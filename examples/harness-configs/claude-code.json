@@ -1,0 +1,10 @@
+[
+  {
+    "name": "claude-code",
+    "_comment": "Claude Code CLI. -p runs a single non-interactive prompt and exits. We do NOT pass --dangerously-skip-permissions here: a wake-triggered invocation should still go through your normal permission prompts / project settings unless you've deliberately configured otherwise. The prompt just points the harness at the briefing file rather than embedding briefing content directly, so the harness reads it with full file-reading tooling.",
+    "command": ["claude", "-p", "Read the briefing at {briefing_file} and act on it"],
+    "timeout_sec": 300,
+    "max_per_hour": 4,
+    "enabled": true
+  }
+]

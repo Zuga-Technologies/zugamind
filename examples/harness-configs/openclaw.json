@@ -1,0 +1,10 @@
+[
+  {
+    "name": "openclaw",
+    "_comment": "UNVERIFIED — community-contributed shape, not tested against a real OpenClaw install. If you run OpenClaw and this is wrong, please open a PR with the corrected argv.",
+    "command": ["openclaw", "run", "--prompt-file", "{briefing_file}"],
+    "timeout_sec": 300,
+    "max_per_hour": 4,
+    "enabled": false
+  }
+]
