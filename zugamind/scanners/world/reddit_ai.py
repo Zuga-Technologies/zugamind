@@ -10,12 +10,15 @@ Subreddits chosen for AI implementation inspiration:
 """
 
 import json
+import logging
 import re
 import time
 import urllib.request
 import urllib.error
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+logger = logging.getLogger("zugamind.scanners.reddit_ai")
 
 _SUBS = ["MachineLearning", "LocalLLaMA", "singularity"]
 _FEED_URL = "https://www.reddit.com/r/{sub}/hot/.rss?limit=8"
@@ -55,7 +58,8 @@ def _fetch_all() -> list[dict]:
     for sub in _SUBS:
         try:
             posts.extend(_fetch_sub(sub)[:4])  # top 4 per sub
-        except (urllib.error.URLError, urllib.error.HTTPError, ET.ParseError, TimeoutError, OSError):
+        except (urllib.error.URLError, urllib.error.HTTPError, ET.ParseError, TimeoutError, OSError) as e:
+            logger.debug("reddit_ai fetch failed for r/%s: %s", sub, e)
             continue
     return posts
 
@@ -69,15 +73,15 @@ def scan_reddit_ai() -> list[dict]:
         if cache.exists() and (time.time() - cache.stat().st_mtime) < _CACHE_TTL_SEC:
             posts = json.loads(cache.read_text(encoding="utf-8"))
             use_cache = True
-    except Exception:
-        pass
+    except Exception as e:  # corrupt cache is non-fatal — fall back to live fetch
+        logger.debug("reddit_ai cache load failed (ignoring): %s", e)
     if not use_cache:
         posts = _fetch_all()
         if posts:
             try:
                 cache.write_text(json.dumps(posts), encoding="utf-8")
-            except OSError:
-                pass
+            except OSError as e:  # persistence best-effort — never break the cycle
+                logger.debug("reddit_ai cache save failed (non-fatal): %s", e)
 
     triggers: list[dict] = []
     for p in posts[:6]:  # cap at 6 across subs
