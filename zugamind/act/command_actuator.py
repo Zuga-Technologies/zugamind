@@ -107,14 +107,24 @@ def load_harness_configs(path: Optional[Path] = None) -> List[Dict[str, Any]]:
         if not isinstance(command, list):
             logger.warning("skipping harness %r — command is not a list", entry.get("name"))
             continue
-        configs.append({
+        cfg = {
             "name": str(entry["name"]),
             "command": list(command),
             "timeout_sec": int(entry.get("timeout_sec", _DEFAULT_TIMEOUT_SEC)),
             "max_per_hour": int(entry.get("max_per_hour", _DEFAULT_MAX_PER_HOUR)),
             "max_per_day": int(entry.get("max_per_day", _DEFAULT_MAX_PER_DAY)),
             "enabled": bool(entry.get("enabled", True)),
-        })
+        }
+        # Optional wake filters (consumed by stream.runner). Rehearsal lesson:
+        # this normalizer once dropped unknown keys, silently disabling the
+        # filter that the config visibly declared — keep it explicit.
+        wake_modules = entry.get("wake_modules")
+        if isinstance(wake_modules, list) and wake_modules:
+            cfg["wake_modules"] = [str(m) for m in wake_modules]
+        floor = entry.get("wake_min_salience")
+        if isinstance(floor, (int, float)):
+            cfg["wake_min_salience"] = float(floor)
+        configs.append(cfg)
     return configs
 
 
