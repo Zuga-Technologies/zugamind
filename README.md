@@ -138,14 +138,23 @@ it's stuck, attention-switch count).
 
 `act/command_actuator.py` loads harness configs from JSON (default
 `zugamind/data/harness.json`, overridable via `ZUGAMIND_HARNESS_CONFIG`).
-`examples/harness-configs/` ships one ready-to-copy file per harness:
+`examples/harness-configs/` ships one ready-to-copy file per harness.
+
+Every row below marked **verified end-to-end** passed the same live test on
+2026-07-08 (`scripts/verify_harness.py`, nothing mocked): a canary trigger
+won the workspace, cleared the action gate, the actuator spawned the real
+harness binary, and the woken agent read ZugaMind's briefing and echoed the
+canary token back.
 
 | Harness | Config | Status |
 |---|---|---|
-| [Claude Code](https://claude.com/claude-code) | `examples/harness-configs/claude-code.json` | Verified — matches the CLI's documented `-p` non-interactive flag |
-| OpenClaw | `examples/harness-configs/openclaw.json` | **Community-unverified** — ships `enabled: false` until confirmed against a real install |
-| Hermes | `examples/harness-configs/hermes.json` | **Community-unverified** — ships `enabled: false` until confirmed against a real install |
+| [Claude Code](https://claude.com/claude-code) 2.1.204 | `examples/harness-configs/claude-code.json` | **Verified end-to-end** (Windows) |
+| [OpenClaw](https://github.com/openclaw/openclaw) 2026.3.11 | `examples/harness-configs/openclaw.json` | **Verified end-to-end** (macOS) — note the required `--session-id` |
+| [Codex CLI](https://github.com/openai/codex) 0.143.0 | `examples/harness-configs/codex.json` | **Verified end-to-end** (macOS) |
+| [Hermes Agent](https://github.com/nousresearch/hermes-agent) 0.18.1 | `examples/harness-configs/hermes.json` | **Verified end-to-end** (macOS, local Ollama qwen3:14b — a $0 wake path) |
 | Generic webhook | `examples/harness-configs/generic-webhook.json` | Verified as a `curl` shape; supply your own URL |
+
+Run the same proof against your own setup: `python scripts/verify_harness.py`.
 
 Every config is a plain argv list; the literal substring `{briefing_file}`
 is replaced with the path to a temp file holding that cycle's markdown

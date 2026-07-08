@@ -1,0 +1,11 @@
+[
+  {
+    "name": "codex",
+    "_comment": "VERIFIED 2026-07-08 against Codex CLI 0.143.0 (macOS, API-key auth) via scripts/verify_harness.py — the woken agent read the briefing file and echoed the canary token. --skip-git-repo-check lets it run from any working directory; drop it if you point Codex at a real repo. Ships enabled:false by default.",
+    "command": ["codex", "exec", "--skip-git-repo-check", "You were woken by ZugaMind, a cognition sidecar. Read the file at {briefing_file} and act on what it asks."],
+    "timeout_sec": 300,
+    "max_per_hour": 4,
+    "max_per_day": 20,
+    "enabled": false
+  }
+]
