@@ -62,7 +62,7 @@ def test_highest_salience_almost_always_wins():
 def test_winner_is_broadcast_to_all_modules():
     ws = Workspace()
     a = _FixedBidModule("a", 0.9)
-    b = _FixedBidModule("b", 0.1)
+    b = _FixedBidModule("b", 0.01)  # 0.1 loses this weighted-random draw ~1 in 5000 runs
     ws.register_module(a)
     ws.register_module(b)
     ws.run_cycle({})
@@ -106,7 +106,9 @@ def test_registered_modulator_reweights_before_attention_schema():
     ws = Workspace()
     ws.register_modulator(boost_low)
     ws.register_module(_FixedBidModule("low", 0.05))
-    ws.register_module(_FixedBidModule("high", 0.5))
+    # Counterpart stays at 0.05 so post-boost odds are ~1 in 150k — a 0.5
+    # counterpart would lose this weighted-random test ~6% of runs.
+    ws.register_module(_FixedBidModule("high", 0.05))
     content = ws.run_cycle({})
     assert content.source_module == "low"  # modulator ran before selection
 
@@ -116,5 +118,8 @@ def test_runner_up_is_recorded():
     ws.register_module(_FixedBidModule("first", 0.9))
     ws.register_module(_FixedBidModule("second", 0.5))
     content = ws.run_cycle({})
+    # Selection is weighted-random (salience^4), so either module can win any
+    # single cycle; the deterministic invariant is that winner and runner-up
+    # are the two distinct bidders.
     assert content.runner_up is not None
-    assert content.runner_up.source_module == "second"
+    assert {content.source_module, content.runner_up.source_module} == {"first", "second"}

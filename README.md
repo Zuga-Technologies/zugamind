@@ -88,7 +88,7 @@ loop from "decided" to "your harness is now working on it":
   `"quiet_hours"` block in the harness config file) that a caller can use
   to suppress wakes overnight.
 - **`stream/runner.py`** — the always-on loop:
-  `python -m stream.runner --daemon`. Each cycle it sweeps scanners, runs
+  `python runner.py --daemon` (from the repo root). Each cycle it sweeps scanners, runs
   one workspace cycle, transitions the cognitive state machine, journals
   what happened — perception and journaling never stop, quiet hours or
   not — and, only if there's a winner AND `gates/action_gate.py` approves
@@ -191,9 +191,8 @@ Then try the always-on runner for one cycle, wired to the shipped Claude
 Code harness config, in dry-run mode (no real subprocess call, no spend):
 
 ```bash
-cd zugamind
-cp ../examples/harness-configs/claude-code.json data/harness.json
-python -m stream.runner --once --dry-run
+cp examples/harness-configs/claude-code.json zugamind/data/harness.json
+python runner.py --once --dry-run
 ```
 
 This sweeps the shipped scanners, runs one workspace cycle, and — if a
