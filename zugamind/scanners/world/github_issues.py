@@ -10,9 +10,11 @@ Configuration (env):
     GITHUB_TOKEN           optional; raises the API rate limit and allows
                            watching private repos.
 
-Issues already surfaced are remembered in the scanner cache, so each issue
-triggers exactly once per process history (dedupe by global issue id).
-Pull requests are excluded (the issues API returns them too).
+An issue triggers on every sweep for as long as it is open and has ZERO
+comments — the world state is the dedupe. The moment anyone (the woken
+harness included) comments, the trigger stops on its own. This makes the
+perceive->wake->act loop self-extinguishing: acting on the trigger is what
+silences it. Pull requests are excluded (the issues API returns them too).
 
 Stdlib only. Failure-silent per scanner contract. Cached 4 min on disk.
 """
@@ -32,7 +34,6 @@ logger = logging.getLogger("zugamind.scanners.github_issues")
 _TIMEOUT = 8.0
 _CACHE_TTL = 240
 _MAX_TRIGGERS = 5
-_MAX_SEEN = 500
 _CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "scanner_cache"
 _CACHE_FILE = _CACHE_DIR / "github_issues.json"
 _API = "https://api.github.com/repos/{repo}/issues?state=open&sort=created&direction=desc&per_page=10"
@@ -49,13 +50,12 @@ def _load_cache() -> dict[str, Any]:
             return json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
     except Exception as e:
         logger.debug("github_issues cache load failed: %s", e)
-    return {"ts": 0, "seen": [], "items": []}
+    return {"ts": 0, "items": []}
 
 
 def _save_cache(cache: dict[str, Any]) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache["seen"] = cache.get("seen", [])[-_MAX_SEEN:]
         _CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
     except Exception as e:
         logger.debug("github_issues cache save failed: %s", e)
@@ -78,14 +78,12 @@ def _fetch_issues(repo: str) -> list[dict[str, Any]]:
 
 
 def scan_github_issues() -> list[dict[str, Any]]:
-    """Return `repo_issue` triggers for unseen open issues on watched repos."""
+    """Return `repo_issue` triggers for open, UNCOMMENTED issues on watched repos."""
     repos = _watched_repos()
     if not repos:
         return []
 
     cache = _load_cache()
-    seen = set(cache.get("seen", []))
-
     if time.time() - cache.get("ts", 0) > _CACHE_TTL:
         items: list[dict[str, Any]] = []
         for repo in repos:
@@ -93,6 +91,8 @@ def scan_github_issues() -> list[dict[str, Any]]:
                 for issue in _fetch_issues(repo):
                     if "pull_request" in issue:
                         continue
+                    if issue.get("comments", 0) > 0:
+                        continue  # already triaged — the world state is the dedupe
                     items.append({
                         "id": issue.get("id"),
                         "repo": repo,
@@ -109,11 +109,11 @@ def scan_github_issues() -> list[dict[str, Any]]:
 
     triggers: list[dict[str, Any]] = []
     for it in cache.get("items", []):
-        if it.get("id") in seen or it.get("id") is None:
+        if it.get("id") is None:
             continue
         triggers.append({
             "type": "repo_issue",
-            "detail": f"New issue #{it['number']} on {it['repo']}: {it['title']}",
+            "detail": f"Untriaged issue #{it['number']} on {it['repo']}: {it['title']}",
             "novelty": 0.9,
             "relevance": 0.8,
             "urgency": 0.5,
@@ -124,11 +124,6 @@ def scan_github_issues() -> list[dict[str, Any]]:
             "issue_author": it["author"],
             "repo": it["repo"],
         })
-        seen.add(it["id"])
         if len(triggers) >= _MAX_TRIGGERS:
             break
-
-    if triggers:
-        cache["seen"] = list(seen)
-        _save_cache(cache)
     return triggers

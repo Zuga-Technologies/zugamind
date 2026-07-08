@@ -247,6 +247,20 @@ class StreamRunner:
 
     # -- winner -> plan -> briefing -> gate -> harness --------------------
 
+    @staticmethod
+    def _harness_wants(hc: Dict[str, Any], winner_dict: Dict[str, Any]) -> bool:
+        """Apply a harness config's optional wake filter to this winner."""
+        modules = hc.get("wake_modules")
+        if isinstance(modules, list) and modules:
+            if winner_dict.get("source_module") not in modules:
+                return False
+        floor = hc.get("wake_min_salience")
+        if isinstance(floor, (int, float)):
+            salience = winner_dict.get("salience", 0.0)
+            if not isinstance(salience, (int, float)) or salience < floor:
+                return False
+        return True
+
     def _dispatch_to_harnesses(
         self,
         content: Any,
@@ -260,6 +274,23 @@ class StreamRunner:
                 hc for hc in command_actuator.load_harness_configs() if hc.get("enabled", True)
             ]
             if not enabled_configs:
+                return []
+
+            # Per-harness wake filter: a harness can opt to be woken only for
+            # specific modules ("wake_modules": ["repo_issues"]) and/or above
+            # a salience floor ("wake_min_salience": 0.6). Without a filter a
+            # harness wakes for every gated winner — including ambient ones —
+            # which is the heartbeat-spam failure mode this sidecar exists to
+            # avoid. Observed in rehearsal: 3 wakes in 3 cycles for idle
+            # priority-goal winners.
+            enabled_configs = [
+                hc for hc in enabled_configs if self._harness_wants(hc, winner_dict)
+            ]
+            if not enabled_configs:
+                journal.append_event("wake_filtered", {
+                    "winner_module": winner_dict.get("source_module"),
+                    "salience": winner_dict.get("salience"),
+                })
                 return []
 
             quiet = command_actuator.load_quiet_hours()

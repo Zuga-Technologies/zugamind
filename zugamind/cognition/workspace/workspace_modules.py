@@ -199,7 +199,10 @@ class RepoIssuesModule(WorkspaceModule):
         urgent = any(w in t.get("issue_title", "").lower()
                      for t in self._triggers for w in urgent_words)
 
-        salience = min(0.85, 0.55 + len(self._triggers) * 0.08 + (0.08 if urgent else 0.0))
+        # Floor of 0.7: an untriaged human-filed issue must reliably beat the
+        # ambient modules (priority_goals idles near 0.5); under salience^4
+        # weighting 0.55 lost the draw ~30% of cycles, observed in rehearsal.
+        salience = min(0.9, 0.7 + len(self._triggers) * 0.05 + (0.08 if urgent else 0.0))
         titles = "; ".join(
             f"#{t.get('issue_number', '?')} {t.get('issue_title', '?')}"
             for t in self._triggers[:2]

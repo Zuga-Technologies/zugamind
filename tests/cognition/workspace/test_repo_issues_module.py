@@ -31,7 +31,9 @@ def test_bid_carries_title_verbatim_and_outbids_idle_modules():
     assert "#3" in bid.content
     # Must comfortably outbid the idle-infrastructure floor (0.05) and the
     # priority-goals baseline (~0.5) so a new human issue wins a quiet cycle.
-    assert bid.salience >= 0.55
+    # 0.7 floor chosen after rehearsal: 0.55 lost the salience^4 draw ~30%
+    # of cycles against ambient modules.
+    assert bid.salience >= 0.7
 
 
 def test_urgent_titles_bid_higher():
