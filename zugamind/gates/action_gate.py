@@ -184,8 +184,16 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     Returns a dict with at least: ok, response, cost, model, reason. May also
     set `tier` and `caller` depending on path taken.
 
-    Fail-closed: any exception resolving budget/model helpers, a budget cap
-    hit, or a shield block all return ok=False. Nothing silently proceeds.
+    Fail-closed BEFORE the model call: any exception resolving budget/model
+    helpers, a failed can_spend() check, a budget cap hit, or a shield block
+    all return ok=False before Claude/Ollama is ever invoked. Nothing
+    silently proceeds.
+
+    AFTER the model call succeeds, ok is True even if persisting the spend to
+    budget.json fails (retried once) — the response was already paid for, so
+    discarding it wouldn't undo that. In that case `budget_persisted` is
+    False and `reason` explains why; callers/monitoring should treat that as
+    a signal that the monthly cap is temporarily unenforceable, not ignore it.
     """
     intent_d: dict[str, Any] = dict(intent)
     kind = intent_d.get("kind", "other")
@@ -268,7 +276,21 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "caller": caller,
         }
 
-    if not can_spend(budget, tier):
+    try:
+        affordable = can_spend(budget, tier)
+    except Exception as exc:  # noqa: BLE001 — fail closed, matches load_budget above
+        logger.warning("action_gate: can_spend check failed: %s", exc)
+        return {
+            "ok": False,
+            "response": None,
+            "cost": 0.0,
+            "model": "none",
+            "reason": f"can_spend_error:{exc}",
+            "tier": tier,
+            "caller": caller,
+        }
+
+    if not affordable:
         return {
             "ok": False,
             "response": None,
@@ -314,12 +336,41 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "caller": caller,
         }
 
+    # The model call above already succeeded — real money is already spent on
+    # the provider's side. record_spend() persists that fact to budget.json so
+    # the NEXT call's can_spend() check sees it. If that persist silently
+    # failed and we just shrugged, the on-disk balance would never reflect
+    # this spend: every subsequent call reloads budget.json fresh (see
+    # load_budget() above), so a single failed write here quietly and
+    # invisibly disables the monthly cap for the rest of the day, no
+    # concurrency race required. One retry absorbs a transient I/O blip;
+    # if it still fails we keep the (already-succeeded) response — discarding
+    # a paid-for answer would be wasteful, not "safer" — but we report the
+    # persistence failure loudly instead of pretending nothing happened.
     spent_before = float(budget.get("spent", 0.0))
-    try:
-        new_budget = record_spend(budget, tier)
-    except Exception as exc:
-        logger.warning("action_gate: record_spend failed: %s", exc)
-        new_budget = budget
+    new_budget = budget
+    persist_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            new_budget = record_spend(budget, tier)
+            persist_exc = None
+            break
+        except Exception as exc:  # noqa: BLE001 — retried once, then surfaced below
+            persist_exc = exc
+            logger.warning(
+                "action_gate: record_spend attempt %d/2 failed (tier=%s): %s",
+                attempt + 1, tier, exc,
+            )
+
+    budget_persisted = persist_exc is None
+    if not budget_persisted:
+        logger.error(
+            "action_gate: record_spend failed twice — spend already happened "
+            "(tier=%s) but budget.json was NOT updated; the monthly cap will "
+            "under-count until the next daily reset: %s",
+            tier, persist_exc,
+        )
+
     cost = float(new_budget.get("spent", spent_before)) - spent_before
 
     result = {
@@ -327,9 +378,10 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         "response": response_text,
         "cost": cost,
         "model": model_id,
-        "reason": None,
+        "reason": None if budget_persisted else f"budget_not_persisted:{persist_exc}",
         "tier": tier,
         "caller": caller,
+        "budget_persisted": budget_persisted,
     }
     _idempotency_store(intent_d, result)
     return result
