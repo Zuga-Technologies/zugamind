@@ -175,6 +175,49 @@ class CodeChangeModule(WorkspaceModule):
 
 
 # =============================================================================
+# MODULE: Repo issues
+# =============================================================================
+
+
+class RepoIssuesModule(WorkspaceModule):
+    """Wraps `repo_issue` triggers from watched GitHub repos.
+
+    Bids high enough to reliably win a quiet cycle: a new issue filed by a
+    human is almost always the most salient thing an unattended agent can
+    act on. Issue titles ride into the bid content verbatim so the wake
+    briefing carries them.
+    """
+    name = "repo_issues"
+
+    TRIGGER_TYPES = {"repo_issue"}
+
+    def generate_bid(self, context: Dict[str, Any]) -> Optional[SalienceBid]:
+        if not self._triggers:
+            return None
+
+        urgent_words = ("bug", "crash", "error", "broken", "security", "fail")
+        urgent = any(w in t.get("issue_title", "").lower()
+                     for t in self._triggers for w in urgent_words)
+
+        salience = min(0.85, 0.55 + len(self._triggers) * 0.08 + (0.08 if urgent else 0.0))
+        titles = "; ".join(
+            f"#{t.get('issue_number', '?')} {t.get('issue_title', '?')}"
+            for t in self._triggers[:2]
+        )
+        repos = sorted({t.get("repo", "?") for t in self._triggers})
+        content = f"{len(self._triggers)} new issue(s) on {', '.join(repos)}: {titles}"
+
+        return SalienceBid(
+            source_module=self.name,
+            content=content,
+            salience=salience,
+            thought_type=ThoughtType.CODE_QUALITY,
+            emotional_valence=-0.3 if urgent else -0.1,
+            context={"triggers": self._triggers, "repos": repos},
+        )
+
+
+# =============================================================================
 # MODULE: Knowledge
 # =============================================================================
 
@@ -422,6 +465,7 @@ ALL_MODULES = [
     InfrastructureModule,
     DaemonModule,
     CodeChangeModule,
+    RepoIssuesModule,
     KnowledgeModule,
     ScheduleModule,
     MetacognitiveModule,
