@@ -210,6 +210,80 @@ class ActionGateTest(unittest.TestCase):
         self.assertEqual(captured["model"], action_gate.TIER_MODELS["sonnet"])
         self.assertGreater(r["cost"], 0.0)
 
+    def test_can_spend_exception_returns_ok_false_not_raised(self):
+        """can_spend() blowing up must fail closed, same as load_budget()."""
+        def _can_spend_boom(_budget, _tier):
+            raise RuntimeError("disk read error")
+
+        def _helpers_boom():
+            return _can_spend_boom, _record_spend_inc, lambda: _budget()
+
+        with patch.object(action_gate, "_resolve_budget_helpers", _helpers_boom):
+            r = action_gate.escalate_for_action(
+                {"kind": "decide", "summary": "x", "caller": "test.can_spend_boom"},
+            )
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["reason"].startswith("can_spend_error:"))
+        self.assertEqual(r["cost"], 0.0)
+
+    def test_record_spend_failure_keeps_response_but_flags_unpersisted(self):
+        """A response already paid for must not be thrown away — but silently
+        pretending the budget was updated would let the monthly cap quietly
+        stop meaning anything. Must retry once, then surface the failure."""
+        attempts = {"n": 0}
+
+        def _record_spend_always_fails(budget, tier):
+            attempts["n"] += 1
+            raise OSError("disk full")
+
+        def _helpers_persist_broken():
+            return _can_spend_yes, _record_spend_always_fails, lambda: _budget()
+
+        def fake_claude():
+            def _api(*a, **kw):
+                return "paid-for-response"
+            return _api
+
+        with patch.object(action_gate, "_resolve_budget_helpers", _helpers_persist_broken), \
+             patch.object(action_gate, "_resolve_claude_caller", fake_claude):
+            r = action_gate.escalate_for_action(
+                {"kind": "decide", "summary": "x", "caller": "test.persist_broken"},
+            )
+        self.assertTrue(r["ok"], "the model call succeeded — must not discard the response")
+        self.assertEqual(r["response"], "paid-for-response")
+        self.assertFalse(r["budget_persisted"])
+        self.assertTrue(r["reason"].startswith("budget_not_persisted:"))
+        self.assertEqual(attempts["n"], 2, "must retry once before giving up")
+
+    def test_record_spend_transient_failure_then_success_is_clean(self):
+        """A one-time hiccup that succeeds on retry should look like a normal
+        happy path — no false alarm."""
+        attempts = {"n": 0}
+
+        def _record_spend_flaky(budget, tier):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise OSError("transient")
+            return _record_spend_inc(budget, tier)
+
+        def _helpers_flaky():
+            return _can_spend_yes, _record_spend_flaky, lambda: _budget()
+
+        def fake_claude():
+            def _api(*a, **kw):
+                return "ok"
+            return _api
+
+        with patch.object(action_gate, "_resolve_budget_helpers", _helpers_flaky), \
+             patch.object(action_gate, "_resolve_claude_caller", fake_claude):
+            r = action_gate.escalate_for_action(
+                {"kind": "decide", "summary": "x", "caller": "test.flaky"},
+            )
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["budget_persisted"])
+        self.assertIsNone(r["reason"])
+        self.assertEqual(attempts["n"], 2)
+
     def test_local_tier_routes_to_ollama_not_claude(self):
         claude_calls = {"n": 0}
 
