@@ -250,11 +250,6 @@ for that instead of assuming it away:
   - `gates/operational_truth.py` — a freshness gate that re-probes live
     state before a claim is allowed to surface, so a true-once observation
     can't be re-narrated as still-true indefinitely.
-  - `gates/zugashield.py` + `gates/integrity.py` — a two-timescale
-    misevolution detector: per-cycle drift-from-baseline (GREEN/YELLOW/RED,
-    RED writes a kill-switch `PAUSE` file) plus a longitudinal
-    Dickey-Fuller stationarity test (pure stdlib, no numpy) that catches
-    slow drift too gradual to trip the per-cycle threshold.
   - `gates/self_mod_cooldown.py` — a restart-durable, disk-backed cooldown
     so a self-modification proposal can't thrash the same file repeatedly.
 - **Fully logged.** `Workspace.get_stats()`, the attention schema's
