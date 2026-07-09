@@ -1,8 +1,12 @@
 [
   {
     "name": "claude-code",
-    "_comment": "VERIFIED 2026-07-08 against Claude Code 2.1.204 (Windows) via scripts/verify_harness.py — the woken agent read the briefing and echoed the canary token. -p runs a single non-interactive prompt and exits. We do NOT pass --dangerously-skip-permissions here: a wake-triggered invocation should still go through your normal permission prompts / project settings unless you've deliberately configured otherwise. The prompt just points the harness at the briefing file rather than embedding briefing content directly, so the harness reads it with full file-reading tooling. Ships enabled:false like every config in this folder — copying a file is never enough to hand an agent a live wake path; flipping this to true is always an explicit act. Consider also setting wake_modules/wake_min_salience so it only wakes for the winners you care about (see examples/harness-configs/README.md).",
-    "command": ["claude", "-p", "Read the briefing at {briefing_file} and act on it"],
+    "_comment": "VERIFIED 2026-07-08 against Claude Code 2.1.204 (Windows) via scripts/verify_harness.py — the woken agent read the briefing and echoed the canary token. -p runs a single non-interactive prompt and exits. We do NOT pass --dangerously-skip-permissions here: a wake-triggered invocation should still go through your normal permission prompts / project settings unless you've deliberately configured otherwise. The prompt just points the harness at the briefing file rather than embedding briefing content directly, so the harness reads it with full file-reading tooling. Ships enabled:false like every config in this folder — copying a file is never enough to hand an agent a live wake path; flipping this to true is always an explicit act. Consider also setting wake_modules/wake_min_salience so it only wakes for the winners you care about (see examples/harness-configs/README.md). Briefings are written to zugamind/data/briefings/ (not the system temp dir) so the -p sandbox, which refuses reads outside the working directory, can read them — run the daemon from the repo root, or set ZUGAMIND_BRIEFING_DIR to a directory your harness may read.",
+    "command": [
+      "claude",
+      "-p",
+      "Read the briefing at {briefing_file} and act on it"
+    ],
     "timeout_sec": 300,
     "max_per_hour": 4,
     "max_per_day": 20,

@@ -198,6 +198,24 @@ def _recent_invocation_count(name: str, window_sec: int, now: Optional[float] = 
     )
 
 
+def _briefing_dir() -> Optional[str]:
+    """Directory briefing files are written to (created if missing).
+
+    Defaults to DATA_DIR/briefings — inside the package data directory —
+    rather than the system temp dir, because sandboxed harnesses (notably
+    Claude Code's non-interactive `-p` mode) refuse to read files outside
+    their working directory, and a briefing the harness cannot read
+    silently wastes the wake. Override with ZUGAMIND_BRIEFING_DIR; returns
+    None (system temp dir) if the directory cannot be created.
+    """
+    root = os.environ.get("ZUGAMIND_BRIEFING_DIR") or str(DATA_DIR / "briefings")
+    try:
+        os.makedirs(root, exist_ok=True)
+        return root
+    except OSError:
+        return None
+
+
 def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False) -> Dict[str, Any]:
     """Invoke one harness with a wake briefing. Never raises.
 
@@ -266,7 +284,9 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
     briefing_path: Optional[str] = None
     result: Dict[str, Any]
     try:
-        fd, briefing_path = tempfile.mkstemp(prefix="zugamind_briefing_", suffix=".md")
+        fd, briefing_path = tempfile.mkstemp(
+            prefix="zugamind_briefing_", suffix=".md", dir=_briefing_dir()
+        )
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(briefing)
 
