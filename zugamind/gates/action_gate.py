@@ -351,7 +351,8 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     # failed and we just shrugged, the on-disk balance would never reflect
     # this spend: every subsequent call reloads budget.json fresh (see
     # load_budget() above), so a single failed write here quietly and
-    # invisibly disables the monthly cap for the rest of the day, no
+    # invisibly under-counts the monthly cap for the rest of the MONTH
+    # (there is no daily reset — the ledger is month-keyed), no
     # concurrency race required. One retry absorbs a transient I/O blip;
     # if it still fails we keep the (already-succeeded) response — discarding
     # a paid-for answer would be wasteful, not "safer" — but we report the
@@ -376,7 +377,8 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         logger.error(
             "action_gate: record_spend failed twice — spend already happened "
             "(tier=%s) but budget.json was NOT updated; the monthly cap will "
-            "under-count until the next daily reset: %s",
+            "under-count for the REST OF THE MONTH — reconcile budget.json "
+            "manually or accept the drift: %s",
             tier, persist_exc,
         )
 
