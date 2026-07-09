@@ -5,109 +5,91 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](pyproject.toml)
 
-Your agent harness thinks when you prompt it. ZugaMind thinks the rest of
-the time.
+**Agents answer. ZugaMind notices.**
 
 ![ZugaMind architecture — scanners feed a salience competition; one winner per cycle clears a fail-closed gate and wakes your harness](docs/assets/zugamind-hero.png)
 
-ZugaMind is a stdlib-only Global Workspace Theory (GWT) cognitive substrate
-that runs as a persistent sidecar next to an agent harness — Claude Code,
-OpenClaw, Hermes, Codex CLI, or anything else that runs as a CLI process.
-A harness is reactive: it wakes up when you type a prompt, works for one
-turn, and forgets everything the moment that turn ends. ZugaMind doesn't.
-It runs always-on, perceives the world through scanners, holds continuity
-across those wakes in an episodic journal, and — only when something
-genuinely wins its attention and clears a fail-closed safety gate — reaches
-out and WAKES your harness with a briefing describing what happened and
-what to do about it.
+An always-on attention sidecar for your agent harness — Claude Code, OpenClaw,
+Codex CLI, Hermes, or any CLI process. It watches your sources for **free**
+(no model calls while idle), runs a Global Workspace salience competition
+over what it sees, and wakes your harness with a continuity briefing only
+when something wins the competition **and** clears a fail-closed budget gate.
+Python stdlib only. Zero dependencies.
 
-Underneath the sidecar behavior is the same explicit, inspectable attention
-mechanism this project started as: independent modules submit salience bids
-every cycle, an attention schema modulates them for health (no stuck loops,
-no starved modules, no monoculture), exactly one winner is selected and
-broadcast, and — only when the winner's work genuinely warrants it — the
-workspace hands off to Claude through a fail-closed, budget-clamped gate.
-Zero pip dependencies in the core package; `pytest` is the only development
-dependency.
+Built by Zuga Technologies. Independent work — not affiliated with or
+endorsed by Anthropic.
 
-Built by Zuga Technologies. This is independent research and engineering,
-not affiliated with or endorsed by Anthropic. To be precise about what this
-is: ZugaMind upgrades the AGENT — giving it persistence, attention, and
-proactivity a stateless harness invocation doesn't have on its own — it
-never claims to upgrade, replace, or model the underlying LLM itself.
+## Install
 
-## Why now
+**Requirements: Python 3.10+ and git. Nothing else** — zero dependencies
+means there is no install step:
 
-On 2026-07-06, Anthropic published ["A global workspace in language
-models"](https://transformer-circuits.pub/2026/workspace) describing
-evidence that Claude's own internal computation exhibits a global-workspace-like
-structure: a limited-capacity bottleneck, broadcast to the rest of the
-network, and competition among candidate representations for access to it.
-The paper is explicit that **what decides admission to that workspace is
-still unknown** — the mechanism is emergent, discovered after the fact by
-interpretability tooling, not designed in.
+```bash
+git clone https://github.com/Zuga-Technologies/zugamind.git
+cd zugamind
+python demo.py        # offline demo — no key, no network
+```
 
-ZugaMind is the engineered complement. It doesn't look inside a model's
-activations; it implements the same *pattern* — one bottleneck, one winner
-per cycle, broadcast, competition — as an external, steerable substrate that
-sits in front of an LLM and decides when that LLM gets invoked at all. Where
-Claude's workspace is emergent and hard to steer, ZugaMind's is engineered
-and steerable: admission is decided by an explicit salience-bidding
-mechanism plus an attention-schema self-model, both fully logged, both
-extensible via a plain Python callback (see `register_modulator` below).
-The one open question the paper names — "what decides admission" — is the
-one thing ZugaMind answers explicitly.
+![demo.py — cycles of salience competition, one winner per cycle, winner routed through the action gate in dry-run](docs/assets/zugamind-demo.gif)
 
-| Paper's GWT observation | ZugaMind's mechanism |
-|---|---|
-| Limited capacity — one winner per cycle | `Workspace.run_cycle()` selects exactly one `SalienceBid` per cycle |
-| Broadcast to the rest of the network | `WorkspaceModule.on_broadcast()` fires on every registered module every cycle |
-| Competition for access | Modules submit `SalienceBid`s; `AttentionSchema.modulate()` re-weights them before selection |
-| Admission mechanism unknown / not steerable | `AttentionSchema` (streak dampening, diversity cap, blind-spot boost, novelty bonus) + pluggable `register_modulator()` hooks — explicit and inspectable |
-| Reportability | `Workspace.get_stats()` returns the full bid field, the winner, and the attention self-model every single cycle |
-| Deliberate vs. automatic processing | Cheap/free local-model tier for routine cycles; the fail-closed action gate escalates to Claude only when a winner's work justifies the spend |
+Optional, only for the test tooling:
 
-## Always-on: the latch-on model
+```bash
+pip install -e ".[dev]"   # adds pytest, nothing else
+pytest -q                 # 262 tests — no network, no keys, ~4s
+```
 
-Everything above (the workspace, the attention schema, the action gate)
-decides *when something deserves attention*. Three more pieces close the
-loop from "decided" to "your harness is now working on it":
+Linux, macOS, Windows all work (CI runs all three × Python 3.10–3.13).
 
-- **`continuity/journal.py`** — an episodic, append-only log
-  (`data/engine/journal.jsonl`) of every notable cycle event: workspace
-  winners, harness invocations, alarms, quiet-hours deferrals, handoffs.
-  `build_briefing()` turns the tail of that log into the markdown a waking
-  harness reads: current cognitive state, time since the last wake, why
-  it's being woken *this* time, what happened since the last wake grouped
-  by kind, and anything left unresolved. The briefing is hard-capped (~4000
-  chars, `ZUGAMIND_BRIEFING_MAX_CHARS`) and trims its oldest entries first
-  when there's too much to say — context assembly is exactly where
-  ambient-cognition systems go wrong, drowning the model in noise instead
-  of orienting it.
-- **`act/command_actuator.py`** — the harness adapter. Given an
-  already-approved decision and a briefing, it writes the briefing to a
-  temp file, substitutes that path into a configured argv
-  (`{briefing_file}`), and runs it as a subprocess — rate-limited per
-  harness on both a rolling hour and a rolling day, and never raising (a
-  bad command, a timeout, a missing binary all come back as a plain
-  `{"ok": False, "error": ...}`, never an exception). It also understands
-  an optional quiet-hours window (`ZUGAMIND_QUIET_HOURS`, or a
-  `"quiet_hours"` block in the harness config file) that a caller can use
-  to suppress wakes overnight.
-- **`stream/runner.py`** — the always-on loop:
-  `python runner.py --daemon` (from the repo root). Each cycle it sweeps scanners, runs
-  one workspace cycle, transitions the cognitive state machine, journals
-  what happened — perception and journaling never stop, quiet hours or
-  not — and, only if there's a winner AND `gates/action_gate.py` approves
-  AND it isn't currently quiet hours, hands the briefing to every enabled,
-  configured harness via `command_actuator`. A winner that arrives during
-  quiet hours is deferred (journaled, not lost) and surfaces in the
-  briefing the next time a real wake happens.
+## Set up the sidecar — 3 steps
 
-This is the "latch-on": ZugaMind attaches to your harness of choice as a
-sidecar process, not a fork or a plugin. Your harness's own code never
-changes; it just receives an occasional, well-justified wake-up call with
-full context for what to do next.
+**1. Copy the config for your harness:**
+
+```bash
+cp examples/harness-configs/claude-code.json zugamind/data/harness.json
+```
+
+(`openclaw.json`, `codex.json`, `hermes.json`, `generic-webhook.json` also ship.)
+
+**2. Open `zugamind/data/harness.json` and set `"enabled": true`.**
+Every shipped config is disabled — going live is always an explicit act,
+never a side effect of copying a file. Before unattended runs, also set
+`wake_modules` / `wake_min_salience` (see `examples/harness-configs/README.md`)
+so the harness only wakes for sources you care about.
+
+**3. Dry-run once, then start the daemon:**
+
+```bash
+python runner.py --once --dry-run   # one full cycle; journals the would-be wake, no spend
+python runner.py --daemon           # always-on (set ANTHROPIC_API_KEY for paid tiers)
+```
+
+Unlike `demo.py`, `runner.py` makes real read-only HTTP requests (the
+shipped scanners poll the HackerNews API and public RSS feeds). `--dry-run`
+means "no harness subprocess, no model spend" — perception itself is live.
+Everything lands in `zugamind/data/engine/journal.jsonl`.
+
+**Prove the wake path against your own install:**
+
+```bash
+python scripts/verify_harness.py
+```
+
+This plants a canary trigger, lets it win the workspace, clears the gate,
+spawns your real harness, and checks the agent's reply echoes the canary —
+the same code path the daemon uses, nothing mocked.
+
+| Harness | Config | Status |
+|---|---|---|
+| [Claude Code](https://claude.com/claude-code) 2.1.204 | `examples/harness-configs/claude-code.json` | **Verified end-to-end** (Windows) |
+| [OpenClaw](https://github.com/openclaw/openclaw) 2026.3.11 | `examples/harness-configs/openclaw.json` | **Verified end-to-end** (macOS) — note the required `--session-id` |
+| [Codex CLI](https://github.com/openai/codex) 0.143.0 | `examples/harness-configs/codex.json` | **Verified end-to-end** (macOS) |
+| [Hermes Agent](https://github.com/nousresearch/hermes-agent) 0.18.1 | `examples/harness-configs/hermes.json` | **Verified end-to-end** (macOS, local Ollama qwen3:14b — a $0 wake path) |
+| Generic webhook | `examples/harness-configs/generic-webhook.json` | Verified as a `curl` shape; supply your own URL |
+
+Configs are plain argv lists; `{briefing_file}` is replaced with the path to
+that cycle's markdown briefing. Each config carries `max_per_hour` and
+`max_per_day` rate limits.
 
 ## Architecture
 
@@ -136,139 +118,46 @@ full context for what to do next.
   Claude  (or the free local-model tier, if the task doesn't warrant it)
 ```
 
-Every arrow above is inspectable: `Workspace.get_stats()` after any cycle
-returns every bid that competed, the winner, the runner-up, and the
-attention schema's current self-model (recent foci, blind spots, whether
-it's stuck, attention-switch count).
+Every arrow is inspectable: `Workspace.get_stats()` after any cycle returns
+every bid that competed, the winner, the runner-up, and the attention
+schema's self-model (recent foci, blind spots, stuck-detection,
+attention-switch count). Extend admission with a plain Python callback via
+`Workspace.register_modulator()`.
 
-## Works with your harness
+Three pieces close the loop from "decided" to "your harness is working on it":
 
-`act/command_actuator.py` loads harness configs from JSON (default
-`zugamind/data/harness.json`, overridable via `ZUGAMIND_HARNESS_CONFIG`).
-`examples/harness-configs/` ships one ready-to-copy file per harness.
+- **`continuity/journal.py`** — append-only episodic log of every notable
+  event. `build_briefing()` turns its tail into the markdown a waking
+  harness reads: why it's being woken, what happened since the last wake,
+  what's unresolved. Hard-capped (~4000 chars) — orientation, not noise.
+- **`act/command_actuator.py`** — the harness adapter: writes the briefing
+  to a temp file, substitutes `{briefing_file}` into your configured argv,
+  runs it as a subprocess. Rate-limited per rolling hour AND day (counted
+  from the durable journal — an unreadable journal refuses the wake rather
+  than resetting the count), never raises, honors quiet hours
+  (`ZUGAMIND_QUIET_HOURS`).
+- **`stream/runner.py`** — the always-on loop. Perception and journaling
+  never stop; quiet-hours winners are deferred (journaled, not lost) and
+  surface in the next real briefing. `touch PAUSE` at the package root
+  halts the whole cycle; `rm PAUSE` resumes.
 
-Every row below marked **verified end-to-end** passed the same live test on
-2026-07-08 (`scripts/verify_harness.py`, nothing mocked): a canary trigger
-won the workspace, cleared the action gate, the actuator spawned the real
-harness binary, and the woken agent read ZugaMind's briefing and echoed the
-canary token back.
+Your harness's own code never changes — ZugaMind attaches as a sidecar
+process and taps it on the shoulder with full context.
 
-| Harness | Config | Status |
+## Why not just cron?
+
+| | cron / heartbeat | ZugaMind |
 |---|---|---|
-| [Claude Code](https://claude.com/claude-code) 2.1.204 | `examples/harness-configs/claude-code.json` | **Verified end-to-end** (Windows) |
-| [OpenClaw](https://github.com/openclaw/openclaw) 2026.3.11 | `examples/harness-configs/openclaw.json` | **Verified end-to-end** (macOS) — note the required `--session-id` |
-| [Codex CLI](https://github.com/openai/codex) 0.143.0 | `examples/harness-configs/codex.json` | **Verified end-to-end** (macOS) |
-| [Hermes Agent](https://github.com/nousresearch/hermes-agent) 0.18.1 | `examples/harness-configs/hermes.json` | **Verified end-to-end** (macOS, local Ollama qwen3:14b — a $0 wake path) |
-| Generic webhook | `examples/harness-configs/generic-webhook.json` | Verified as a `curl` shape; supply your own URL |
+| Idle cost | A model call per tick, mattered or not | $0 — deterministic scanners + salience math; the first token billed is after something already won the competition |
+| Trigger | The clock | Salience — something changed *and* out-competed everything else this cycle |
+| Repeats | Re-alerts on the same thing forever | Habituation — a seen trigger is damped for hours (`ZUGAMIND_HABITUATION_HOURS`) |
+| Attention health | N/A | Streak dampening, diversity caps, blind-spot boosts — no source can monopolize wakes |
+| Context on wake | Whatever your script passes | A capped continuity briefing: why you're being woken, what happened since last wake, what's unresolved |
+| Runaway protection | You write it | Fail-closed gate + hard $ cap + per-hour/per-day invocation caps counted from a durable journal |
 
-Run the same proof against your own setup: `python scripts/verify_harness.py`.
-
-Every config is a plain argv list; the literal substring `{briefing_file}`
-is replaced with the path to a temp file holding that cycle's markdown
-briefing before the command runs. Each config also carries `max_per_hour`
-and `max_per_day` rate limits, and **every shipped config is `enabled:
-false`** — you flip the flag deliberately after reading what it will run.
-See `examples/harness-configs/README.md` for the full shape.
-
-**Prior art & design positioning.** OpenClaw's community proposed a
-"Thinking Clock" — a background tick loop with a cheap-LLM tier for idle
-perception — in [issue #17287](https://github.com/openclaw/openclaw/issues/17287)
-(closed as a duplicate of the same author's broader
-["Thinking Agents Manifesto", issue #17363](https://github.com/openclaw/openclaw/issues/17363),
-which a maintainer closed as not planned for core: the project's VISION.md
-deliberately avoids "shipping heavy orchestration layers as a default
-architecture in core", pointing this class of idea at plugins and external
-projects instead). ZugaMind is that external layer, built as a
-harness-agnostic sidecar instead of a fork of any one harness's core, with
-one structural difference: its peripheral tier uses no model at all. Idle
-perception is deterministic scanners plus salience competition — free, and
-the first model call happens only after something has already won the
-workspace and cleared the budget gate, not on every tick.
-
-## Install
-
-**Requirements: Python 3.10+ and git. Nothing else** — the package has zero
-dependencies (stdlib only), so there is no install step to run it:
-
-```bash
-git clone https://github.com/Zuga-Technologies/zugamind.git
-cd zugamind
-python demo.py                    # offline demo — no key, no network
-python runner.py --once --dry-run # one real perception cycle, no spend
-```
-
-Optional editable install (only needed for the test tooling):
-
-```bash
-pip install -e ".[dev]"   # the only thing this adds is pytest
-pytest -q                 # 262 tests — no network, no keys, ~4s
-```
-
-Works identically on Linux, macOS, and Windows (CI runs all three ×
-Python 3.10–3.13). On Windows, `python` is whatever your launcher resolves —
-`py` works too.
-
-To go from demo to a live sidecar (wire a harness, enable it, run the
-daemon), follow the Quickstart below.
-
-## Quickstart
-
-No API key required:
-
-```bash
-git clone https://github.com/Zuga-Technologies/zugamind.git
-cd zugamind
-python demo.py
-```
-
-![demo.py — 4 cycles of salience competition, one winner per cycle, final winner routed through the action gate in dry-run](docs/assets/zugamind-demo.gif)
-
-This registers the shipped example modules (`zugamind/cognition/workspace/workspace_modules.py`),
-feeds them synthetic scanner triggers for 8 cycles, and prints every bid,
-the winner, and the proposed plan per cycle — using only the free local
-tier (no network, no key). If `ANTHROPIC_API_KEY` is set in your
-environment, the final cycle's winner is additionally routed through the
-real action gate to Claude; otherwise that step runs in `dry_run=True` mode
-(no network call, no spend) so the whole demo works offline out of the box.
-
-```bash
-python demo.py --cycles 20 --seed 3      # more cycles, different synthetic run
-```
-
-Then try the always-on runner for one cycle, wired to the shipped Claude
-Code harness config, in dry-run mode (no real subprocess call, no spend).
-Every config in `examples/harness-configs/` ships `"enabled": false` —
-copying a file is never enough to hand an agent a live wake path, so flip
-the flag as an explicit act:
-
-```bash
-cp examples/harness-configs/claude-code.json zugamind/data/harness.json
-# open zugamind/data/harness.json and set "enabled": true
-python runner.py --once --dry-run
-```
-
-This sweeps the shipped scanners, runs one workspace cycle, and — if a
-winner clears the action gate and it isn't currently quiet hours — journals
-what *would* have woken Claude Code with the cycle's briefing
-(`data/engine/journal.jsonl`), without ever invoking a subprocess. Note
-that unlike `demo.py`, this makes real (read-only, unauthenticated) HTTP
-requests: the shipped world-scanners poll the HackerNews API and a handful
-of public RSS feeds. `--dry-run` means "no harness subprocess, no model
-spend" — perception itself is live. Drop
-`--dry-run` (and set `ANTHROPIC_API_KEY`) to let it actually run; add
-`--daemon [--interval 420]` to run forever instead of one cycle. Before
-leaving it running unattended, also set `wake_modules` /
-`wake_min_salience` in the config (see
-`examples/harness-configs/README.md`) — an unfiltered harness wakes for
-*every* gated winner, and read the prompt-injection note in
-[Safety design](#safety-design) first.
-
-Run the test suite:
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
+If you'd rather read the code as "a priority queue with decay and rate
+limits", it works identically under that description — the GWT vocabulary
+is the design lineage, not a load-bearing claim.
 
 ## Safety design
 
@@ -293,8 +182,7 @@ for that instead of assuming it away:
   never ignore it.
 - **Everything ships disabled or dry-run.** Every example harness config
   ships `"enabled": false`; the runner has `--dry-run`; wiring a live wake
-  path is always an explicit human act, never a side effect of copying a
-  file.
+  path is always an explicit human act.
 - **Know the prompt-injection surface.** The scanners ingest text from the
   open internet (GitHub issue titles, HN/Reddit post titles — anyone can
   write those), and that text flows into the briefing your harness is asked
@@ -335,42 +223,50 @@ for that instead of assuming it away:
   loggable every cycle — "why did it do that" should always be answerable
   from the log, not from re-running the model.
 
-## Why not just cron?
+## Why now
 
-The reflexive dismissal, answered with the mechanism rather than prose:
+On 2026-07-06, Anthropic published ["A global workspace in language
+models"](https://transformer-circuits.pub/2026/workspace): evidence that
+Claude's own internal computation exhibits a global-workspace-like structure
+— a limited-capacity bottleneck, broadcast, competition for access. The
+paper is explicit that **what decides admission is still unknown** — the
+mechanism is emergent, discovered after the fact.
 
-| | cron / heartbeat | ZugaMind |
-|---|---|---|
-| Idle cost | A model call per tick, mattered or not | $0 — deterministic scanners + salience math; the first token billed is after something already won the competition |
-| Trigger | The clock | Salience — something changed *and* out-competed everything else this cycle |
-| Repeats | Re-alerts on the same thing forever | Habituation — a seen trigger is damped for hours (`ZUGAMIND_HABITUATION_HOURS`) |
-| Attention health | N/A | Streak dampening, diversity caps, blind-spot boosts — no source can monopolize wakes |
-| Context on wake | Whatever your script passes | A capped continuity briefing: why you're being woken, what happened since last wake, what's unresolved |
-| Runaway protection | You write it | Fail-closed gate + hard $ cap + per-hour/per-day invocation caps counted from a durable journal |
+ZugaMind is the engineered complement at a different level of the stack: the
+same pattern — one bottleneck, one winner per cycle, broadcast, competition —
+built as an external, steerable substrate that decides when your LLM gets
+invoked at all. The one open question the paper names is the one thing
+ZugaMind answers explicitly.
 
-If you'd rather read the code as "a priority queue with decay and rate
-limits", it works identically under that description — the GWT vocabulary
-is the design lineage, not a load-bearing claim.
+| Paper's GWT observation | ZugaMind's mechanism |
+|---|---|
+| Limited capacity — one winner per cycle | `Workspace.run_cycle()` selects exactly one `SalienceBid` per cycle |
+| Broadcast to the rest of the network | `WorkspaceModule.on_broadcast()` fires on every registered module every cycle |
+| Competition for access | Modules submit `SalienceBid`s; `AttentionSchema.modulate()` re-weights them before selection |
+| Admission mechanism unknown / not steerable | `AttentionSchema` (streak dampening, diversity cap, blind-spot boost, novelty bonus) + pluggable `register_modulator()` hooks — explicit and inspectable |
+| Reportability | `Workspace.get_stats()` returns the full bid field, the winner, and the attention self-model every single cycle |
+| Deliberate vs. automatic processing | Cheap/free local-model tier for routine cycles; the fail-closed action gate escalates to Claude only when a winner's work justifies the spend |
 
-## Related work
+## Related work & prior art
 
+- OpenClaw's community proposed a "Thinking Clock" — a background tick loop
+  with a cheap-LLM tier — in [issue #17287](https://github.com/openclaw/openclaw/issues/17287),
+  closed as a duplicate of the broader
+  ["Thinking Agents Manifesto" (#17363)](https://github.com/openclaw/openclaw/issues/17363),
+  which maintainers closed as not planned for core (VISION.md avoids
+  "shipping heavy orchestration layers as a default architecture in core").
+  ZugaMind is that external layer, harness-agnostic, with one structural
+  difference: the idle tier uses **no model at all**. The manifesto author's
+  own prototype is [amor71/thinking-agents](https://github.com/amor71/thinking-agents).
 - [Anthropic, "A global workspace in language models"](https://transformer-circuits.pub/2026/workspace)
-  (2026-07-06) — interpretability evidence of an emergent internal
-  workspace in Claude. ZugaMind is the engineered, external complement at a
-  different level of the stack (see [Why now](#why-now) and the limitations
-  below — this repo makes no claim about model internals).
-- [OpenClaw "Thinking Agents Manifesto" (#17363)](https://github.com/openclaw/openclaw/issues/17363)
-  and ["Thinking Clock" (#17287)](https://github.com/openclaw/openclaw/issues/17287) —
-  the community design conversation this sidecar answers; see prior-art
-  notes above. The manifesto author's own prototype is
-  [amor71/thinking-agents](https://github.com/amor71/thinking-agents).
+  (2026-07-06) — see [Why now](#why-now); this repo makes no claim about
+  model internals.
 - [giansha/Global-Workspace-Agents](https://github.com/giansha/Global-Workspace-Agents)
-  ([arXiv 2604.08206](https://arxiv.org/abs/2604.08206)) — an academic GWT
+  ([arXiv 2604.08206](https://arxiv.org/abs/2604.08206)) — academic GWT
   multi-agent framework; research-oriented rather than a harness sidecar.
-- [bwcummings1/limen](https://github.com/bwcummings1/limen) — a
-  self-contained stdlib GWT runtime demo that appeared after the Anthropic
-  paper. Different gap: LIMEN demonstrates the loop; ZugaMind ships the
-  loop with verified harness adapters, budget/rate-limit safety, and a
+- [bwcummings1/limen](https://github.com/bwcummings1/limen) — a stdlib GWT
+  runtime demo. Different gap: LIMEN demonstrates the loop; ZugaMind ships
+  the loop with verified harness adapters, budget/rate-limit safety, and a
   continuity journal for unattended operation.
 
 ## Limitations
