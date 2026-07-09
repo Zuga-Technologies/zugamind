@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/zugamind-logo-512.png" width="180" alt="ZugaMind — one signal wins">
+</p>
+
 # ZugaMind
 
 [![CI](https://github.com/Zuga-Technologies/zugamind/actions/workflows/ci.yml/badge.svg)](https://github.com/Zuga-Technologies/zugamind/actions/workflows/ci.yml)
