@@ -34,7 +34,9 @@ cd zugamind
 python demo.py        # offline demo — no key, no network
 ```
 
-![demo.py — cycles of salience competition, one winner per cycle, winner routed through the action gate in dry-run](docs/assets/zugamind-demo.gif)
+![Real terminal recording of python demo.py --cycles 4 — salience bids compete, one winner per cycle, final winner routed through the action gate in dry-run](docs/assets/zugamind-demo.gif)
+
+<sub>Recorded with asciinema from an actual run — output is verbatim; playback paced for readability.</sub>
 
 Optional, only for the test tooling:
 
