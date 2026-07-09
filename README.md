@@ -185,6 +185,32 @@ perception is deterministic scanners plus salience competition — free, and
 the first model call happens only after something has already won the
 workspace and cleared the budget gate, not on every tick.
 
+## Install
+
+**Requirements: Python 3.10+ and git. Nothing else** — the package has zero
+dependencies (stdlib only), so there is no install step to run it:
+
+```bash
+git clone https://github.com/Zuga-Technologies/zugamind.git
+cd zugamind
+python demo.py                    # offline demo — no key, no network
+python runner.py --once --dry-run # one real perception cycle, no spend
+```
+
+Optional editable install (only needed for the test tooling):
+
+```bash
+pip install -e ".[dev]"   # the only thing this adds is pytest
+pytest -q                 # 262 tests — no network, no keys, ~4s
+```
+
+Works identically on Linux, macOS, and Windows (CI runs all three ×
+Python 3.10–3.13). On Windows, `python` is whatever your launcher resolves —
+`py` works too.
+
+To go from demo to a live sidecar (wire a harness, enable it, run the
+daemon), follow the Quickstart below.
+
 ## Quickstart
 
 No API key required:
