@@ -1,0 +1,11 @@
+[
+  {
+    "name": "hermes",
+    "_comment": "VERIFIED 2026-07-08 against Hermes Agent v0.18.1 (macOS, local Ollama qwen3:14b @ 64k ctx) via scripts/verify_harness.py. The briefing is INLINED into the prompt via shell substitution rather than passed as a file path: small local models sometimes emit their file-read tool call as text instead of executing it, so `hermes -z` with the briefing already in the prompt is the reliable shape. Requires model.ollama_num_ctx >= 65536 in ~/.hermes/config.yaml (Hermes enforces a 64k-context minimum). Ships enabled:false by default.",
+    "command": ["bash", "-c", "hermes -z \"You were woken by ZugaMind, a cognition sidecar. Here is the briefing: $(head -c 2000 {briefing_file}). Act on what it asks.\""],
+    "timeout_sec": 600,
+    "max_per_hour": 4,
+    "max_per_day": 20,
+    "enabled": false
+  }
+]

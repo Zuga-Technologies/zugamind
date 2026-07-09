@@ -1,0 +1,11 @@
+[
+  {
+    "name": "openclaw",
+    "_comment": "VERIFIED 2026-07-08 against OpenClaw 2026.3.11 (macOS) via scripts/verify_harness.py — the woken agent read the briefing and echoed the canary token. The explicit --session-id is required: without it `openclaw agent` exits 1 asking for --to/--session-id/--agent. Ships enabled:false so copying the file is never enough to spend money by accident.",
+    "command": ["openclaw", "agent", "--session-id", "zugamind-wake", "-m", "You were woken by ZugaMind, a cognition sidecar. Read the file at {briefing_file} and act on what it asks.", "--json", "--timeout", "180"],
+    "timeout_sec": 240,
+    "max_per_hour": 4,
+    "max_per_day": 20,
+    "enabled": false
+  }
+]

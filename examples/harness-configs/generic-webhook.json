@@ -1,0 +1,10 @@
+[
+  {
+    "name": "generic-webhook",
+    "_comment": "Fallback for any harness/automation reachable over HTTP instead of a local CLI — POSTs the raw briefing text as the request body. Replace the URL with your own endpoint before enabling.",
+    "command": ["curl", "-s", "-X", "POST", "-d", "@{briefing_file}", "https://example.invalid/wake"],
+    "timeout_sec": 60,
+    "max_per_hour": 4,
+    "enabled": false
+  }
+]
