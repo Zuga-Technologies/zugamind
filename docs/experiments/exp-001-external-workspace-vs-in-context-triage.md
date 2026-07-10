@@ -127,7 +127,32 @@ especially) look interesting, we'd genuinely like to help set it up: the
 corpus, conditions, and harness here are designed to be reusable as the
 behavioral half of that study.
 
+## Calibration notes from the hermetic smoke run (2026-07-10, pre-data)
+
+The harness (`scripts/run_exp001.py`) and a deterministic oracle harness (a
+subprocess that echoes `ACT:` lines for canary IDs in its input — full
+pipeline, zero model) surfaced three design decisions before any real run:
+
+1. **Canary persistence.** A one-shot canary can lose its tick's
+   weighted-random competition and vanish — unrealistic, since a genuine
+   monitored-source failure re-alarms every scan until fixed. Canaries now
+   re-emit for 3 consecutive ticks; time-to-detection counts from onset.
+2. **Wake floor pre-declared.** Condition A's harness config sets
+   `wake_min_salience: 0.35` — the product's own selectivity lever. Without
+   it, every cycle winner dispatches and condition A's wake count is
+   meaningless.
+3. **Open calibration question (to settle before pre-registration):** ten
+   same-type canaries in one simulated week trip the attention schema's
+   diversity dampening — later canaries get suppressed below the wake floor
+   *by real product behavior* (repeated same-class alarms habituate). That
+   is the system working as designed against an unrealistically homogeneous
+   failure corpus. Before the measured runs we will either diversify canary
+   types/modules or reduce density, and document the choice here. This is a
+   corpus-design decision; no pipeline code will change in response to
+   scores.
+
 ## Timeline
 
-Design published 2026-07-10. Predictions pre-registered, then Tier 1 run,
-week of 2026-07-13. Tier 2 (local replication) the following week.
+Design published 2026-07-10. Harness + hermetic tests + oracle smoke landed
+same day. Predictions pre-registered, then Tier 1 run, week of 2026-07-13.
+Tier 2 (local replication) the following week.
