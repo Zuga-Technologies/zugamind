@@ -70,8 +70,13 @@ def query_claude_api(
         resp = urlopen(req, timeout=30)
         data = json.loads(resp.read().decode())
         content = data.get("content", [])
-        if content and content[0].get("type") == "text":
-            return content[0]["text"]
+        for block in content:
+            if block.get("type") == "text" and block.get("text"):
+                return block["text"]
+        logger.warning(
+            "Claude API returned no text block (model=%s, stop_reason=%s, blocks=%s)",
+            model, data.get("stop_reason"), [b.get("type") for b in content],
+        )
         return None
     except Exception as e:
         logger.warning("Claude API call failed (%s): %s", model, e)
