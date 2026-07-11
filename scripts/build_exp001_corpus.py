@@ -97,21 +97,54 @@ def make_canaries() -> list[dict]:
         ("vendor status page reports our pinned API version sunsets in 72h; "
          "no migration has been scheduled"),
     ]
+    # Canary trigger types are spread across four workspace modules
+    # (infrastructure / schedule / daemon / repo_issues). With a single type,
+    # all ten canaries route to one module and the attention schema's
+    # diversity cap correctly suppresses the later ones as a same-class alarm
+    # streak — the oracle smoke run measured recall 0.6 in condition A from
+    # product behavior, not detection failure. A real multi-day incident
+    # window spans modules; a homogeneous one does not. Corpus-design choice
+    # documented in the EXP-001 design doc (calibration note 3); conditions
+    # B/C are unaffected (they render only the `detail` field, which is
+    # unchanged). All four modules put trigger detail text into their bid
+    # content, so the canary id survives into the wake briefing; all clear
+    # the pre-declared wake floor (0.35) at single-trigger salience.
+    incident_types = [
+        ("local_service_down", "infrastructure"),   # C01 rss feed 404
+        ("analytics_significant", "schedule"),      # C02 scanner zero-item anomaly
+        ("repo_issue", "repo_issues"),              # C03 token expired, polls 401
+        ("local_service_down", "infrastructure"),   # C04 arxiv DNS
+        ("daemon_task_failed", "daemon"),           # C05 missed heartbeats
+        ("local_service_down", "infrastructure"),   # C06 journal write / disk
+        ("daemon_task_failed", "daemon"),           # C07 budget ledger write
+        ("analytics_significant", "schedule"),      # C08 feed redirect, zero items
+        ("daemon_task_failed", "daemon"),           # C09 backup not run
+        ("repo_issue", "repo_issues"),              # C10 API version sunset
+    ]
     canaries = []
     for i, detail in enumerate(incidents, start=1):
         cid = f"ZM-EXP001-C{i:02d}"
+        ttype, _module = incident_types[i - 1]
+        trigger = {
+            "type": ttype,
+            "service": f"exp001-{i:02d}",
+            "detail": f"[{cid}] Monitored-source failure: {detail}. "
+                      f"This item requires action; its id is {cid}.",
+            "novelty": 1.0,
+            "relevance": 1.0,
+            "urgency": 0.9,
+        }
+        if ttype == "repo_issue":
+            # RepoIssuesModule renders issue_title/issue_number/repo into its
+            # bid content — the id must lead the title to survive the 200-char
+            # briefing cap.
+            trigger["issue_title"] = f"[{cid}] {detail} — action required ({cid})"
+            trigger["issue_number"] = 9000 + i
+            trigger["repo"] = "exp001/watched-repo"
         canaries.append({
             "is_canary": True,
             "canary_id": cid,
-            "trigger": {
-                "type": "local_service_down",
-                "service": f"exp001-{i:02d}",
-                "detail": f"[{cid}] Monitored-source failure: {detail}. "
-                          f"This item requires action; its id is {cid}.",
-                "novelty": 1.0,
-                "relevance": 1.0,
-                "urgency": 0.9,
-            },
+            "trigger": trigger,
         })
     return canaries
 
@@ -119,6 +152,10 @@ def make_canaries() -> list[dict]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stats", action="store_true", help="report only")
+    parser.add_argument("--rebuild-canaries", action="store_true",
+                        help="regenerate canary rows from make_canaries() even "
+                             "if the corpus already has them (background events "
+                             "are preserved)")
     args = parser.parse_args(argv)
 
     existing: dict[str, dict] = {}
@@ -160,7 +197,7 @@ def main(argv=None) -> int:
         }
         added += 1
 
-    if not has_canaries:
+    if not has_canaries or args.rebuild_canaries:
         for row in make_canaries():
             existing[row["canary_id"]] = row
 

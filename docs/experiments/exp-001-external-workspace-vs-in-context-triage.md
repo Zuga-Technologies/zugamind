@@ -141,15 +141,21 @@ pipeline, zero model) surfaced three design decisions before any real run:
    `wake_min_salience: 0.35` — the product's own selectivity lever. Without
    it, every cycle winner dispatches and condition A's wake count is
    meaningless.
-3. **Open calibration question (to settle before pre-registration):** ten
-   same-type canaries in one simulated week trip the attention schema's
+3. **Calibration question — SETTLED 2026-07-11 (canary diversification):**
+   ten same-type canaries in one simulated week trip the attention schema's
    diversity dampening — later canaries get suppressed below the wake floor
-   *by real product behavior* (repeated same-class alarms habituate). That
-   is the system working as designed against an unrealistically homogeneous
-   failure corpus. Before the measured runs we will either diversify canary
-   types/modules or reduce density, and document the choice here. This is a
-   corpus-design decision; no pipeline code will change in response to
-   scores.
+   *by real product behavior* (repeated same-class alarms habituate). The
+   oracle smoke measured condition A at recall 0.6 against the homogeneous
+   corpus — suppression, not detection failure. We chose **diversification**:
+   the ten canaries now span four workspace modules (infrastructure ×3,
+   daemon ×3, schedule ×2, repo_issues ×2), matching how a real multi-day
+   incident window spans failure classes. Incident texts and the `detail`
+   field are byte-identical to before, so conditions B/C (which render only
+   `detail`) are unaffected — the change alters only condition A's routing
+   surface. Post-change oracle smoke: A recall 1.0, precision 1.0, 22 wakes
+   (vs 42 ticks in B/C). No pipeline code changed in response to scores; the
+   change is `build_exp001_corpus.py --rebuild-canaries` and is in the git
+   history.
 
 ## Timeline
 
