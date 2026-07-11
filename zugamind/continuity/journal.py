@@ -231,6 +231,23 @@ def build_briefing(
             salience = winner.get("salience")
             sal_str = f"{salience:.2f}" if isinstance(salience, (int, float)) else "?"
             lines.append(f"- **{module}** (salience {sal_str}): {content}")
+            # A winning bid can batch several triggers; the content line above
+            # carries only the module's summary of the first/hottest one.
+            # Enumerate every trigger so nothing that won attention is lost
+            # before it reaches the model (EXP-001 finding: a canary won the
+            # competition but its id never entered the briefing — issue #9).
+            # This section is exempt from the size-cap trimming below, so cap
+            # per-line and per-list here instead of trusting the global cap.
+            triggers = (winner.get("context") or {}).get("triggers") or []
+            if len(triggers) > 1 or (
+                triggers and str(triggers[0].get("detail", ""))[:300] not in content
+            ):
+                lines.append("  Triggers in this bid:")
+                for trig in triggers[:20]:
+                    detail = str(trig.get("detail", "") or trig)[:300]
+                    lines.append(f"  - {detail}")
+                if len(triggers) > 20:
+                    lines.append(f"  - (+{len(triggers) - 20} more, see journal)")
         else:
             lines.append("- (no winner supplied — scheduled/manual wake)")
 

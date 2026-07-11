@@ -395,12 +395,45 @@ class Workspace:
     attention schema) -> hard cap -> select (salience^power) -> broadcast
     -> update.
 
-    Paper mapping (see README):
-      limited capacity / one winner per cycle  -> run_cycle returns ONE winner
-      broadcast to all modules                 -> on_broadcast() every cycle
-      competition for access                    -> salience bids + AttentionSchema
-      reportability                             -> get_stats() every cycle
-      deliberate modulation                     -> register_modulator()
+    Paper mapping (see README) — an engineered analogy, not a claim about
+    Claude's internals. Anthropic's paper ("Verbalizable Representations
+    Form a Global Workspace in Language Models", 2026-07-06) found J-space
+    inside trained weights; everything below is a separate, external
+    implementation of the same classical GWT pattern, held to its own
+    verdict rather than assumed to match:
+
+      broadcast to all modules      -> on_broadcast() every cycle
+                                        [tightest parallel: the paper's own
+                                        broadcast evidence is a ~100x
+                                        connectivity fan-out finding; matches
+                                        "every consumer hears the winner"]
+      one winner per cycle          -> run_cycle returns ONE winner
+                                        [loose: the paper's J-space is ~25
+                                        CONCURRENTLY active concepts, not a
+                                        single discrete winner per cycle]
+      competition via salience bids -> SalienceBid + AttentionSchema
+                                        [loose, flag hard: the paper states
+                                        the J-space entry mechanism is
+                                        UNKNOWN — this bid pipeline is our
+                                        own design, not evidence about how
+                                        Claude selects]
+      reportability                 -> get_stats() every cycle
+                                        [different in kind: this is direct
+                                        dict introspection into code we
+                                        wrote, not the paper's finding that
+                                        Claude VERBALLY reconstructs J-space
+                                        content with no privileged access]
+      external steering             -> register_modulator()
+                                        [different locus: an operator-side
+                                        hook, not the model voluntarily
+                                        holding a concept on request the way
+                                        the paper's control experiments show]
+
+    What this module actually demonstrates: a complete, working, fully-
+    logged gather -> compete -> broadcast pipeline is buildable outside a
+    model — the same pattern the paper's authors name as still unknown
+    for the mechanism INSIDE Claude. That is an existence proof for the
+    architecture, not a claim about how Claude works.
     """
 
     def __init__(self, selection_power: float = 4.0):
@@ -492,10 +525,47 @@ class Workspace:
                 logger.warning("[Workspace] Module %s bid failed: %s", module.name, e)
         return bids
 
+    # Alarm lane (issue #8, from EXP-001): a bid carrying a critical trigger
+    # must not be subject to the lottery. Eligibility requires BOTH a
+    # critical-urgency trigger AND healthy post-modulation salience — so
+    # habituation/diversity dampening still retire repeated same-class
+    # alarms (alarm fatigue protection stays intact; the lane is for
+    # first-arrival criticals that would otherwise lose a lucky draw).
+    ALARM_URGENCY = 0.9
+    ALARM_MIN_SALIENCE = 0.5
+
+    @staticmethod
+    def _is_critical(bid: SalienceBid) -> bool:
+        triggers = (bid.context or {}).get("triggers") or []
+        try:
+            return any(
+                float(t.get("urgency", 0.0)) >= Workspace.ALARM_URGENCY
+                for t in triggers
+                if isinstance(t, dict)
+            )
+        except (TypeError, ValueError):
+            return False
+
     def _select_winner(self, bids: List[SalienceBid]) -> Optional[SalienceBid]:
-        """Weighted-random selection over salience**selection_power."""
+        """Deterministic alarm lane first; weighted-random lottery otherwise."""
         if not bids:
             return None
+        criticals = [
+            b for b in bids
+            if b.salience >= self.ALARM_MIN_SALIENCE and self._is_critical(b)
+        ]
+        if criticals:
+            # Overlapping criticals rotate: least-recently-served module
+            # first, salience as tie-break. Pure max() re-starves cooler
+            # alarms when several incident windows overlap (observed on the
+            # EXP-001 corpus: a 0.66 critical lost every lane round to
+            # 0.75-1.0 criticals until its re-emission window closed) —
+            # every critical must get a turn before any repeats.
+            recent = [f.get("module") for f in self.attention_schema.recent_foci[-6:]]
+            return min(
+                criticals,
+                key=lambda b: (recent.count(b.source_module), -b.salience),
+            )
         weights = [b.salience ** self.selection_power for b in bids]
         total = sum(weights)
         if total == 0:
