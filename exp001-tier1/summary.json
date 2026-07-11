@@ -1,0 +1,1017 @@
+[
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      2
+    ],
+    "total_invocations": 24,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 19,
+        "detected_tick": 20
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 35,
+        "detected_tick": 35
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 31,
+        "detected_tick": 31
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 21,
+        "detected_tick": 21
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 3,
+        "detected_tick": 3
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 17,
+        "detected_tick": 19
+      }
+    },
+    "condition": "A",
+    "run": 0,
+    "seed": 20260713,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\A-run0.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      2,
+      2
+    ],
+    "total_invocations": 24,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 6,
+        "detected_tick": 7
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 4,
+        "detected_tick": 4
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 24,
+        "detected_tick": 24
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 30,
+        "detected_tick": 31
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 31,
+        "detected_tick": 33
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 27,
+        "detected_tick": 29
+      }
+    },
+    "condition": "A",
+    "run": 1,
+    "seed": 20260714,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\A-run1.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 9,
+    "recall": 0.9,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2,
+      2
+    ],
+    "total_invocations": 22,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 13,
+        "detected_tick": null
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 14,
+        "detected_tick": 16
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 22,
+        "detected_tick": 22
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 38,
+        "detected_tick": 40
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      }
+    },
+    "condition": "A",
+    "run": 2,
+    "seed": 20260715,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\A-run2.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 9,
+    "recall": 0.9,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      1
+    ],
+    "total_invocations": 24,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 10,
+        "detected_tick": 11
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 20,
+        "detected_tick": null
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 9,
+        "detected_tick": 9
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 27,
+        "detected_tick": 27
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 32,
+        "detected_tick": 32
+      }
+    },
+    "condition": "A",
+    "run": 3,
+    "seed": 20260716,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\A-run3.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 9,
+    "recall": 0.9,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2
+    ],
+    "total_invocations": 26,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 23,
+        "detected_tick": 23
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 33,
+        "detected_tick": 33
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 14,
+        "detected_tick": null
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 38,
+        "detected_tick": 38
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 24,
+        "detected_tick": 26
+      }
+    },
+    "condition": "A",
+    "run": 4,
+    "seed": 20260717,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\A-run4.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 9,
+    "recall": 0.9,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 35,
+        "detected_tick": 35
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 31,
+        "detected_tick": 31
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 21,
+        "detected_tick": 21
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 3,
+        "detected_tick": 3
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 17,
+        "detected_tick": null
+      }
+    },
+    "condition": "B",
+    "run": 0,
+    "seed": 20260713,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\B-run0.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 6,
+        "detected_tick": 6
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 4,
+        "detected_tick": 4
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 24,
+        "detected_tick": 24
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 30,
+        "detected_tick": 30
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 31,
+        "detected_tick": 31
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 27,
+        "detected_tick": 27
+      }
+    },
+    "condition": "B",
+    "run": 1,
+    "seed": 20260714,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\B-run1.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 13,
+        "detected_tick": 13
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 14,
+        "detected_tick": 14
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 22,
+        "detected_tick": 22
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 38,
+        "detected_tick": 38
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      }
+    },
+    "condition": "B",
+    "run": 2,
+    "seed": 20260715,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\B-run2.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 10,
+        "detected_tick": 10
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 20,
+        "detected_tick": 20
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 9,
+        "detected_tick": 9
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 27,
+        "detected_tick": 27
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 32,
+        "detected_tick": 32
+      }
+    },
+    "condition": "B",
+    "run": 3,
+    "seed": 20260716,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\B-run3.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 23,
+        "detected_tick": 23
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 33,
+        "detected_tick": 33
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 14,
+        "detected_tick": 14
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 38,
+        "detected_tick": 38
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 24,
+        "detected_tick": 26
+      }
+    },
+    "condition": "B",
+    "run": 4,
+    "seed": 20260717,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\B-run4.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 9,
+    "recall": 0.9,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 35,
+        "detected_tick": 35
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 31,
+        "detected_tick": 31
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 21,
+        "detected_tick": 21
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 3,
+        "detected_tick": 3
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 17,
+        "detected_tick": null
+      }
+    },
+    "condition": "C",
+    "run": 0,
+    "seed": 20260713,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\C-run0.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 6,
+        "detected_tick": 6
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 4,
+        "detected_tick": 4
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 24,
+        "detected_tick": 24
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 30,
+        "detected_tick": 30
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 31,
+        "detected_tick": 31
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 27,
+        "detected_tick": 27
+      }
+    },
+    "condition": "C",
+    "run": 1,
+    "seed": 20260714,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\C-run1.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 13,
+        "detected_tick": 13
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 14,
+        "detected_tick": 14
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 22,
+        "detected_tick": 22
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 38,
+        "detected_tick": 38
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      }
+    },
+    "condition": "C",
+    "run": 2,
+    "seed": 20260715,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\C-run2.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 10,
+        "detected_tick": 10
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 20,
+        "detected_tick": 20
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 9,
+        "detected_tick": 9
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 27,
+        "detected_tick": 27
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 32,
+        "detected_tick": 32
+      }
+    },
+    "condition": "C",
+    "run": 3,
+    "seed": 20260716,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\C-run3.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2
+    ],
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 23,
+        "detected_tick": 23
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 33,
+        "detected_tick": 33
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 14,
+        "detected_tick": 14
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 38,
+        "detected_tick": 38
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 24,
+        "detected_tick": 26
+      }
+    },
+    "condition": "C",
+    "run": 4,
+    "seed": 20260717,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "exp001-tier1\\C-run4.jsonl"
+  }
+]
