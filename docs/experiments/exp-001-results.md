@@ -81,8 +81,12 @@ concrete pipeline fixes above.
 
 ## Threats to validity (beyond the design doc's list)
 
-- Corpus skew: 214/224 background events are HN stories (disclosed in
+- Corpus skew: ~95% of background events are HN stories (disclosed in
   calibration note 4).
+- Corpus-as-run correction: 5 additional real events captured the same
+  morning were present in the corpus file during all measured runs but
+  missed the freeze commit — the corpus as-run is 229 background events,
+  not 224. Committed as-run with this note; canary rows unaffected.
 - Single model (claude-sonnet-5) and single harness (claude CLI); Tier 2
   addresses the model axis.
 - N=5 with 10 canaries: recall differences of one canary (0.02) are within
