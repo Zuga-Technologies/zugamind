@@ -73,6 +73,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import time
@@ -364,6 +365,13 @@ class StreamRunner:
                 "context": {"winner": winner_dict, "plan": plan},
                 "caller": "stream.runner",
             }
+            # ZUGAMIND_WAKE_TIER routes the gate's wake-decision call to a
+            # specific tier — "local" makes the entire idle-and-decide loop
+            # model-bill-free (Ollama judges the wake, the harness is the
+            # only paid hop). Unset = the gate's per-kind default.
+            wake_tier = os.environ.get("ZUGAMIND_WAKE_TIER", "").strip()
+            if wake_tier:
+                intent["tier"] = wake_tier
             gate_result = escalate_for_action(intent, dry_run=self.dry_run)
 
             if not gate_result.get("ok"):
