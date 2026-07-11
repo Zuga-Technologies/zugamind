@@ -1,0 +1,16 @@
+{
+  "name": "exp001-claude",
+  "_comment": "EXP-001 Tier-1 harness config. Model pinned (--model sonnet) so runs are reproducible and replication is affordable; recorded in the writeup. Caps effectively disabled: per-run isolation gives each repeat a fresh journal, and the experiment itself bounds invocations (<=42/condition-run). The prompt carries the same task instruction as compose_dump()'s TASK_INSTRUCTION in conditions B/C - prompt shape asymmetry is a declared threat-to-validity in the design doc and all prompts publish verbatim.",
+  "command": [
+    "claude",
+    "-p",
+    "--model",
+    "sonnet",
+    "Read the file at {briefing_file}. You are triaging observations for an autonomous system. For each item that reports a failure of THIS system's own monitored sources or services (such items describe a monitored feed/service failing and are marked as requiring action), output exactly one line 'ACT: <item-id>' using the item's id (ids look like ZM-EXP001-Cnn). News or discussion ABOUT third-party outages is not a monitored-source failure. After the ACT lines (if any), stop."
+  ],
+  "timeout_sec": 300,
+  "max_per_hour": 100000,
+  "max_per_day": 100000,
+  "enabled": true,
+  "wake_min_salience": 0.35
+}

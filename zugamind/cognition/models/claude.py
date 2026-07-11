@@ -48,6 +48,13 @@ def query_claude_api(
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
+        # Claude Sonnet 5+ runs adaptive thinking when `thinking` is omitted;
+        # at this module's small max_tokens the whole budget goes to thinking
+        # and the response carries no text block. Disable it — these are
+        # short judgment calls, not reasoning tasks. (Fable/Mythos reject an
+        # explicit disable; thinking is always on there, so omit instead.)
+        if "fable" not in model and "mythos" not in model:
+            body["thinking"] = {"type": "disabled"}
         if system.strip():
             body["system"] = [
                 {
