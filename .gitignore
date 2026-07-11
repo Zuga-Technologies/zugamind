@@ -31,3 +31,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+exp001-out/
+exp001-tier1-pilot/
+exp001-tier1/
