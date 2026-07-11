@@ -111,3 +111,36 @@ def test_sub_threshold_urgency_is_not_critical():
         for seed in range(30)
     }
     assert "ambient" in winners
+
+
+def test_attention_health_disabled_bypasses_alarm_lane():
+    """EXP-003 ablation switch: with attention_health_enabled=False, a
+    critical alarm that would otherwise win every draw (see
+    test_critical_alarm_beats_hotter_ambient_bid_every_time) is back in the
+    plain weighted lottery — the ambient bid must win at least once."""
+    winners = set()
+    for seed in range(30):
+        random.seed(seed)
+        ws = Workspace(attention_health_enabled=False)
+        ws.register_module(_TriggerBidModule("alarm", 0.65, urgency=1.0))
+        ws.register_module(_TriggerBidModule("ambient", 0.9, urgency=None))
+        content = ws.run_cycle({})
+        winners.add(content.source_module if content else None)
+    assert "ambient" in winners, "alarm lane still active despite attention_health_enabled=False"
+
+
+def test_attention_health_disabled_bypasses_diversity_cap():
+    """Same switch, soft-modulation side: a module winning every cycle
+    should normally get dampened by streak/diversity corrections. With the
+    switch off, raw salience alone decides — the same module keeps winning
+    despite a repeated streak."""
+    random.seed(20260711)
+    ws = Workspace(attention_health_enabled=False)
+    dominant = _TriggerBidModule("dominant", 0.9, urgency=None)
+    quiet = _TriggerBidModule("quiet", 0.3, urgency=None)
+    ws.register_module(dominant)
+    ws.register_module(quiet)
+    winners = [ws.run_cycle({}).source_module for _ in range(6)]
+    assert winners.count("dominant") == 6, (
+        f"diversity/streak correction still active despite the switch: {winners}"
+    )

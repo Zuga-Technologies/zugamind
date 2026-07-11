@@ -165,8 +165,9 @@ class StreamRunner:
         extra_scanners: Optional[Dict[str, Callable[[], List[dict]]]] = None,
         dry_run: bool = False,
         include_default_scanners: bool = True,
+        attention_health_enabled: bool = True,
     ):
-        self.workspace = Workspace()
+        self.workspace = Workspace(attention_health_enabled=attention_health_enabled)
         self.modules = create_all_modules()
         for m in self.modules:
             self.workspace.register_module(m)

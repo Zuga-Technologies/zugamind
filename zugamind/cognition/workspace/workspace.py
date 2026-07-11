@@ -436,7 +436,7 @@ class Workspace:
     architecture, not a claim about how Claude works.
     """
 
-    def __init__(self, selection_power: float = 4.0):
+    def __init__(self, selection_power: float = 4.0, attention_health_enabled: bool = True):
         self._modules: List[WorkspaceModule] = []
         self._modulators: List[BidModulator] = []
         self._workspace_content: Optional[WorkspaceContent] = None
@@ -449,6 +449,13 @@ class Workspace:
         # act on the highest-urgency item, not explore stochastically, while
         # leaving lower bids a real (not vestigial) chance to win.
         self.selection_power = selection_power
+        # EXP-003 ablation switch: when False, both the soft AttentionSchema
+        # corrections (modulate + hard diversity cap) AND the alarm lane are
+        # bypassed — winner is the raw weighted lottery every cycle. The
+        # critical-digest briefing path is unaffected either way (it is not
+        # a selection mechanism; see exp-003-attention-health-ablation.md
+        # for why it's deliberately excluded from this switch).
+        self.attention_health_enabled = attention_health_enabled
 
     def register_module(self, module: WorkspaceModule):
         """Register a module to participate in workspace competition."""
@@ -490,8 +497,9 @@ class Workspace:
             except Exception as e:
                 logger.warning("[Workspace] Modulator failed: %s", e)
 
-        bids = self.attention_schema.modulate(bids)
-        self.attention_schema.apply_hard_diversity_cap(bids)
+        if self.attention_health_enabled:
+            bids = self.attention_schema.modulate(bids)
+            self.attention_schema.apply_hard_diversity_cap(bids)
 
         self.last_cycle_bids = list(bids)
 
@@ -547,13 +555,20 @@ class Workspace:
             return False
 
     def _select_winner(self, bids: List[SalienceBid]) -> Optional[SalienceBid]:
-        """Deterministic alarm lane first; weighted-random lottery otherwise."""
+        """Deterministic alarm lane first; weighted-random lottery otherwise.
+
+        The alarm lane is itself a selection-fairness mechanism (issue #8),
+        so it is gated by attention_health_enabled same as AttentionSchema's
+        soft corrections — EXP-003's ablation strips both together to
+        isolate "does any selection-layer fairness machinery matter" from
+        the raw weighted lottery.
+        """
         if not bids:
             return None
         criticals = [
             b for b in bids
             if b.salience >= self.ALARM_MIN_SALIENCE and self._is_critical(b)
-        ]
+        ] if self.attention_health_enabled else []
         if criticals:
             # Overlapping criticals rotate: least-recently-served module
             # first, salience as tie-break. Pure max() re-starves cooler
