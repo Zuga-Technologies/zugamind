@@ -158,6 +158,7 @@ def build_briefing(
     since_iso: Optional[str],
     winner: Optional[Dict[str, Any]] = None,
     *,
+    other_criticals: Optional[List[Dict[str, Any]]] = None,
     now: Optional[datetime] = None,
 ) -> str:
     """Render a markdown wake briefing for a harness invocation.
@@ -250,6 +251,29 @@ def build_briefing(
                     lines.append(f"  - (+{len(triggers) - 20} more, see journal)")
         else:
             lines.append("- (no winner supplied — scheduled/manual wake)")
+
+        # Critical digest: a page lists every active alert, not just the
+        # loudest. With more concurrent alarms than wake slots, alarms that
+        # lost this cycle's selection would otherwise queue past their
+        # window (EXP-001 acceptance finding) — ride them along on this
+        # wake. Same exemption from size-cap trimming as the winner section,
+        # so capped per-line and per-list here.
+        if other_criticals:
+            lines.append("")
+            lines.append("## Other active alarms (did not win this cycle)")
+            shown = 0
+            for bid in other_criticals[:6]:
+                mod = bid.get("source_module", "?")
+                for trig in ((bid.get("context") or {}).get("triggers") or [])[:5]:
+                    detail = str(trig.get("detail", "") or trig)[:300]
+                    lines.append(f"- [{mod}] {detail}")
+                    shown += 1
+            total = sum(
+                len((b.get("context") or {}).get("triggers") or [])
+                for b in other_criticals
+            )
+            if total > shown:
+                lines.append(f"- (+{total - shown} more, see journal)")
 
         lines.append("")
         lines.append("## Since last wake")

@@ -357,7 +357,22 @@ class StreamRunner:
             plan = self.planner.propose_plan(content, budget)
 
             since_iso = state.get("last_wake")
-            briefing = journal.build_briefing(since_iso, winner=winner_dict)
+            # Critical digest: alarms that lost this cycle's selection ride
+            # along in the briefing instead of queueing for a wake slot they
+            # may never get (EXP-001 acceptance finding — with more
+            # concurrent alarm windows than slots, rotation alone still
+            # drops whoever expires first).
+            winner_module = winner_dict.get("source_module")
+            other_criticals = [
+                {"source_module": b.source_module, "context": b.context}
+                for b in self.workspace.last_cycle_bids
+                if b.source_module != winner_module
+                and b.salience >= self.workspace.ALARM_MIN_SALIENCE
+                and self.workspace._is_critical(b)
+            ]
+            briefing = journal.build_briefing(
+                since_iso, winner=winner_dict, other_criticals=other_criticals
+            )
 
             intent = {
                 "kind": "decide",

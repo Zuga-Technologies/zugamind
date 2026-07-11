@@ -53,6 +53,33 @@ def test_single_trigger_already_in_content_adds_no_duplicate_list(tmp_path, monk
     assert briefing.count("[ID-ZZZ]") == 1
 
 
+def test_other_criticals_ride_along_in_the_briefing(tmp_path, monkeypatch):
+    """Critical digest: alarms that lost the cycle's selection must still
+    reach the model on this wake (EXP-001: overlapping alarm windows vs
+    one wake slot per tick)."""
+    _patch_journal(tmp_path, monkeypatch)
+    winner = _winner_with_triggers(["[ID-WIN] the winning failure"])
+    losers = [{
+        "source_module": "daemon",
+        "context": {"triggers": [
+            {"detail": "[ID-LOSER-1] queued alarm one", "urgency": 0.95},
+            {"detail": "[ID-LOSER-2] queued alarm two", "urgency": 0.95},
+        ]},
+    }]
+    briefing = journal.build_briefing(None, winner=winner, other_criticals=losers)
+    assert "[ID-WIN]" in briefing
+    assert "[ID-LOSER-1]" in briefing and "[ID-LOSER-2]" in briefing
+    assert "Other active alarms" in briefing
+
+
+def test_no_other_criticals_no_extra_section(tmp_path, monkeypatch):
+    _patch_journal(tmp_path, monkeypatch)
+    briefing = journal.build_briefing(
+        None, winner=_winner_with_triggers(["[ID-X] solo"]), other_criticals=[]
+    )
+    assert "Other active alarms" not in briefing
+
+
 def test_trigger_list_is_capped_not_unbounded(tmp_path, monkeypatch):
     _patch_journal(tmp_path, monkeypatch)
     details = [f"[ID-{i:03d}] failure number {i}" for i in range(40)]
