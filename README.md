@@ -165,6 +165,26 @@ If you'd rather read the code as "a priority queue with decay and rate
 limits", it works identically under that description — the GWT vocabulary
 is the design lineage, not a load-bearing claim.
 
+### Measured, not claimed (EXP-001)
+
+We pre-registered predictions, ran the comparison against cron baselines
+with a real model, and published every raw run — including the two
+predictions we got wrong. On a frozen corpus of 229 real events + 10
+planted incidents (5 runs per condition, claude-sonnet-5):
+
+| | recall | precision | false acts | invocations/run |
+|---|---|---|---|---|
+| ZugaMind (post-fix) | 0.98 | 1.00 | 0 | ~24 |
+| cron + dump | 0.98 | 1.00 | 0 | 42 |
+| cron + ask | 0.98 | 1.00 | 0 | 42 |
+
+Equal detection at 43% fewer model invocations — in cron's best case (a
+lazy 4-hour tick; the cadence sweep is [EXP-002](docs/experiments/)). The
+experiment also caught three real pipeline bugs, fixed same-day (#8, #9).
+Design, predictions-as-committed, results, and raw JSONL:
+[docs/experiments/](docs/experiments/). Replay it:
+`python scripts/run_exp001.py --smoke` (hermetic, no keys, $0).
+
 ## Safety design
 
 ZugaMind assumes an autonomous agent will eventually be wrong, and designs
