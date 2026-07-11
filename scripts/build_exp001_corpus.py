@@ -53,6 +53,52 @@ def assign_tick(key: str) -> int:
     return int(hashlib.sha1(key.encode()).hexdigest(), 16) % N_TICKS
 
 
+def backfill_hn_triggers(target: int) -> list[dict]:
+    """Fetch REAL HN stories from the past 7 days via the Algolia API, shaped
+    exactly like the hackernews scanner's triggers.
+
+    Corpus amendment 2026-07-11 (documented in the design doc, calibration
+    note 4): the pilot revealed the captured background set (25 events) fell
+    far short of the design's ~200-event spec, leaving cron ticks nearly
+    empty and hypothesis H3 untestable. This backfill raises density using
+    only real, verifiable events (each row carries its story_id and url) —
+    nothing synthetic, canaries untouched, predictions unchanged.
+    """
+    import time
+    from urllib.request import urlopen
+
+    out: list[dict] = []
+    week_ago = int(time.time()) - 7 * 86400
+    page = 0
+    while len(out) < target and page < 20:
+        url = (
+            "https://hn.algolia.com/api/v1/search_by_date?tags=story"
+            f"&numericFilters=points>2,created_at_i>{week_ago}"
+            f"&hitsPerPage=50&page={page}"
+        )
+        with urlopen(url, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+        hits = data.get("hits", [])
+        if not hits:
+            break
+        for h in hits:
+            title = (h.get("title") or "").strip()
+            if not title:
+                continue
+            out.append({
+                "type": "hackernews_story",
+                "detail": f"HN [{h.get('points', 0)}pts]: {title}",
+                "url": h.get("url") or f"https://news.ycombinator.com/item?id={h['objectID']}",
+                "story_id": int(h["objectID"]),
+                "score": h.get("points", 0),
+                "novelty": 0.55,
+                "relevance": 0.5,
+                "urgency": 0.3,
+            })
+        page += 1
+    return out[:target]
+
+
 def collect_live_triggers() -> list[dict]:
     """Call every available scan_* callable once; skip failures loudly."""
     scan_fns: dict[str, object] = {}
@@ -156,6 +202,10 @@ def main(argv=None) -> int:
                         help="regenerate canary rows from make_canaries() even "
                              "if the corpus already has them (background events "
                              "are preserved)")
+    parser.add_argument("--backfill-hn", type=int, default=0, metavar="N",
+                        help="add up to N real HN stories from the past 7 days "
+                             "(Algolia) to reach the design's ~200-event spec; "
+                             "see calibration note 4 in the design doc")
     args = parser.parse_args(argv)
 
     existing: dict[str, dict] = {}
@@ -184,6 +234,8 @@ def main(argv=None) -> int:
         return 0
 
     captured = collect_live_triggers()
+    if args.backfill_hn > 0:
+        captured.extend(backfill_hn_triggers(args.backfill_hn))
     added = 0
     for trig in captured:
         key = stable_key(trig)

@@ -157,8 +157,25 @@ pipeline, zero model) surfaced three design decisions before any real run:
    change is `build_exp001_corpus.py --rebuild-canaries` and is in the git
    history.
 
+4. **Corpus-density amendment — 2026-07-11, after the Tier-1 pilot, before
+   any measured run.** The pilot (1 run per condition, real model, results
+   in the repo history) revealed the captured background set had only 25
+   events against the design's ~200-event spec — cron ticks averaged under
+   2 items, so H3's >15-item bins could not occur and condition B ran
+   against a near-empty week (its best case). Amendment: backfilled the
+   background set to 224 events using REAL Hacker News stories from the
+   preceding 7 days via the Algolia API (each row carries its verifiable
+   story_id and url; shape identical to the hackernews scanner's output;
+   nothing synthetic). Known skew: the backfilled corpus is 214/224
+   hackernews_story — acceptable for the background's role (competing
+   noise) and disclosed here. Canary rows are byte-identical to the
+   pre-registration commit; the predictions in exp-001-predictions.md are
+   unchanged and remain binding. Pilot results from the sparse corpus
+   publish alongside the measured runs.
+
 ## Timeline
 
 Design published 2026-07-10. Harness + hermetic tests + oracle smoke landed
-same day. Predictions pre-registered, then Tier 1 run, week of 2026-07-13.
-Tier 2 (local replication) the following week.
+same day. Predictions pre-registered 2026-07-11; Tier-1 pilot same day caught
+the corpus-density shortfall (calibration note 4); measured N=5 runs follow
+on the amended corpus. Tier 2 (local replication) the following week.
