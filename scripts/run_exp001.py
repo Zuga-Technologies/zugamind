@@ -59,6 +59,9 @@ CORPUS_FILE = Path(__file__).resolve().parent / "exp001_corpus.jsonl"
 CANARY_PREFIX = "ZM-EXP001-C"
 SIM_START = datetime(2026, 7, 1, 8, 0, tzinfo=timezone.utc)
 N_TICKS = 42  # simulated week at 4h/tick; must match build_exp001_corpus.py
+NATIVE_TICK_HOURS = 4.0  # the corpus's own time resolution (EXP-002 design
+                         # doc, threats: the very-fast cadence cannot resolve
+                         # events finer than this grid)
 
 TASK_INSTRUCTION = (
     "You are triaging observations for an autonomous system. For each item "
@@ -130,6 +133,28 @@ def merge_ticks(*sources: dict[int, list[dict]]) -> dict[int, list[dict]]:
         for tick, batch in src.items():
             merged.setdefault(tick, []).extend(batch)
     return merged
+
+
+def native_to_run_tick(native_tick: int, tick_hours: float) -> int:
+    """Map a native-grid tick (4h resolution) to the run grid's tick index."""
+    return int(native_tick * NATIVE_TICK_HOURS // tick_hours)
+
+
+def rebucket_ticks(events: dict[int, list[dict]], tick_hours: float
+                   ) -> tuple[dict[int, list[dict]], int]:
+    """Replay the SAME simulated timeline on a different polling grid
+    (EXP-002 cadence sweep). Events keep their simulated timestamps —
+    an event at native tick T (sim-time T*4h) lands in whichever run-grid
+    tick contains that moment. At tick_hours=4.0 this is the identity
+    (EXP-001 behavior unchanged); coarser grids merge native ticks,
+    finer grids leave most run ticks empty — by design, since the corpus
+    is only resolved to NATIVE_TICK_HOURS.
+    """
+    out: dict[int, list[dict]] = {}
+    for tick, batch in events.items():
+        out.setdefault(native_to_run_tick(tick, tick_hours), []).extend(batch)
+    n_run_ticks = int(-(-(N_TICKS * NATIVE_TICK_HOURS) // tick_hours))  # ceil
+    return out, n_run_ticks
 
 
 def canary_ids_in(text: str) -> set[str]:
@@ -323,15 +348,19 @@ def oracle_config(name: str = "oracle", for_condition_a: bool = False) -> dict:
 def run_once_for_condition(condition: str, run_idx: int, seed: int, out_dir: Path,
                            dry_run: bool, tick_hours: float,
                            harness_cfg: dict | None) -> dict:
-    background, canaries, n_ticks = load_corpus(CORPUS_FILE)
-    placed = place_canaries(canaries, n_ticks, seed)
-    planted: dict[int, int] = {}
+    background, canaries, n_native_ticks = load_corpus(CORPUS_FILE)
+    # Canaries are placed on the NATIVE grid regardless of run cadence, so
+    # one seed produces one simulated timeline that every cadence replays —
+    # the cadence sweep varies only how finely that timeline is polled.
+    placed = place_canaries(canaries, n_native_ticks, seed)
+    planted: dict[str, int] = {}
     for tick, batch in placed.items():
         for trig in batch:
             for cid in canary_ids_in(str(trig)):
                 # onset tick = earliest emission (persistence re-emits later)
                 planted[cid] = min(planted.get(cid, tick), tick)
-    events = merge_ticks(background, placed)
+    events, n_ticks = rebucket_ticks(merge_ticks(background, placed), tick_hours)
+    planted = {cid: native_to_run_tick(t, tick_hours) for cid, t in planted.items()}
 
     run_dir = out_dir / f"{condition}-run{run_idx}"
     isolate_data_dir(run_dir)
@@ -354,8 +383,12 @@ def run_once_for_condition(condition: str, run_idx: int, seed: int, out_dir: Pat
             fh.write(json.dumps(rec) + "\n")
 
     metrics = score(records, planted, condition, dry_run)
+    metrics["time_to_detection_hours"] = [
+        round(t * tick_hours, 2) for t in metrics["time_to_detection_ticks"]
+    ]
     metrics.update({"condition": condition, "run": run_idx, "seed": seed,
-                    "dry_run": dry_run, "ticks": n_ticks, "raw": str(raw_path)})
+                    "dry_run": dry_run, "ticks": n_ticks,
+                    "tick_hours": tick_hours, "raw": str(raw_path)})
     return metrics
 
 
@@ -364,7 +397,12 @@ def main(argv=None) -> int:
     parser.add_argument("--condition", choices=["A", "B", "C"])
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--seed", type=int, default=20260713)
-    parser.add_argument("--tick-hours", type=float, default=4.0)
+    parser.add_argument("--tick-hours", type=float, default=4.0,
+                        help="polling-grid interval in simulated hours "
+                             "(EXP-002 cadence sweep: 24 / 4 / 1 / 0.25). "
+                             "The corpus timeline is fixed; this only changes "
+                             "how finely B/C poll it and how often A's "
+                             "perception cycle runs. Default 4.0 = EXP-001.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--harness-config", type=Path,
                         help="JSON file with ONE harness config dict for this run")

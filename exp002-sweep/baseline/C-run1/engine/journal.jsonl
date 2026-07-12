@@ -1,0 +1,42 @@
+{"ts": "2026-07-12T20:40:01.230412+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:01.323814+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:01.449557+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C08\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:01.559694+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C08\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:01.658890+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C04\nACT: ZM-EXP001-C08\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:01.764464+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C01\nACT: ZM-EXP001-C04\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:01.868919+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C01\nACT: ZM-EXP001-C02\nACT: ZM-EXP001-C04\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:01.968858+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C01\nACT: ZM-EXP001-C02\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.064701+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C02\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.170546+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.281417+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.393378+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.514782+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C06\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.615208+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C06\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.729028+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C06\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.839074+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:02.949370+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.054674+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.160990+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.264353+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C03\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.364593+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C03\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.474504+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C03\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.572902+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.676442+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.781867+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C05\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.882316+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C05\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:03.984709+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C05\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.087879+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C10\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.186871+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C10\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.288746+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C10\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.395142+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C07\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.495465+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C07\nACT: ZM-EXP001-C09\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.592670+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C07\nACT: ZM-EXP001-C09\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.697234+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP001-C09\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.792580+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.888011+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:04.991932+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:05.094478+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:05.191922+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:05.291657+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:05.395346+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}
+{"ts": "2026-07-12T20:40:05.488899+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "NONE\n", "stderr": ""}

@@ -1,0 +1,14 @@
+{
+  "state": "FOCUSED",
+  "since": "2026-07-12T16:59:32.554818",
+  "last_cycle": null,
+  "cycles_today": 0,
+  "last_transition": {
+    "from": "ALERT",
+    "to": "FOCUSED",
+    "reason": "winner from metacognition",
+    "at": "2026-07-12T16:59:32.554818"
+  },
+  "focus_topic": null,
+  "last_wake": "2026-07-12T20:59:31.903631+00:00"
+}
