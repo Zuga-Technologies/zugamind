@@ -9,7 +9,12 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
 [![Dependencies: zero](https://img.shields.io/badge/dependencies-zero-brightgreen.svg)](pyproject.toml)
 
-**Agents answer. ZugaMind notices.**
+**Stop paying your agent to wake up and find nothing.**
+
+Cron wakes your agent on schedule. ZugaMind wakes it because something
+happened.
+
+*Agents answer. ZugaMind notices.*
 
 ![ZugaMind architecture — scanners feed a salience competition; one winner per cycle clears a fail-closed gate and wakes your harness](docs/assets/zugamind-hero.png)
 
