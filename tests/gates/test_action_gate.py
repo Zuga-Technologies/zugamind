@@ -307,5 +307,77 @@ class ActionGateTest(unittest.TestCase):
         self.assertEqual(claude_calls["n"], 0)
 
 
+class BudgetPersistFailureJournalTest(unittest.TestCase):
+    """#6 — a double record_spend() failure must leave a STRUCTURED journal
+    trail (`budget_persist_failed`), not just ERROR log text, so the ledger
+    can be reconciled mechanically. Happy path journals nothing."""
+
+    def setUp(self):
+        action_gate._idempotency_cache.clear()
+
+    def _run_gate(self, tmp, record_spend_fn):
+        """Run one sonnet escalation with journal repointed at tmp; return
+        the gate result and the parsed journal events."""
+        import json
+        from pathlib import Path
+        from continuity import journal
+
+        engine = Path(tmp) / "engine"
+        journal_file = engine / "journal.jsonl"
+
+        def helpers():
+            return _can_spend_yes, record_spend_fn, lambda: _budget()
+
+        def fake_claude():
+            return lambda *a, **kw: "paid response"
+
+        with patch.object(action_gate, "_resolve_budget_helpers", helpers), \
+             patch.object(action_gate, "_resolve_claude_caller", fake_claude), \
+             patch.object(journal, "ENGINE_DIR", engine), \
+             patch.object(journal, "JOURNAL_FILE", journal_file):
+            r = action_gate.escalate_for_action(
+                {"kind": "code_change", "summary": "x", "tier": "sonnet",
+                 "caller": "test.persist"}
+            )
+        events = []
+        if journal_file.exists():
+            with open(journal_file, encoding="utf-8") as fh:
+                events = [json.loads(line) for line in fh if line.strip()]
+        return r, events
+
+    def test_double_persist_failure_journals_structured_event(self):
+        import tempfile
+
+        def record_spend_boom(_budget, _tier):
+            raise OSError("disk wedged")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            r, events = self._run_gate(tmp, record_spend_boom)
+
+        # Existing semantics preserved: paid response kept, failure surfaced.
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["response"], "paid response")
+        self.assertFalse(r["budget_persisted"])
+
+        failed = [e for e in events if e["kind"] == "budget_persist_failed"]
+        self.assertEqual(len(failed), 1)
+        ev = failed[0]
+        self.assertEqual(ev["tier"], "sonnet")
+        self.assertGreater(ev["estimated_cost"], 0.0)
+        self.assertIn("disk wedged", ev["error"])
+        self.assertEqual(ev["caller"], "test.persist")
+
+    def test_happy_path_journals_nothing(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            r, events = self._run_gate(tmp, _record_spend_inc)
+
+        self.assertTrue(r["ok"])
+        self.assertTrue(r["budget_persisted"])
+        self.assertEqual(
+            [e for e in events if e["kind"] == "budget_persist_failed"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

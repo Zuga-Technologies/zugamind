@@ -381,6 +381,26 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "manually or accept the drift: %s",
             tier, persist_exc,
         )
+        # Leave a STRUCTURED trail, not just log text (#6): the journal is an
+        # independent file with independent writes — a wedged budget.json does
+        # not imply a wedged journal. Reconciliation becomes mechanical: sum
+        # `budget_persist_failed` events, fold into `spent`. append_event is
+        # already best-effort (never raises), and the extra try/except keeps
+        # even an unexpected import failure from turning the fail-loud path
+        # into a crash.
+        try:
+            from continuity import journal  # noqa: WPS433 — lazy, like the other helpers
+            from foundation.config import HAIKU_COST, SONNET_COST, OPUS_COST  # noqa: WPS433
+            estimated = {"haiku": HAIKU_COST, "sonnet": SONNET_COST,
+                         "opus": OPUS_COST}.get(tier, 0.0)
+            journal.append_event("budget_persist_failed", {
+                "tier": tier,
+                "estimated_cost": estimated,
+                "caller": caller,
+                "error": str(persist_exc),
+            })
+        except Exception as exc:  # noqa: BLE001 — trail is best-effort by contract
+            logger.warning("action_gate: budget_persist_failed journaling failed: %s", exc)
 
     cost = float(new_budget.get("spent", spent_before)) - spent_before
 
