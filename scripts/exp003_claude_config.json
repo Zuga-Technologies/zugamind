@@ -1,0 +1,16 @@
+{
+  "name": "exp003-claude",
+  "_comment": "EXP-003 Tier-1 harness config. Same shape and discipline as exp001_claude_config.json: model pinned (--model sonnet) for reproducibility, caps effectively disabled (per-run isolation gives each repeat a fresh journal; the experiment itself bounds invocations to <=42/condition-run, and the rate windows are wall-clock while the simulated week replays in seconds - the first tier-1 attempt was invalidated by exactly this, see exp003-tier1-invalid/README.md). Prompt is the EXP-001 task instruction with the id scheme swapped to EXP-003's two fixed ids.",
+  "command": [
+    "claude",
+    "-p",
+    "--model",
+    "sonnet",
+    "Read the file at {briefing_file}. You are triaging observations for an autonomous system. For each item that reports a failure of THIS system's own monitored sources or services (such items describe a monitored feed/service failing and are marked as requiring action), output exactly one line 'ACT: <item-id>' using the item's id (ids look like ZM-EXP003-BURIED or ZM-EXP003-DOMREAL). Routine degraded/latency chatter that describes itself as non-critical and self-resolving is not a failure requiring action. After the ACT lines (if any), stop."
+  ],
+  "timeout_sec": 300,
+  "max_per_hour": 100000,
+  "max_per_day": 100000,
+  "enabled": true,
+  "wake_min_salience": 0.35
+}

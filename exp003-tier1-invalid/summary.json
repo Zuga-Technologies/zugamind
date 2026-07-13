@@ -1,0 +1,242 @@
+[
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 9,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 28,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 35,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "run": 0,
+    "seed": 20260711,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "A-run0.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 9,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 10,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 19,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "run": 1,
+    "seed": 20260712,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "A-run1.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 10,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 20,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 19,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "run": 2,
+    "seed": 20260713,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "A-run2.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 9,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 6,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 7,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "run": 3,
+    "seed": 20260714,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "A-run3.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 11,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 9,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 16,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "run": 4,
+    "seed": 20260715,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "A-run4.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 41,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 28,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 35,
+        "detected_tick": null
+      }
+    },
+    "condition": "D",
+    "run": 0,
+    "seed": 20260711,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "D-run0.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 40,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 10,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 19,
+        "detected_tick": null
+      }
+    },
+    "condition": "D",
+    "run": 1,
+    "seed": 20260712,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "D-run1.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 41,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 20,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 19,
+        "detected_tick": null
+      }
+    },
+    "condition": "D",
+    "run": 2,
+    "seed": 20260713,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "D-run2.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 42,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 6,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 7,
+        "detected_tick": null
+      }
+    },
+    "condition": "D",
+    "run": 3,
+    "seed": 20260714,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "D-run3.jsonl"
+  },
+  {
+    "planted": 2,
+    "detected": 0,
+    "buried_recall": 0.0,
+    "domreal_recall": 0.0,
+    "false_acts": 0,
+    "total_invocations": 41,
+    "per_canary": {
+      "ZM-EXP003-BURIED": {
+        "planted_tick": 9,
+        "detected_tick": null
+      },
+      "ZM-EXP003-DOMREAL": {
+        "planted_tick": 16,
+        "detected_tick": null
+      }
+    },
+    "condition": "D",
+    "run": 4,
+    "seed": 20260715,
+    "dry_run": false,
+    "ticks": 42,
+    "raw": "D-run4.jsonl"
+  }
+]
