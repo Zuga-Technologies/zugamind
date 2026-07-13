@@ -80,8 +80,41 @@ gates win this corpus outright and the doc will say so.
 - N=3 per cell; detection ties are exact counts, cost gaps are ~3–6× (far
   beyond run-to-run variance of ±3 wakes); no significance claims.
 
-## EXP-004t addendum
+## EXP-004t addendum (same day) — one calibrated knob reaches parity
 
-*Pending — running now (`exp004-out/` s*-At cells), predictions at
-[exp-004t-predictions.md](exp-004t-predictions.md), committed before the
-calibration harness existed. Publishes either way.*
+Condition At = the identical workspace with its single global wake floor
+calibrated by the same published procedure E's thresholds received
+(predictions pre-registered in
+[exp-004t-predictions.md](exp-004t-predictions.md) before the calibration
+harness existed). Same corpora, same seeds, N=3 per cell:
+
+| sources | E wakes (mean, S params) | At wakes (mean, 1 param) | ratio |
+|---|---|---|---|
+| 2 | 2.7 (2–3 knobs) | 4.0 | 1.48× |
+| 4 | 5.0 (5 knobs) | 5.7 | 1.13× |
+| 8 | 8.7 (9 knobs) | 10.0 | 1.15× |
+| 12 | 13.0 (13 knobs) | **13.3** | **1.03×** |
+
+Recall 1.0 everywhere, H4 newcomer caught everywhere, false ACTs 0 — the
+raised floor cost no detection, because post-#11 alarm-lane winners bypass
+the floor by design (this addendum is only safe BECAUSE of EXP-003's fix;
+the experiments compound).
+
+All four pre-registered predictions held: P1 (no detection cost), P2
+(within 1.5× of E everywhere — 1.48× at S=2 sits just inside the band and
+is reported as the near-miss it is), P3 (At never *beats* E — tuned
+per-source gates remain the theoretical cost floor on this corpus), P4
+(1 parameter vs S parameters, by construction).
+
+Note the direction of the ratio: parity IMPROVES with scale (1.48× → 1.03×).
+One self-calibrated knob buys near-exact cost parity with S hand-tuned
+thresholds precisely where maintaining S thresholds hurts most.
+
+**Revised honest summary for the whole experiment:** on the gates' best-case
+corpus, tuned per-source gates and the calibrated workspace are
+detection-identical and cost-identical at scale; the difference that
+remains is operational — 1 knob vs S knobs — plus the untested regimes
+(drift, whispers, cross-source correlation) reserved for EXP-004b. The
+as-measured loss above stands for the untuned default, and shipping a
+better default floor derived from this calibration procedure is now an
+open product question (issue to follow), not an experiment question.

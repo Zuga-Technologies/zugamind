@@ -1,0 +1,14 @@
+{
+  "state": "ALERT",
+  "since": "2026-07-13T10:21:46.112265",
+  "last_cycle": null,
+  "cycles_today": 0,
+  "last_transition": {
+    "from": "FOCUSED",
+    "to": "ALERT",
+    "reason": "winner urgency 1.00 >= 0.7",
+    "at": "2026-07-13T10:21:46.112265"
+  },
+  "focus_topic": null,
+  "last_wake": "2026-07-13T14:22:40.198815+00:00"
+}

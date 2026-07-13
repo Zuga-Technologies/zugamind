@@ -1,14 +1,14 @@
 {
   "state": "FOCUSED",
-  "since": "2026-07-13T09:28:42.173597",
+  "since": "2026-07-13T10:03:34.522272",
   "last_cycle": null,
   "cycles_today": 0,
   "last_transition": {
     "from": "ALERT",
     "to": "FOCUSED",
     "reason": "winner from infrastructure",
-    "at": "2026-07-13T09:28:42.173597"
+    "at": "2026-07-13T10:03:34.522272"
   },
   "focus_topic": null,
-  "last_wake": "2026-07-13T13:28:41.655740+00:00"
+  "last_wake": "2026-07-13T14:03:34.540781+00:00"
 }
