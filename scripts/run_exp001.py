@@ -371,6 +371,13 @@ def run_once_for_condition(condition: str, run_idx: int, seed: int, out_dir: Pat
             cfg["wake_min_salience"] = 0.35
         command_actuator.load_harness_configs = (  # experiment config wins
             lambda *a, _cfg=cfg, **kw: [_cfg])
+        # Isolate quiet hours too: load_quiet_hours() reads the DEFAULT
+        # data-dir config file, which a co-located live deployment may own.
+        # Caught 2026-07-12: a dogfood daemon's harness.json (quiet 23:00-
+        # 08:00) silently deferred every simulated wake whose sim-time fell
+        # in that window — contaminating 4 sweep runs. Simulated weeks have
+        # no operator sleep schedule.
+        command_actuator.load_quiet_hours = lambda *a, **kw: None
         records = run_condition_a(events, n_ticks, tick_hours, dry_run)
     else:
         cfg = harness_cfg or oracle_config()

@@ -1,5 +1,23 @@
 # EXP-002 — Results (cadence sweep, N=3 per cell, hermetic oracle)
 
+> **CORRECTION (2026-07-12, ~3h after first publication).** Four of the 36
+> runs (fast/A-run2 and all three very-fast/A runs) were contaminated by a
+> co-located live deployment: a dogfood daemon's `harness.json` on the same
+> machine carried operator quiet hours (23:00–08:00), and `load_quiet_hours()`
+> reads that shared default config — so simulated wakes whose sim-clock fell
+> in that window were silently deferred. The contaminated runs UNDER-counted
+> A's wakes (originally published: fast 23/26/21, very-fast 16/22/17) and
+> inflated A's apparent TTD (deferral lags of 16–32 fine-grid ticks). All six
+> fast+very-fast A runs were re-measured after isolating quiet hours in the
+> experiment runner (the fix is in `run_exp001.py`/`run_exp003.py`); the
+> corrected sweep is verified deferral-free across all 36 journals. Corrected
+> numbers appear throughout below; the headline gap moved from ~654 to ~647
+> (still ~35×), P2's verdict improved (the below-band readings were
+> artifacts), and the original post-hoc note 2 ("unexplained wake-count dip,
+> flagged as a threat until understood") is RESOLVED — it was this
+> contamination, exactly as the flag suspected. Raw contaminated runs remain
+> in git history (2bbd6f7) for the record.
+
 **Run:** 2026-07-12, BugaPC. 36 measured runs (3 conditions × 4 cadences × N=3),
 zero failed cells. Instrument: the hermetic oracle harness (deterministic
 briefing-reader) with the wake-decision gate on the local tier — NOT the
@@ -27,8 +45,8 @@ Raw per-run JSONL, engine journals, and per-cadence summaries: `exp002-sweep/`.
 |---|---|---|---|---|---|
 | slow (24h) | 7 | 7, 7, 7 † | 7 | 7 | 0 |
 | baseline (4h) | 42 | 24, 24, 22 | 42 | 42 | 18.7 |
-| fast (1h) | 168 | 23, 26, 21 | 168 | 168 | 144.7 |
-| very-fast (15min) | 672 | 16, 22, 17 | 672 | 672 | **653.7** |
+| fast (1h) | 168 | 23, 26, 25 | 168 | 168 | 143.3 |
+| very-fast (15min) | 672 | 23, 26, 25 | 672 | 672 | **647.3** |
 
 † Grid-clamped: A cannot wake more than once per tick, so at 7 ticks its
 ceiling is 7. The clamp binds only when the grid is coarser than the event
@@ -36,13 +54,13 @@ stream — see P2 scoring.
 
 Recall: 1.0 in 35 of 36 runs (one slow/A run at 0.9 — see post-hoc note 3).
 Precision 1.0 everywhere. Cron TTD: 0 ticks in every cell by construction;
-A TTD (hours, mean): 0.93 at baseline, 0.27 at fast, 1.47 at very-fast,
-max observed 12h.
+A TTD (hours, mean): 0.93 at baseline, 0.00 at fast, 0.00 at very-fast,
+max observed 12h (baseline only — see post-hoc note 2).
 
 **The one-sentence result: cron's cost is a straight line through the polling
-rate (7 → 42 → 168 → 672 calls/week, exactly), ZugaMind's is flat (~16–26
+rate (7 → 42 → 168 → 672 calls/week, exactly), ZugaMind's is flat (~22–26
 calls/week at every cadence at or below 4h), and at 15-minute polling the gap
-is ~654 model calls per week — 35× the gap measured at EXP-001's cadence —
+is ~647 model calls per week — 35× the gap measured at EXP-001's cadence —
 for zero measurable detection benefit on this corpus.**
 
 ## Predictions scored
@@ -50,9 +68,9 @@ for zero measurable detection benefit on this corpus.**
 | # | prediction | verdict |
 |---|---|---|
 | P1 | cron invocations == tick count exactly at every cadence | **HELD** — 7/42/168/672 exactly, all runs, both conditions. |
-| P2 | A stays within 18–30 wakes across all four cadences, no monotonic trend | **HALF-FAILED as written** — the *claim under test* (cadence-independence) held emphatically: A never scales with the grid. But the pre-registered band was wrong on both edges: slow runs sit at 7 (grid-clamped — the band ignored the tick ceiling) and two very-fast runs came in at 16–17, *below* the band. No monotonic increase; if anything a mild decrease at very-fast (post-hoc note 2). |
-| P3 | absolute gap at very-fast ≥ 180 (≥10× baseline's 18) | **HELD** — 653.7, i.e. 35× baseline. The prediction was conservative by 3.5×. |
-| P4 | at 15min cadence cron's TTD beats A's baseline TTD — the prediction most likely to go against the architecture | **HELD (against us, as designed)** — cron detects at tick 0 in every cell; A pays a real latency cost (mean ~0.3–1.5h, max 12h). The event-driven design is cheaper, not faster. Granularity caveat: TTD is measured at tick resolution, so sub-tick latency is invisible for both conditions. |
+| P2 | A stays within 18–30 wakes across all four cadences, no monotonic trend | **HALF-FAILED as written (corrected)** — the *claim under test* (cadence-independence) held emphatically: A sits at 22–26 wakes at 4h, 1h, AND 15min grids, no trend. The band fails only at 24h, where the grid clamp (max one wake/tick, 7 ticks) binds — a ceiling the pre-registered band simply didn't anticipate. (First publication also showed 16–17 at very-fast, below-band; those were quiet-hours contamination — see correction note.) |
+| P3 | absolute gap at very-fast ≥ 180 (≥10× baseline's 18) | **HELD** — 647.3, i.e. 35× baseline. The prediction was conservative by 3.5×. |
+| P4 | at 15min cadence cron's TTD beats A's baseline TTD — the prediction most likely to go against the architecture | **HELD as written, with a corrected nuance in A's favor** — cron detects at tick 0 in every cell, and A's *baseline* TTD (0.93h mean, 12h max) is what the prediction compared against, so it holds. But corrected data shows A's TTD at fast and very-fast grids is ALSO 0.00h: with a finer perception grid, the alarm lane fires the wake in the onset tick. A's latency cost is a property of its tick granularity under contention, not a fixed tax. (First publication showed 1.47h at very-fast; that was deferral lag from the contamination.) |
 | P5 | diminishing returns at very-fast vs fast (corpus resolution ceiling) | **UNTESTABLE — floor effect** — cron's TTD was already 0 at *every* cadence including 24h, so there was no headroom in which returns could diminish. The corpus-resolution concern was real but showed up more starkly than predicted: on this corpus, polling 16× faster bought cron no measurable detection improvement at all. |
 
 ## Post-hoc observations (NOT pre-registered — flagged as such)
@@ -62,14 +80,16 @@ for zero measurable detection benefit on this corpus.**
    responsiveness is ~654p and the annualized saving ~34,000p. EXP-001's
    post-hoc note applies unchanged: per-call cost is dominated by the fixed
    CLI overhead (~10–15k system-prompt tokens), so p is not small.
-2. **A's mild wake-count dip at very-fast (16–22 vs 21–26 at fast) was not
-   predicted and is not yet explained.** Candidates: more empty perception
-   cycles changing the soft-modulation history, or salience-floor
-   interactions when native events spread across a finer grid. It moves in
-   the architecture's favor, which is exactly why we flag it rather than
-   celebrate it — an unexplained favorable result is a threat to validity
-   until it's mechanistically understood. Open item for EXP-002b or a code
-   walkthrough.
+2. **RESOLVED BY CORRECTION — the original "unexplained wake-count dip at
+   very-fast" was contamination, not architecture.** First publication
+   flagged A's 16–22 wakes at very-fast as an unexplained favorable result
+   and a threat to validity until mechanistically understood. The mechanism
+   was found within hours: quiet-hours deferrals leaking from a co-located
+   live deployment's config (see correction note). Corrected wake counts
+   (23–26) show no dip at all. The flag-don't-celebrate discipline worked
+   exactly as intended. The same contamination produced the originally
+   reported 12h-class TTD lags at fine grids; corrected fine-grid TTD is
+   0.00h, leaving the 12h max TTD a baseline-cadence contention effect only.
 3. **The single 0.9-recall run (slow/A) is starvation-shaped.** At 24h ticks,
    six native ticks of events compete in each cycle and one canary never won
    a wake or a digest slot. One run at N=3 proves nothing, but it rhymes with

@@ -17,249 +17,6 @@
       0,
       0
     ],
-    "total_invocations": 23,
-    "per_canary": {
-      "ZM-EXP001-C01": {
-        "planted_tick": 76,
-        "detected_tick": 76
-      },
-      "ZM-EXP001-C02": {
-        "planted_tick": 72,
-        "detected_tick": 72
-      },
-      "ZM-EXP001-C03": {
-        "planted_tick": 140,
-        "detected_tick": 140
-      },
-      "ZM-EXP001-C04": {
-        "planted_tick": 20,
-        "detected_tick": 20
-      },
-      "ZM-EXP001-C05": {
-        "planted_tick": 124,
-        "detected_tick": 124
-      },
-      "ZM-EXP001-C06": {
-        "planted_tick": 64,
-        "detected_tick": 64
-      },
-      "ZM-EXP001-C07": {
-        "planted_tick": 84,
-        "detected_tick": 84
-      },
-      "ZM-EXP001-C08": {
-        "planted_tick": 60,
-        "detected_tick": 60
-      },
-      "ZM-EXP001-C09": {
-        "planted_tick": 12,
-        "detected_tick": 12
-      },
-      "ZM-EXP001-C10": {
-        "planted_tick": 68,
-        "detected_tick": 68
-      }
-    },
-    "time_to_detection_hours": [
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0
-    ],
-    "condition": "A",
-    "run": 0,
-    "seed": 20260713,
-    "dry_run": false,
-    "ticks": 168,
-    "tick_hours": 1.0,
-    "raw": "E:\\Programming\\zugamind-review\\exp002-sweep\\fast\\A-run0.jsonl"
-  },
-  {
-    "planted": 10,
-    "detected": 10,
-    "recall": 1.0,
-    "precision": 1.0,
-    "false_acts": 0,
-    "time_to_detection_ticks": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
-    "total_invocations": 26,
-    "per_canary": {
-      "ZM-EXP001-C01": {
-        "planted_tick": 20,
-        "detected_tick": 20
-      },
-      "ZM-EXP001-C02": {
-        "planted_tick": 24,
-        "detected_tick": 24
-      },
-      "ZM-EXP001-C03": {
-        "planted_tick": 76,
-        "detected_tick": 76
-      },
-      "ZM-EXP001-C04": {
-        "planted_tick": 16,
-        "detected_tick": 16
-      },
-      "ZM-EXP001-C05": {
-        "planted_tick": 96,
-        "detected_tick": 96
-      },
-      "ZM-EXP001-C06": {
-        "planted_tick": 48,
-        "detected_tick": 48
-      },
-      "ZM-EXP001-C07": {
-        "planted_tick": 120,
-        "detected_tick": 120
-      },
-      "ZM-EXP001-C08": {
-        "planted_tick": 8,
-        "detected_tick": 8
-      },
-      "ZM-EXP001-C09": {
-        "planted_tick": 124,
-        "detected_tick": 124
-      },
-      "ZM-EXP001-C10": {
-        "planted_tick": 108,
-        "detected_tick": 108
-      }
-    },
-    "time_to_detection_hours": [
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0
-    ],
-    "condition": "A",
-    "run": 1,
-    "seed": 20260714,
-    "dry_run": false,
-    "ticks": 168,
-    "tick_hours": 1.0,
-    "raw": "E:\\Programming\\zugamind-review\\exp002-sweep\\fast\\A-run1.jsonl"
-  },
-  {
-    "planted": 10,
-    "detected": 10,
-    "recall": 1.0,
-    "precision": 1.0,
-    "false_acts": 0,
-    "time_to_detection_ticks": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      8
-    ],
-    "total_invocations": 21,
-    "per_canary": {
-      "ZM-EXP001-C01": {
-        "planted_tick": 32,
-        "detected_tick": 32
-      },
-      "ZM-EXP001-C02": {
-        "planted_tick": 60,
-        "detected_tick": 60
-      },
-      "ZM-EXP001-C03": {
-        "planted_tick": 20,
-        "detected_tick": 20
-      },
-      "ZM-EXP001-C04": {
-        "planted_tick": 52,
-        "detected_tick": 52
-      },
-      "ZM-EXP001-C05": {
-        "planted_tick": 48,
-        "detected_tick": 48
-      },
-      "ZM-EXP001-C06": {
-        "planted_tick": 56,
-        "detected_tick": 56
-      },
-      "ZM-EXP001-C07": {
-        "planted_tick": 88,
-        "detected_tick": 96
-      },
-      "ZM-EXP001-C08": {
-        "planted_tick": 152,
-        "detected_tick": 152
-      },
-      "ZM-EXP001-C09": {
-        "planted_tick": 148,
-        "detected_tick": 148
-      },
-      "ZM-EXP001-C10": {
-        "planted_tick": 8,
-        "detected_tick": 8
-      }
-    },
-    "time_to_detection_hours": [
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      0.0,
-      8.0
-    ],
-    "condition": "A",
-    "run": 2,
-    "seed": 20260715,
-    "dry_run": false,
-    "ticks": 168,
-    "tick_hours": 1.0,
-    "raw": "E:\\Programming\\zugamind-review\\exp002-sweep\\fast\\A-run2.jsonl"
-  },
-  {
-    "planted": 10,
-    "detected": 10,
-    "recall": 1.0,
-    "precision": 1.0,
-    "false_acts": 0,
-    "time_to_detection_ticks": [
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0
-    ],
     "total_invocations": 168,
     "per_canary": {
       "ZM-EXP001-C01": {
@@ -727,5 +484,248 @@
     "ticks": 168,
     "tick_hours": 1.0,
     "raw": "E:\\Programming\\zugamind-review\\exp002-sweep\\fast\\C-run2.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 23,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 76,
+        "detected_tick": 76
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 72,
+        "detected_tick": 72
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 140,
+        "detected_tick": 140
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 20,
+        "detected_tick": 20
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 124,
+        "detected_tick": 124
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 64,
+        "detected_tick": 64
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 84,
+        "detected_tick": 84
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 60,
+        "detected_tick": 60
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 68,
+        "detected_tick": 68
+      }
+    },
+    "time_to_detection_hours": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "condition": "A",
+    "run": 0,
+    "seed": 20260713,
+    "dry_run": false,
+    "ticks": 168,
+    "tick_hours": 1.0,
+    "raw": "E:\\Programming\\zugamind-review\\exp002-sweep\\fast\\A-run0.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 26,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 20,
+        "detected_tick": 20
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 24,
+        "detected_tick": 24
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 76,
+        "detected_tick": 76
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 96,
+        "detected_tick": 96
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 48,
+        "detected_tick": 48
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 120,
+        "detected_tick": 120
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 124,
+        "detected_tick": 124
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 108,
+        "detected_tick": 108
+      }
+    },
+    "time_to_detection_hours": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "condition": "A",
+    "run": 1,
+    "seed": 20260714,
+    "dry_run": false,
+    "ticks": 168,
+    "tick_hours": 1.0,
+    "raw": "E:\\Programming\\zugamind-review\\exp002-sweep\\fast\\A-run1.jsonl"
+  },
+  {
+    "planted": 10,
+    "detected": 10,
+    "recall": 1.0,
+    "precision": 1.0,
+    "false_acts": 0,
+    "time_to_detection_ticks": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "total_invocations": 25,
+    "per_canary": {
+      "ZM-EXP001-C01": {
+        "planted_tick": 32,
+        "detected_tick": 32
+      },
+      "ZM-EXP001-C02": {
+        "planted_tick": 60,
+        "detected_tick": 60
+      },
+      "ZM-EXP001-C03": {
+        "planted_tick": 20,
+        "detected_tick": 20
+      },
+      "ZM-EXP001-C04": {
+        "planted_tick": 52,
+        "detected_tick": 52
+      },
+      "ZM-EXP001-C05": {
+        "planted_tick": 48,
+        "detected_tick": 48
+      },
+      "ZM-EXP001-C06": {
+        "planted_tick": 56,
+        "detected_tick": 56
+      },
+      "ZM-EXP001-C07": {
+        "planted_tick": 88,
+        "detected_tick": 88
+      },
+      "ZM-EXP001-C08": {
+        "planted_tick": 152,
+        "detected_tick": 152
+      },
+      "ZM-EXP001-C09": {
+        "planted_tick": 148,
+        "detected_tick": 148
+      },
+      "ZM-EXP001-C10": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      }
+    },
+    "time_to_detection_hours": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "condition": "A",
+    "run": 2,
+    "seed": 20260715,
+    "dry_run": false,
+    "ticks": 168,
+    "tick_hours": 1.0,
+    "raw": "E:\\Programming\\zugamind-review\\exp002-sweep\\fast\\A-run2.jsonl"
   }
 ]
