@@ -28,7 +28,14 @@ def test_paid_tier_allowed_when_sufficient_remaining():
     assert budget.can_spend({"remaining": 1.0}, "sonnet") is True
 
 
-def test_record_spend_deducts_and_bumps_call_counter():
+def test_record_spend_deducts_and_bumps_call_counter(tmp_path, monkeypatch):
+    # A paid-tier record_spend() writes to disk (see save_budget) — this was
+    # unpatched before the conftest.py autouse isolation fixture existed,
+    # which meant every pytest run in this checkout overwrote the real
+    # deployment's live budget.json with this test's synthetic single-call
+    # ledger. Patched explicitly here too, belt-and-suspenders, matching the
+    # other budget tests in this file.
+    monkeypatch.setattr(budget, "BUDGET_FILE", tmp_path / "budget.json")
     b = {"spent": 0.0, "remaining": config.monthly_cap(),
          "calls": {"local": 0, "haiku": 0, "sonnet": 0, "opus": 0}, "paid_spent": 0.0}
     updated = budget.record_spend(b, "haiku")
@@ -38,6 +45,8 @@ def test_record_spend_deducts_and_bumps_call_counter():
 
 
 def test_record_spend_local_tier_costs_nothing():
+    # Local tier never writes to disk (see record_spend's docstring) — no
+    # BUDGET_FILE patch needed, this one was never the contamination path.
     b = {"spent": 0.0, "remaining": config.monthly_cap(),
          "calls": {"local": 0, "haiku": 0, "sonnet": 0, "opus": 0}, "paid_spent": 0.0}
     updated = budget.record_spend(b, "local")

@@ -16,10 +16,13 @@ feeds them synthetic scanner triggers. Zero pip dependencies (stdlib only).
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from foundation.config import ENGINE_DIR
 
 from .workspace import ThoughtType, SalienceBid, WorkspaceContent, WorkspaceModule
 
@@ -397,17 +400,45 @@ class PriorityGoalsModule(WorkspaceModule):
         ("value", "Delivering value to the operator within budget"),
     ]
 
+    # Persisted so a process restart between wakes doesn't wipe every goal's
+    # staleness clock back to "never touched" — a bug that pinned hours_stale
+    # at the 9999.0 sentinel forever and fired a permanent 0.45-salience
+    # noise wake every idle cycle (diagnosed in zugamind-daemon/wake-notes.md
+    # 2026-07-12/13, three separate wakes, never fixed until now).
+    STATE_FILE: Path = ENGINE_DIR / "priority_goals_state.json"
+
     def __init__(self):
         super().__init__()
         self._goal_last_touched: Dict[str, Optional[datetime]] = {
             g[0]: None for g in self.GOALS
         }
+        self._load_state()
+
+    def _load_state(self) -> None:
+        try:
+            if not self.STATE_FILE.exists():
+                return
+            raw = json.loads(self.STATE_FILE.read_text(encoding="utf-8"))
+            for key, iso in raw.items():
+                if key in self._goal_last_touched and iso:
+                    self._goal_last_touched[key] = datetime.fromisoformat(iso)
+        except Exception as e:  # noqa: BLE001 — a corrupt state file must not crash the caller
+            logger.warning("priority_goals state load failed (non-fatal): %s", e)
+
+    def _save_state(self) -> None:
+        try:
+            self.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            raw = {k: (v.isoformat() if v else None) for k, v in self._goal_last_touched.items()}
+            self.STATE_FILE.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        except Exception as e:  # noqa: BLE001 — persistence is best-effort
+            logger.warning("priority_goals state save failed (non-fatal): %s", e)
 
     def set_goal_state(self, goal_last_touched: Dict[str, Optional[datetime]]):
         """Called by the host loop with per-goal recency (e.g. from an event log)."""
         for k, v in goal_last_touched.items():
             if k in self._goal_last_touched:
                 self._goal_last_touched[k] = v
+        self._save_state()
 
     def generate_bid(self, context: Dict[str, Any]) -> Optional[SalienceBid]:
         now = datetime.now()
@@ -450,12 +481,15 @@ class PriorityGoalsModule(WorkspaceModule):
         )
 
     def on_broadcast(self, content: WorkspaceContent):
-        """Reset this goal's staleness clock when it wins."""
+        """Reset this goal's staleness clock when it wins. Persisted
+        immediately — see STATE_FILE — so it survives a process restart
+        before the next wake."""
         try:
             if content and content.bid and content.bid.source_module == self.name:
                 key = content.bid.context.get("goal_key")
                 if key in self._goal_last_touched:
                     self._goal_last_touched[key] = datetime.now()
+                    self._save_state()
         except Exception as e:
             logger.debug("priority_goals on_broadcast failed: %s", e)
 
