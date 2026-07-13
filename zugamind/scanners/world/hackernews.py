@@ -59,6 +59,17 @@ _KEEP_RE = re.compile(
 )
 _MAX_STORIES = 30
 
+# Brand watch: mentions of YOUR project outrank ambient industry news.
+# ZUGAMIND_BRAND_TERMS is a comma-separated term list (e.g. "zugamind,zuga");
+# unset = feature off. A title hit bypasses the topical keyword filter — a
+# brand mention is wake-worthy even when it shares no words with the AI/ML
+# vocabulary — and emits at high salience (though below the alarm lane:
+# someone discussing your project is urgent-ish, not an outage).
+_BRAND_TERMS = [t.strip() for t in
+                os.environ.get("ZUGAMIND_BRAND_TERMS", "").split(",") if t.strip()]
+_BRAND_RE = (re.compile("|".join(re.escape(t) for t in _BRAND_TERMS), re.IGNORECASE)
+             if _BRAND_TERMS else None)
+
 
 def _fetch_json(url: str) -> Any:
     try:
@@ -147,9 +158,16 @@ def scan_hackernews() -> list[dict]:
         score = item.get("score", 0) or 0
         if not title:
             continue
-        if not _KEEP_RE.search(title):
+        brand_hit = bool(_BRAND_RE and _BRAND_RE.search(title))
+        if not brand_hit and not _KEEP_RE.search(title):
             continue
-        out.append({
+        # Engagement velocity (points/hour) is free in the API — a story at
+        # 100pts/hour deserves to out-bid one that took a day to get there.
+        # 0.3 floor = the old flat prior; cap 0.65 keeps ambient news from
+        # ever reaching the alarm lane on velocity alone.
+        age_h = max((now - float(item.get("time") or now)) / 3600.0, 0.5)
+        urgency = round(min(0.65, 0.3 + (score / age_h) / 400.0), 3)
+        trig = {
             "type": "hackernews_story",
             "detail": f"HN [{score}pts]: {title[:140]}",
             "url": url,
@@ -157,8 +175,14 @@ def scan_hackernews() -> list[dict]:
             "score": score,
             "novelty": 0.55,
             "relevance": 0.5,
-            "urgency": 0.3,
-        })
+            "urgency": urgency,
+        }
+        if brand_hit:
+            trig["detail"] = f"HN BRAND MENTION [{score}pts]: {title[:140]}"
+            trig["brand_mention"] = True
+            trig.update({"novelty": 0.9, "relevance": 0.9,
+                         "urgency": max(0.75, urgency)})
+        out.append(trig)
     _prune_items(cache, now)
     _save_cache(cache)
     return out

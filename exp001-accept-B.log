@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "E:\Programming\zugamind-review\scripts\run_exp001.py", line 415, in <module>
+    sys.exit(main())
+             ~~~~^^
+  File "E:\Programming\zugamind-review\scripts\run_exp001.py", line 396, in main
+    m = run_once_for_condition(cond, k, args.seed + k, args.out,
+                               dry_run=dry,
+                               tick_hours=args.tick_hours,
+                               harness_cfg=harness_cfg)
+  File "E:\Programming\zugamind-review\scripts\run_exp001.py", line 348, in run_once_for_condition
+    records = run_condition_bc(events, n_ticks, tick_hours, dry_run,
+                               ask=(condition == "C"), harness_cfg=cfg)
+  File "E:\Programming\zugamind-review\scripts\run_exp001.py", line 222, in run_condition_bc
+    result = command_actuator.invoke_harness(harness_cfg, prompt, dry_run=dry_run)
+  File "E:\Programming\zugamind-review\zugamind\act\command_actuator.py", line 239, in invoke_harness
+    name = config.get("name", "unknown")
+           ^^^^^^^^^^
+AttributeError: 'list' object has no attribute 'get'

@@ -1,0 +1,8 @@
+A run0: recall=1.0 precision=1.0 wakes=23 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run1: recall=1.0 precision=1.0 wakes=26 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run2: recall=1.0 precision=1.0 wakes=25 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\fast\summary.json
+A run0: recall=1.0 precision=1.0 wakes=23 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run1: recall=1.0 precision=1.0 wakes=26 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run2: recall=1.0 precision=1.0 wakes=25 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\very-fast\summary.json

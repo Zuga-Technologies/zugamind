@@ -1,0 +1,48 @@
+A run0: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run1: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run2: recall=0.9 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\slow\summary.json
+B run0: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run1: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run2: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\slow\summary.json
+C run0: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run1: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run2: recall=1.0 precision=1.0 wakes=7 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\slow\summary.json
+A run0: recall=1.0 precision=1.0 wakes=24 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run1: recall=1.0 precision=1.0 wakes=24 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+A run2: recall=1.0 precision=1.0 wakes=22 ttd=[0, 0, 0, 0, 0, 0, 0, 1, 2, 3]
+summary -> E:\Programming\zugamind-review\exp002-sweep\baseline\summary.json
+B run0: recall=1.0 precision=1.0 wakes=42 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run1: recall=1.0 precision=1.0 wakes=42 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run2: recall=1.0 precision=1.0 wakes=42 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\baseline\summary.json
+C run0: recall=1.0 precision=1.0 wakes=42 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run1: recall=1.0 precision=1.0 wakes=42 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run2: recall=1.0 precision=1.0 wakes=42 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\baseline\summary.json
+A run0: recall=1.0 precision=1.0 wakes=23 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run1: recall=1.0 precision=1.0 wakes=26 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+A run2: recall=1.0 precision=1.0 wakes=21 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 8]
+summary -> E:\Programming\zugamind-review\exp002-sweep\fast\summary.json
+B run0: recall=1.0 precision=1.0 wakes=168 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run1: recall=1.0 precision=1.0 wakes=168 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run2: recall=1.0 precision=1.0 wakes=168 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\fast\summary.json
+C run0: recall=1.0 precision=1.0 wakes=168 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run1: recall=1.0 precision=1.0 wakes=168 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run2: recall=1.0 precision=1.0 wakes=168 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\fast\summary.json
+A run0: recall=1.0 precision=1.0 wakes=16 ttd=[0, 0, 0, 0, 0, 0, 16, 16, 16, 32]
+A run1: recall=1.0 precision=1.0 wakes=22 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 16, 32]
+A run2: recall=1.0 precision=1.0 wakes=17 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 16, 32]
+summary -> E:\Programming\zugamind-review\exp002-sweep\very-fast\summary.json
+B run0: recall=1.0 precision=1.0 wakes=672 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run1: recall=1.0 precision=1.0 wakes=672 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+B run2: recall=1.0 precision=1.0 wakes=672 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\very-fast\summary.json
+C run0: recall=1.0 precision=1.0 wakes=672 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run1: recall=1.0 precision=1.0 wakes=672 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+C run2: recall=1.0 precision=1.0 wakes=672 ttd=[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+summary -> E:\Programming\zugamind-review\exp002-sweep\very-fast\summary.json

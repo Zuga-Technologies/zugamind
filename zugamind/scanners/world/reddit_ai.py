@@ -93,16 +93,28 @@ def scan_reddit_ai() -> list[dict]:
             except OSError as e:  # persistence best-effort — never break the cycle
                 logger.debug("reddit_ai cache save failed (non-fatal): %s", e)
 
+    # Brand watch (same contract as the HN scanner): ZUGAMIND_BRAND_TERMS
+    # comma-list, unset = off. A brand mention in a title outranks ambient
+    # subreddit chatter but stays below the alarm lane.
+    brand_terms = [t.strip() for t in
+                   os.environ.get("ZUGAMIND_BRAND_TERMS", "").split(",") if t.strip()]
+    brand_re = (re.compile("|".join(re.escape(t) for t in brand_terms), re.IGNORECASE)
+                if brand_terms else None)
+
     triggers: list[dict] = []
     for p in posts[:6]:  # cap at 6 across subs
         slug = (p.get("id") or p.get("link") or "")[-40:]
+        brand_hit = bool(brand_re and brand_re.search(p.get("title", "") or ""))
         triggers.append(
             {
                 "type": "reddit_ai_post",
-                "detail": f"r/{p.get('sub','?')}: {p.get('title','?')}",
-                "novelty": 0.75,
-                "relevance": 0.55,
-                "urgency": 0.25,
+                "detail": (f"r/{p.get('sub','?')} BRAND MENTION: {p.get('title','?')}"
+                           if brand_hit else
+                           f"r/{p.get('sub','?')}: {p.get('title','?')}"),
+                "novelty": 0.9 if brand_hit else 0.75,
+                "relevance": 0.9 if brand_hit else 0.55,
+                "urgency": 0.75 if brand_hit else 0.25,
+                **({"brand_mention": True} if brand_hit else {}),
                 "post_slug": slug,
                 "post_url": p.get("link", ""),
                 "subreddit": p.get("sub", ""),
