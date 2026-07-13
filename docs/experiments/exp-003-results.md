@@ -78,12 +78,26 @@ detection at a fraction of the invocations — A needed 27% of D's wakes for
 identical buried-signal recall. The architecture's honest, evidenced claim
 after three experiments is **cheap completeness**, not superior perception.
 
-## Post-fix verification addendum
+## Post-fix verification addendum (2026-07-13, same night)
 
-*Pending — being run now with identical seeds (`exp003-tier1-postfix/`).*
-If the #11 fix holds, condition A should reach domreal 1.0 with buried 1.0
-unchanged — equal detection to D at ~27% of the wakes, i.e. strict
-dominance on this corpus. This section publishes either way.
+Condition A re-run ×5 on the #11 fix (c466008) with IDENTICAL seeds
+(20260711–15), raw runs in `exp003-tier1-postfix/`:
+
+| | A pre-fix | A post-fix | D (control) |
+|---|---|---|---|
+| buried-signal recall | 5/5 = 1.0 | **5/5 = 1.0** | 5/5 = 1.0 |
+| dominant source's own alert | 1/5 = 0.2 | **5/5 = 1.0** | 5/5 = 1.0 |
+| invocations/run (mean) | 10.8 | **10.8** (9–13) | 40.8 |
+| false ACTs | 0 | 0 | 0 |
+
+**Verified: domreal 0.2 → 1.0, buried unchanged, cost unchanged.** With the
+three-door defect closed, the full workspace matches the wake-on-everything
+control on every detection metric at 27% of its invocations — strict
+dominance on this corpus. The conclusion above stands with sharper edges:
+the attention layer's evidenced value is cost, and after #11 it no longer
+pays a correctness price for it. Timeline for the record: defect measured,
+mechanism traced, fix written, tests green, fix verified by re-run — all
+within ~4 hours, all in public.
 
 ## Threats to validity (beyond the design doc's list)
 
