@@ -126,7 +126,7 @@ def generate_question(
     # before any I/O is spent.
     if q["answer_source_hint"] == "code_search":
         try:
-            from cognition.workspace.answer_router import _extract_keywords
+            from examples.socratic_reflection.answer_router import _extract_keywords
             if not _extract_keywords(q["text"], k=1):
                 logger.info(
                     "[question_gen] dropped unanswerable code_search question "

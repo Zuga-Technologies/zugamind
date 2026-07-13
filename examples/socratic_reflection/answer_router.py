@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _VALID_SOURCES = ("code_search", "file_read", "none")
 _CONTENT_CAP = 20000
 
