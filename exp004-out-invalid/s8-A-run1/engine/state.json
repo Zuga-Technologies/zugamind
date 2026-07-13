@@ -1,0 +1,14 @@
+{
+  "state": "FOCUSED",
+  "since": "2026-07-13T04:17:23.293232",
+  "last_cycle": null,
+  "cycles_today": 0,
+  "last_transition": {
+    "from": "RESTING",
+    "to": "FOCUSED",
+    "reason": "winner from priority_goals",
+    "at": "2026-07-13T04:17:23.293232"
+  },
+  "focus_topic": null,
+  "last_wake": "2026-07-13T08:34:06.313731+00:00"
+}

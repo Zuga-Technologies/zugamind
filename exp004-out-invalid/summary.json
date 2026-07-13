@@ -1,0 +1,1130 @@
+[
+  {
+    "planted": 3,
+    "detected": 3,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 2,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 7,
+        "detected_tick": 7
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 23,
+        "detected_tick": 23
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 23,
+        "detected_tick": 23
+      }
+    },
+    "condition": "E",
+    "sources": 2,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 3,
+    "raw": "s2-E-run0.jsonl"
+  },
+  {
+    "planted": 3,
+    "detected": 3,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 3,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 32,
+        "detected_tick": 32
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 7,
+        "detected_tick": 7
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 24,
+        "detected_tick": 24
+      }
+    },
+    "condition": "E",
+    "sources": 2,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 2,
+    "raw": "s2-E-run1.jsonl"
+  },
+  {
+    "planted": 3,
+    "detected": 3,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 3,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 4,
+        "detected_tick": 4
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 35,
+        "detected_tick": 35
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 33,
+        "detected_tick": 33
+      }
+    },
+    "condition": "E",
+    "sources": 2,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 3,
+    "raw": "s2-E-run2.jsonl"
+  },
+  {
+    "planted": 5,
+    "detected": 5,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 5,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 7,
+        "detected_tick": 7
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 3,
+        "detected_tick": 3
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 33,
+        "detected_tick": 33
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 31,
+        "detected_tick": 31
+      }
+    },
+    "condition": "E",
+    "sources": 4,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 5,
+    "raw": "s4-E-run0.jsonl"
+  },
+  {
+    "planted": 5,
+    "detected": 5,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 5,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 35,
+        "detected_tick": 35
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 30,
+        "detected_tick": 30
+      }
+    },
+    "condition": "E",
+    "sources": 4,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 5,
+    "raw": "s4-E-run1.jsonl"
+  },
+  {
+    "planted": 5,
+    "detected": 5,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 5,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 6,
+        "detected_tick": 6
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 21,
+        "detected_tick": 21
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 26,
+        "detected_tick": 26
+      }
+    },
+    "condition": "E",
+    "sources": 4,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 5,
+    "raw": "s4-E-run2.jsonl"
+  },
+  {
+    "planted": 9,
+    "detected": 9,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 8,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 36,
+        "detected_tick": 36
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 35,
+        "detected_tick": 35
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 30,
+        "detected_tick": 30
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 25,
+        "detected_tick": 25
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 4,
+        "detected_tick": 4
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 13,
+        "detected_tick": 13
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 36,
+        "detected_tick": 36
+      }
+    },
+    "condition": "E",
+    "sources": 8,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 9,
+    "raw": "s8-E-run0.jsonl"
+  },
+  {
+    "planted": 9,
+    "detected": 9,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 9,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 11,
+        "detected_tick": 11
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 33,
+        "detected_tick": 33
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 34,
+        "detected_tick": 34
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 32,
+        "detected_tick": 32
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 3,
+        "detected_tick": 3
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 30,
+        "detected_tick": 30
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 26,
+        "detected_tick": 26
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 12,
+        "detected_tick": 12
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      }
+    },
+    "condition": "E",
+    "sources": 8,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 9,
+    "raw": "s8-E-run1.jsonl"
+  },
+  {
+    "planted": 9,
+    "detected": 9,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 9,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 10,
+        "detected_tick": 10
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 38,
+        "detected_tick": 38
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 30,
+        "detected_tick": 30
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 23,
+        "detected_tick": 23
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 6,
+        "detected_tick": 6
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 31,
+        "detected_tick": 31
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 7,
+        "detected_tick": 7
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 9,
+        "detected_tick": 9
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 36,
+        "detected_tick": 36
+      }
+    },
+    "condition": "E",
+    "sources": 8,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 9,
+    "raw": "s8-E-run2.jsonl"
+  },
+  {
+    "planted": 13,
+    "detected": 13,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 13,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 36,
+        "detected_tick": 36
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 2,
+        "detected_tick": 2
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 18,
+        "detected_tick": 18
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 4,
+        "detected_tick": 4
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 3,
+        "detected_tick": 3
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 15,
+        "detected_tick": 15
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 20,
+        "detected_tick": 20
+      },
+      "ZM-EXP004-C10": {
+        "planted_tick": 9,
+        "detected_tick": 9
+      },
+      "ZM-EXP004-C11": {
+        "planted_tick": 11,
+        "detected_tick": 11
+      },
+      "ZM-EXP004-C12": {
+        "planted_tick": 10,
+        "detected_tick": 10
+      },
+      "ZM-EXP004-C13": {
+        "planted_tick": 34,
+        "detected_tick": 34
+      }
+    },
+    "condition": "E",
+    "sources": 12,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 13,
+    "raw": "s12-E-run0.jsonl"
+  },
+  {
+    "planted": 13,
+    "detected": 13,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 13,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 14,
+        "detected_tick": 14
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 39,
+        "detected_tick": 39
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 11,
+        "detected_tick": 11
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 3,
+        "detected_tick": 3
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 22,
+        "detected_tick": 22
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 24,
+        "detected_tick": 24
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 9,
+        "detected_tick": 9
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 32,
+        "detected_tick": 32
+      },
+      "ZM-EXP004-C10": {
+        "planted_tick": 28,
+        "detected_tick": 28
+      },
+      "ZM-EXP004-C11": {
+        "planted_tick": 8,
+        "detected_tick": 8
+      },
+      "ZM-EXP004-C12": {
+        "planted_tick": 35,
+        "detected_tick": 35
+      },
+      "ZM-EXP004-C13": {
+        "planted_tick": 37,
+        "detected_tick": 37
+      }
+    },
+    "condition": "E",
+    "sources": 12,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 13,
+    "raw": "s12-E-run1.jsonl"
+  },
+  {
+    "planted": 13,
+    "detected": 13,
+    "recall": 1.0,
+    "h4_detected": true,
+    "false_acts": 0,
+    "total_invocations": 13,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 24,
+        "detected_tick": 24
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 7,
+        "detected_tick": 7
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 23,
+        "detected_tick": 23
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 39,
+        "detected_tick": 39
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 16,
+        "detected_tick": 16
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 14,
+        "detected_tick": 14
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 20,
+        "detected_tick": 20
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 4,
+        "detected_tick": 4
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 30,
+        "detected_tick": 30
+      },
+      "ZM-EXP004-C10": {
+        "planted_tick": 19,
+        "detected_tick": 19
+      },
+      "ZM-EXP004-C11": {
+        "planted_tick": 5,
+        "detected_tick": 5
+      },
+      "ZM-EXP004-C12": {
+        "planted_tick": 21,
+        "detected_tick": 21
+      },
+      "ZM-EXP004-C13": {
+        "planted_tick": 36,
+        "detected_tick": 36
+      }
+    },
+    "condition": "E",
+    "sources": 12,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 13,
+    "raw": "s12-E-run2.jsonl"
+  },
+  {
+    "planted": 3,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 12,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 7,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 23,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 23,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 2,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s2-A-run0.jsonl"
+  },
+  {
+    "planted": 3,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 18,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 32,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 7,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 24,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 2,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s2-A-run1.jsonl"
+  },
+  {
+    "planted": 3,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 12,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 4,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 35,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 33,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 2,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s2-A-run2.jsonl"
+  },
+  {
+    "planted": 5,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 20,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 5,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 7,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 3,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 33,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 31,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 4,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s4-A-run0.jsonl"
+  },
+  {
+    "planted": 5,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 18,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 2,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 16,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 35,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 18,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 30,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 4,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s4-A-run1.jsonl"
+  },
+  {
+    "planted": 5,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 24,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 37,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 6,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 2,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 21,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 26,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 4,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s4-A-run2.jsonl"
+  },
+  {
+    "planted": 9,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 29,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 36,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 35,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 30,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 25,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 4,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 8,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 15,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 13,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 36,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 8,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s8-A-run0.jsonl"
+  },
+  {
+    "planted": 9,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 29,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 11,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 33,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 34,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 32,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 3,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 30,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 26,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 12,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 37,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 8,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s8-A-run1.jsonl"
+  },
+  {
+    "planted": 9,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 31,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 10,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 38,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 30,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 23,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 6,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 31,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 7,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 9,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 36,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 8,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s8-A-run2.jsonl"
+  },
+  {
+    "planted": 13,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 41,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 36,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 16,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 2,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 18,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 5,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 4,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 3,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 15,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 20,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C10": {
+        "planted_tick": 9,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C11": {
+        "planted_tick": 11,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C12": {
+        "planted_tick": 10,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C13": {
+        "planted_tick": 34,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 12,
+    "run": 0,
+    "seed": 20260712,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s12-A-run0.jsonl"
+  },
+  {
+    "planted": 13,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 38,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 14,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 39,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 16,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 11,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 3,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 22,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 24,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 9,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 32,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C10": {
+        "planted_tick": 28,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C11": {
+        "planted_tick": 8,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C12": {
+        "planted_tick": 35,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C13": {
+        "planted_tick": 37,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 12,
+    "run": 1,
+    "seed": 20260713,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s12-A-run1.jsonl"
+  },
+  {
+    "planted": 13,
+    "detected": 0,
+    "recall": 0.0,
+    "h4_detected": false,
+    "false_acts": 0,
+    "total_invocations": 41,
+    "per_canary": {
+      "ZM-EXP004-C01": {
+        "planted_tick": 24,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C02": {
+        "planted_tick": 7,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C03": {
+        "planted_tick": 23,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C04": {
+        "planted_tick": 39,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C05": {
+        "planted_tick": 16,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C06": {
+        "planted_tick": 14,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C07": {
+        "planted_tick": 20,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C08": {
+        "planted_tick": 4,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C09": {
+        "planted_tick": 30,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C10": {
+        "planted_tick": 19,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C11": {
+        "planted_tick": 5,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C12": {
+        "planted_tick": 21,
+        "detected_tick": null
+      },
+      "ZM-EXP004-C13": {
+        "planted_tick": 36,
+        "detected_tick": null
+      }
+    },
+    "condition": "A",
+    "sources": 12,
+    "run": 2,
+    "seed": 20260714,
+    "dry_run": false,
+    "config_params": 0,
+    "raw": "s12-A-run2.jsonl"
+  }
+]

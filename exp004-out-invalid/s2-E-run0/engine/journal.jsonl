@@ -1,0 +1,2 @@
+{"ts": "2026-07-13T00:48:23.273916+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP004-C01\n", "stderr": ""}
+{"ts": "2026-07-13T00:48:24.641426+00:00", "kind": "harness_invocation", "ok": true, "harness": "oracle", "dry_run": false, "returncode": 0, "stdout": "ACT: ZM-EXP004-C02\nACT: ZM-EXP004-C03\n", "stderr": ""}

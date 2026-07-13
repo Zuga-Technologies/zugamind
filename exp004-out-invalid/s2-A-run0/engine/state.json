@@ -1,0 +1,14 @@
+{
+  "state": "FOCUSED",
+  "since": "2026-07-13T02:58:22.944825",
+  "last_cycle": null,
+  "cycles_today": 0,
+  "last_transition": {
+    "from": "RESTING",
+    "to": "FOCUSED",
+    "reason": "winner from infrastructure",
+    "at": "2026-07-13T02:58:22.944825"
+  },
+  "focus_topic": null,
+  "last_wake": "2026-07-13T07:05:38.127776+00:00"
+}

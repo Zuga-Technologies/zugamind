@@ -1,0 +1,12 @@
+s2-E-run0: recall=1.0 h4=True inv=2 false_acts=0 params=3
+s2-E-run1: recall=1.0 h4=True inv=3 false_acts=0 params=2
+s2-E-run2: recall=1.0 h4=True inv=3 false_acts=0 params=3
+s4-E-run0: recall=1.0 h4=True inv=5 false_acts=0 params=5
+s4-E-run1: recall=1.0 h4=True inv=5 false_acts=0 params=5
+s4-E-run2: recall=1.0 h4=True inv=5 false_acts=0 params=5
+s8-E-run0: recall=1.0 h4=True inv=8 false_acts=0 params=9
+s8-E-run1: recall=1.0 h4=True inv=9 false_acts=0 params=9
+s8-E-run2: recall=1.0 h4=True inv=9 false_acts=0 params=9
+s12-E-run0: recall=1.0 h4=True inv=13 false_acts=0 params=13
+s12-E-run1: recall=1.0 h4=True inv=13 false_acts=0 params=13
+s12-E-run2: recall=1.0 h4=True inv=13 false_acts=0 params=13
