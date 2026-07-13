@@ -4,11 +4,22 @@
 N=3), hermetic oracle instrument, wake-decision gate on the local tier
 (constant-pass, disclosed as in EXP-002). Condition A ran on post-#11 main
 (c466008) — the architecture as it ships today, including the alarm-lane fix
-EXP-003 forced. Predictions were committed before any harness code existed
-in [exp-004-predictions.md](exp-004-predictions.md) and are scored below
-unchanged. **The headline is a loss: our steelmanned rival ties the
-workspace on every detection metric and does it on roughly a third of the
-wakes.** Per the pre-registration, that publishes.
+EXP-003 forced. Predictions are scored below
+unchanged from [exp-004-predictions.md](exp-004-predictions.md). **The
+headline is a loss: our steelmanned rival ties the workspace on every
+detection metric and does it on roughly a third of the wakes.** Per the
+pre-registration, that publishes.
+
+**Pre-registration integrity disclosure:** the design and predictions
+documents were authored 2026-07-12, before any EXP-004 harness code — but
+their COMMIT was accidentally omitted from that evening's path-limited
+pushes and only landed after the data existed. The public git record
+therefore cannot prove EXP-004's predictions predate its results the way it
+proves it for EXP-001/002/003 and for the EXP-004t addendum (cdbb155,
+committed before its harness). We state this rather than backdate anything:
+treat EXP-004's prediction-vs-outcome scoring with correspondingly less
+weight, and note the failed predictions (P2 inverted, P3, P4 half) argue
+against post-hoc authorship better than any timestamp could.
 
 A first run set was invalidated by a corpus-builder bug (incident trigger
 types were unroutable, so condition A structurally could not perceive any
