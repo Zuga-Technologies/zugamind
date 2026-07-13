@@ -58,3 +58,14 @@ the canary token back. Run the same proof against your own setup:
   salience floor. Without a filter a harness wakes for **every** gated
   winner — including ambient ones — which is the heartbeat-spam failure
   mode this sidecar exists to avoid. Set one before running unattended.
+- `"wake_min_salience": "calibrate"` (a string, not a number) opts into a
+  **self-calibrating floor** instead of a fixed number — EXP-004t measured
+  that a floor learned from the live ambient wake stream (max observed
+  ambient winner salience + 0.05) reaches the cost of hand-tuning a
+  per-source gate, with zero detection loss (alarm-lane winners always
+  bypass the floor, calibrated or not). Until 20 ambient samples have been
+  observed it behaves exactly like `0.35` (today's old static default) —
+  never more permissive while still learning. See
+  `zugamind/act/floor_calibration.py`. State persists to
+  `<data_dir>/floor_calibration.json`; a `floor_calibrated` journal event
+  fires once, when the window fills.

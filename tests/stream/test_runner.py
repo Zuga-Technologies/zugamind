@@ -12,6 +12,7 @@ import json
 from datetime import datetime
 
 import act.command_actuator as command_actuator
+import act.floor_calibration as floor_calibration
 import continuity.journal as journal
 import foundation.config as config
 import foundation.state as state_mod
@@ -402,3 +403,25 @@ def test_integrity_skips_dry_run_and_failed_invocations(tmp_path, monkeypatch):
 
     assert scored["called"] is False  # no real invocation — nothing to score
     assert not any(e["kind"] == "work_claim" for e in journal.read_events())
+
+
+def test_dispatch_records_ambient_sample_for_calibrate_mode_harness(tmp_path, monkeypatch):
+    """Through-the-runner wiring check (issue #12) — the direct-dict
+    _harness_wants tests in test_wake_filter.py can't catch a broken call
+    site the way test_wake_filters_survive_the_config_loader catches a
+    broken loader."""
+    _patch_engine_dir(tmp_path, monkeypatch)
+    monkeypatch.setattr(floor_calibration, "STATE_FILE", tmp_path / "floor_calibration.json")
+    harness_config = {
+        "name": "calib-harness", "command": ["x", "{briefing_file}"],
+        "timeout_sec": 10, "max_per_hour": 4, "enabled": True,
+        "wake_min_salience": "calibrate",
+    }
+    monkeypatch.setattr(command_actuator, "load_harness_configs", lambda *a, **kw: [harness_config])
+
+    runner = StreamRunner(extra_scanners={"scan_toy_infra": _toy_infra_scanner}, dry_run=True,
+                          include_default_scanners=False)
+    runner.run_once()
+
+    state = json.loads(floor_calibration.STATE_FILE.read_text())
+    assert len(state["calib-harness"]["samples"]) == 1

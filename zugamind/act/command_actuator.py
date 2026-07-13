@@ -124,6 +124,9 @@ def load_harness_configs(path: Optional[Path] = None) -> List[Dict[str, Any]]:
         floor = entry.get("wake_min_salience")
         if isinstance(floor, (int, float)):
             cfg["wake_min_salience"] = float(floor)
+        elif floor == "calibrate":
+            # Opt-in self-calibrating floor (issue #12) — see act/floor_calibration.py.
+            cfg["wake_min_salience"] = "calibrate"
         configs.append(cfg)
     return configs
 

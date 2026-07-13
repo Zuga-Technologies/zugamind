@@ -81,6 +81,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from act import command_actuator
+from act import floor_calibration
 from cognition.workspace import Workspace, create_all_modules, route_triggers_to_modules
 from cognition.workspace.workspace_planner import WorkspacePlanner
 from continuity import journal
@@ -316,6 +317,12 @@ class StreamRunner:
         if (winner_dict.get("context") or {}).get("alarm_lane"):
             return True
         floor = hc.get("wake_min_salience")
+        if floor == "calibrate":
+            # Opt-in self-calibrating floor (issue #12) — resolves to the
+            # learned floor once calibrated, WARMUP_FLOOR (0.35, today's old
+            # static default) until then. Never more permissive than the
+            # shipped default while still learning. See act/floor_calibration.py.
+            floor = floor_calibration.resolve_floor(hc.get("name", ""))
         if isinstance(floor, (int, float)):
             salience = winner_dict.get("salience", 0.0)
             if not isinstance(salience, (int, float)) or salience < floor:
@@ -344,9 +351,18 @@ class StreamRunner:
             # which is the heartbeat-spam failure mode this sidecar exists to
             # avoid. Observed in rehearsal: 3 wakes in 3 cycles for idle
             # priority-goal winners.
+            pre_filter_configs = enabled_configs
             enabled_configs = [
                 hc for hc in enabled_configs if self._harness_wants(hc, winner_dict)
             ]
+
+            # Record this cycle's winner as an ambient calibration sample for
+            # any harness in "calibrate" mode — AFTER the filter decision
+            # above, so this winner's own salience can only affect the floor
+            # starting next cycle, never retroactively filter itself out.
+            for hc in pre_filter_configs:
+                floor_calibration.maybe_record_ambient_sample(hc, winner_dict)
+
             if not enabled_configs:
                 journal.append_event("wake_filtered", {
                     "winner_module": winner_dict.get("source_module"),

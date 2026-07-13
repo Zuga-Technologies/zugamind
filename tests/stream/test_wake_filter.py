@@ -6,6 +6,7 @@ direct-dict unit tests could not catch.
 """
 import json
 
+import act.floor_calibration as floor_calibration
 from act.command_actuator import load_harness_configs
 from stream.runner import StreamRunner
 
@@ -53,3 +54,43 @@ def test_wake_filters_survive_the_config_loader(tmp_path):
     assert cfg["wake_min_salience"] == 0.6
     assert not StreamRunner._harness_wants(cfg, _winner("priority_goals", 0.9))
     assert StreamRunner._harness_wants(cfg, _winner("repo_issues", 0.9))
+
+
+# --- "calibrate" mode (issue #12) --------------------------------------------
+
+def test_calibrate_string_survives_the_config_loader(tmp_path):
+    p = tmp_path / "harness.json"
+    p.write_text(json.dumps({"harnesses": [{
+        "name": "h", "command": ["echo", "{briefing_file}"],
+        "wake_min_salience": "calibrate",
+    }]}), encoding="utf-8")
+    (cfg,) = load_harness_configs(p)
+    assert cfg["wake_min_salience"] == "calibrate"
+
+
+def test_calibrate_mode_uses_warmup_floor_before_calibration(tmp_path, monkeypatch):
+    monkeypatch.setattr(floor_calibration, "STATE_FILE", tmp_path / "floor_calibration.json")
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert not StreamRunner._harness_wants(hc, _winner(salience=0.2))
+    assert StreamRunner._harness_wants(hc, _winner(salience=0.4))
+
+
+def test_calibrate_mode_uses_learned_floor_once_calibrated(tmp_path, monkeypatch):
+    monkeypatch.setattr(floor_calibration, "STATE_FILE", tmp_path / "floor_calibration.json")
+    import continuity.journal as journal
+    monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "journal.jsonl")
+
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    for _ in range(floor_calibration.CALIBRATION_WINDOW):
+        floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.15))
+    learned = round(0.15 + floor_calibration.CALIBRATION_MARGIN, 4)
+    assert not StreamRunner._harness_wants(hc, _winner(salience=learned - 0.01))
+    assert StreamRunner._harness_wants(hc, _winner(salience=learned))
+
+
+def test_alarm_lane_bypasses_calibrate_floor_too(tmp_path, monkeypatch):
+    monkeypatch.setattr(floor_calibration, "STATE_FILE", tmp_path / "floor_calibration.json")
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    winner = _winner(salience=0.01)
+    winner["context"] = {"alarm_lane": True}
+    assert StreamRunner._harness_wants(hc, winner)
