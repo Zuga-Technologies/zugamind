@@ -1,6 +1,13 @@
 """
 ZugaMind Workspace Actuator — feedback loop for workspace health.
 
+**Reference-only (issue #5): complete and tested, but not instantiated by
+StreamRunner, the demo, or wired into `cognition.workspace`'s public
+`__all__`.** The attention schema already does per-cycle streak damping and
+diversity capping; this is the slower, integral-term counterpart — fairness
+over tens of cycles rather than within one. To wire it in: instantiate in
+`StreamRunner.__init__` and call `on_cycle_complete()` from `run_once()`.
+
 Runs every N cycles (default 10). Reads workspace stats and writes
 dampening/boost adjustments directly to the AttentionSchema. Adjustments
 decay a small amount every cycle, so the actuator must keep re-evaluating
