@@ -307,6 +307,14 @@ class StreamRunner:
         if isinstance(modules, list) and modules:
             if winner_dict.get("source_module") not in modules:
                 return False
+        # An alarm-lane winner bypasses the salience floor: its salience may
+        # be dampened to near-zero by the attention schema (that dampening is
+        # about its module's CHATTER), but the lane already decided this
+        # specific critical must surface. EXP-003 measured the cost of not
+        # doing this: the dominant source's own genuine alert won selection
+        # and then died right here at the floor (domreal_recall 0.2).
+        if (winner_dict.get("context") or {}).get("alarm_lane"):
+            return True
         floor = hc.get("wake_min_salience")
         if isinstance(floor, (int, float)):
             salience = winner_dict.get("salience", 0.0)
@@ -364,11 +372,18 @@ class StreamRunner:
             # concurrent alarm windows than slots, rotation alone still
             # drops whoever expires first).
             winner_module = winner_dict.get("source_module")
+            # No salience condition here: a critical is a critical. The old
+            # `salience >= ALARM_MIN_SALIENCE` guard excluded criticals from
+            # attention-dampened modules — the same defect EXP-003 measured
+            # in the lane (domreal_recall 0.2): DOMREAL couldn't win a wake
+            # AND couldn't ride the digest, because both doors checked the
+            # dampened module salience instead of the alert's own urgency.
+            # Digest space is briefing text — bundling one more critical is
+            # nearly free; silently dropping one is not.
             other_criticals = [
                 {"source_module": b.source_module, "context": b.context}
                 for b in self.workspace.last_cycle_bids
                 if b.source_module != winner_module
-                and b.salience >= self.workspace.ALARM_MIN_SALIENCE
                 and self.workspace._is_critical(b)
             ]
             briefing = journal.build_briefing(

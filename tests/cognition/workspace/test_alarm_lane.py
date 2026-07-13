@@ -1,12 +1,17 @@
-"""Alarm-lane selection tests (issue #8, from EXP-001).
+"""Alarm-lane selection tests (issue #8 from EXP-001; refractory semantics
+from EXP-003).
 
 EXP-001 traced 2 of condition A's 3 missed canaries to lottery starvation:
 a critical alarm repeatedly losing the salience^power weighted-random draw
 to hotter ambient modules until its re-emission window closed. The fix: a
-bid carrying a critical-urgency trigger AND healthy post-modulation salience
-wins deterministically. Bids damped below ALARM_MIN_SALIENCE by the
-attention schema (habituation / diversity caps) stay in the lottery — the
-lane must not defeat alarm-fatigue protection.
+bid carrying a critical-urgency trigger wins deterministically.
+
+EXP-003 then measured the cost of the original alarm-fatigue guard (lane
+required post-modulation salience >= ALARM_MIN_SALIENCE): a module dampened
+for its NOISE had its first-arrival CRITICAL silenced too — domreal_recall
+0.2. Fatigue is now keyed on the alarm class itself: a (module, trigger
+type) that recently won the lane sits out ALARM_REFRACTORY_CYCLES; a
+first-arrival critical enters the lane no matter how dampened its module is.
 """
 import random
 
@@ -63,17 +68,66 @@ def test_critical_alarm_beats_hotter_ambient_bid_every_time():
         assert winner == "alarm", f"seed {seed}: lottery starved the alarm"
 
 
-def test_damped_critical_stays_in_the_lottery():
-    """Below ALARM_MIN_SALIENCE the lane is closed: a habituated repeat alarm
-    (salience 0.2) must NOT deterministically beat a 0.9 ambient bid."""
-    winners = {
-        _run_once(seed, [
-            _TriggerBidModule("tired_alarm", 0.2, urgency=1.0),
+def test_first_arrival_damped_critical_still_wins_the_lane():
+    """The EXP-003 domreal regression: a module dampened to 0.2 for its
+    chatter raises a FIRST-ARRIVAL critical — the lane must take it anyway.
+    Under the old ALARM_MIN_SALIENCE guard this lost to ambient ~always."""
+    for seed in range(30):
+        winner = _run_once(seed, [
+            _TriggerBidModule("damped_alarm", 0.2, urgency=1.0),
             _TriggerBidModule("ambient", 0.9, urgency=None),
         ])
-        for seed in range(30)
-    }
-    assert "ambient" in winners, "damped alarm bypassed alarm-fatigue protection"
+        assert winner == "damped_alarm", (
+            f"seed {seed}: dampening silenced a first-arrival critical")
+
+
+def test_served_alarm_sits_out_the_refractory_window():
+    """Alarm fatigue, new semantics: after an alarm class wins the lane, the
+    SAME class re-bidding goes back to the lottery for
+    ALARM_REFRACTORY_CYCLES — a repeat alarm must not own the workspace."""
+    random.seed(20260712)
+    ws = Workspace()
+    ws.register_module(_TriggerBidModule("repeat_alarm", 0.2, urgency=1.0))
+    ws.register_module(_TriggerBidModule("ambient", 0.9, urgency=None))
+    winners = [ws.run_cycle({}).source_module for _ in range(6)]
+    assert winners[0] == "repeat_alarm", "first arrival must take the lane"
+    assert "ambient" in winners[1:], (
+        f"served alarm kept winning through its refractory window: {winners}")
+
+
+def test_alarm_class_regains_lane_after_refractory_expires():
+    """A NEW incident from the same class after the window must be lane-
+    eligible again (the window is fatigue, not a permanent mute)."""
+    random.seed(20260712)
+    ws = Workspace()
+    alarm = _TriggerBidModule("cyclic_alarm", 0.2, urgency=1.0)
+    ws.register_module(alarm)
+    ws.register_module(_TriggerBidModule("ambient", 0.9, urgency=None))
+    first = ws.run_cycle({}).source_module
+    for _ in range(Workspace.ALARM_REFRACTORY_CYCLES):
+        ws.run_cycle({})
+    later = ws.run_cycle({}).source_module
+    assert first == "cyclic_alarm"
+    assert later == "cyclic_alarm", "alarm class never regained lane eligibility"
+
+
+def test_lane_winner_is_flagged_for_downstream_wake_filters():
+    """The lane's rescue must survive the harness salience floor: winners
+    carry context['alarm_lane'] and stream.runner honors it (EXP-003:
+    DOMREAL won selection at 0.15 salience and died at the 0.35 floor)."""
+    from stream.runner import StreamRunner
+
+    random.seed(20260712)
+    ws = Workspace()
+    ws.register_module(_TriggerBidModule("damped_alarm", 0.15, urgency=1.0))
+    content = ws.run_cycle({})
+    assert content.bid.context.get("alarm_lane") is True
+    winner_dict = content.to_dict()
+    hc = {"name": "t", "wake_min_salience": 0.35}
+    assert StreamRunner._harness_wants(hc, winner_dict) is True
+    # A non-lane winner below the floor is still filtered.
+    assert StreamRunner._harness_wants(
+        hc, {"source_module": "x", "salience": 0.15, "context": {}}) is False
 
 
 def test_two_criticals_highest_salience_wins_deterministically():

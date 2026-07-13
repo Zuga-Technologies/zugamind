@@ -443,6 +443,10 @@ class Workspace:
         self.attention_schema = AttentionSchema()
         self._cycle_count: int = 0
         self.last_cycle_bids: List[SalienceBid] = []
+        # Alarm-fatigue ledger: alarm-class key -> selection-cycle it last won
+        # the lane (see the alarm-lane comment block above _is_critical).
+        self._served_alarms: Dict[str, int] = {}
+        self._selection_cycle: int = 0
         # Higher power = more deterministic winner selection. ^4 means a 0.9
         # bid beats a 0.6 bid ~84% of the time (0.9^4/(0.9^4+0.6^4) ≈ 0.835,
         # vs ~69% at ^2) — tuned for an operational agent that should usually
@@ -534,13 +538,26 @@ class Workspace:
         return bids
 
     # Alarm lane (issue #8, from EXP-001): a bid carrying a critical trigger
-    # must not be subject to the lottery. Eligibility requires BOTH a
-    # critical-urgency trigger AND healthy post-modulation salience — so
-    # habituation/diversity dampening still retire repeated same-class
-    # alarms (alarm fatigue protection stays intact; the lane is for
-    # first-arrival criticals that would otherwise lose a lucky draw).
+    # must not be subject to the lottery.
+    #
+    # HISTORY: eligibility originally ALSO required healthy post-modulation
+    # salience (ALARM_MIN_SALIENCE = 0.5) as alarm-fatigue protection. EXP-003
+    # measured that guard's cost: a module deep in streak-dampening for its
+    # NOISE had its first-arrival CRITICAL silenced along with the chatter —
+    # the dominant source's own genuine alert was detected in only 1 of 5
+    # runs (domreal_recall 0.2). The guard could not distinguish "this alarm
+    # class was already served" from "this module talks too much."
+    #
+    # Now fatigue protection is keyed on the ALARM ITSELF: a (module, trigger
+    # type) alarm class that recently won the lane sits out for
+    # ALARM_REFRACTORY_CYCLES (repeat alarms return to the lottery — fatigue
+    # preserved), while a first-arrival critical enters the lane regardless
+    # of how dampened its module's salience is (dampening loses the authority
+    # to silence screams). Lane winners are flagged `alarm_lane` in bid
+    # context so downstream wake filters (stream.runner salience floor) do
+    # not re-silence what the lane just rescued.
     ALARM_URGENCY = 0.9
-    ALARM_MIN_SALIENCE = 0.5
+    ALARM_REFRACTORY_CYCLES = 6
 
     @staticmethod
     def _is_critical(bid: SalienceBid) -> bool:
@@ -554,6 +571,26 @@ class Workspace:
         except (TypeError, ValueError):
             return False
 
+    @staticmethod
+    def _alarm_keys(bid: SalienceBid) -> List[str]:
+        """Fatigue-ledger identities for a bid's critical triggers: one key
+        per (module, trigger type) alarm class."""
+        keys = []
+        for t in (bid.context or {}).get("triggers") or []:
+            try:
+                if isinstance(t, dict) and float(t.get("urgency", 0.0)) >= Workspace.ALARM_URGENCY:
+                    keys.append(f"{bid.source_module}:{t.get('type', '?')}")
+            except (TypeError, ValueError):
+                continue
+        return keys
+
+    def _alarm_unserved(self, bid: SalienceBid) -> bool:
+        """True if any of the bid's alarm classes has NOT won the lane within
+        the refractory window — first-arrival criticals always qualify."""
+        cutoff = self._selection_cycle - self.ALARM_REFRACTORY_CYCLES
+        return any(self._served_alarms.get(k, -10**9) <= cutoff
+                   for k in self._alarm_keys(bid))
+
     def _select_winner(self, bids: List[SalienceBid]) -> Optional[SalienceBid]:
         """Deterministic alarm lane first; weighted-random lottery otherwise.
 
@@ -565,9 +602,10 @@ class Workspace:
         """
         if not bids:
             return None
+        self._selection_cycle += 1
         criticals = [
             b for b in bids
-            if b.salience >= self.ALARM_MIN_SALIENCE and self._is_critical(b)
+            if self._is_critical(b) and self._alarm_unserved(b)
         ] if self.attention_health_enabled else []
         if criticals:
             # Overlapping criticals rotate: least-recently-served module
@@ -577,10 +615,24 @@ class Workspace:
             # 0.75-1.0 criticals until its re-emission window closed) —
             # every critical must get a turn before any repeats.
             recent = [f.get("module") for f in self.attention_schema.recent_foci[-6:]]
-            return min(
+            chosen = min(
                 criticals,
                 key=lambda b: (recent.count(b.source_module), -b.salience),
             )
+            # Record the serve (alarm fatigue: this class sits out the lane
+            # for ALARM_REFRACTORY_CYCLES) and flag the bid so downstream
+            # wake filters don't re-silence a lane rescue (EXP-003 found
+            # DOMREAL winning selection but dying at the harness salience
+            # floor because its module was dampened to 0.15).
+            for k in self._alarm_keys(chosen):
+                self._served_alarms[k] = self._selection_cycle
+            if len(self._served_alarms) > 256:  # bounded, oldest first
+                for k in sorted(self._served_alarms,
+                                key=self._served_alarms.get)[:128]:
+                    del self._served_alarms[k]
+            if isinstance(chosen.context, dict):
+                chosen.context["alarm_lane"] = True
+            return chosen
         weights = [b.salience ** self.selection_power for b in bids]
         total = sum(weights)
         if total == 0:

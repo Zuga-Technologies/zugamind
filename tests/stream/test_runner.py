@@ -32,6 +32,14 @@ def _patch_engine_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "journal.jsonl")
     monkeypatch.setattr(state_mod, "STATE_FILE", tmp_path / "state.json")
     monkeypatch.setattr(state_mod, "ENGINE_DIR", tmp_path)
+    # Isolate quiet hours: load_quiet_hours() reads the REAL default config
+    # (data/harness.json), which a live deployment on the dev machine may
+    # own. Without this, any test running inside the operator's configured
+    # quiet window fails with quiet_hours_deferred instead of reaching the
+    # gate — observed 2026-07-12 at 23:0x, the same config-leak class that
+    # contaminated EXP-002/003 (see run_exp001.py). Tests that exercise
+    # quiet hours re-patch this explicitly.
+    monkeypatch.setattr(command_actuator, "load_quiet_hours", lambda *a, **kw: None)
 
 
 def test_once_cycle_writes_cycle_event_and_state(tmp_path, monkeypatch):
