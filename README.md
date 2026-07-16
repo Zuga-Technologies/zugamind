@@ -52,6 +52,29 @@ pytest -q                 # 262 tests — no network, no keys, ~4s
 
 Linux, macOS, Windows all work (CI runs all three × Python 3.10–3.13).
 
+## Let your AI agent set this up
+
+You don't have to do the steps below by hand. This repo is designed to be
+readable and safe for an AI coding agent to configure on your behalf —
+paste this into Claude Code, Cursor, Codex, or whatever you're already
+running:
+
+```
+Clone https://github.com/Zuga-Technologies/zugamind, run `python demo.py` and
+show me the output so I can see how it works. Then help me set it up as a
+sidecar for you specifically: copy the harness config matching what you are
+(examples/harness-configs/), and walk me through wake_modules and
+wake_min_salience before touching anything. Run `python runner.py --once
+--dry-run` so I can see one real cycle without spending anything or enabling
+live wakes. Only flip "enabled": true in the config after I've seen the
+dry-run and told you to go live.
+```
+
+The repo enforces the safety side of this itself (every shipped config ships
+`"enabled": false`; going live is always an explicit human act — see
+[Safety design](#safety-design)) — the prompt above just makes sure your
+agent walks you through it instead of skipping straight to a live daemon.
+
 ## Set up the sidecar — 3 steps
 
 **1. Copy the config for your harness:**
@@ -101,6 +124,18 @@ the same code path the daemon uses, nothing mocked.
 Configs are plain argv lists; `{briefing_file}` is replaced with the path to
 that cycle's markdown briefing. Each config carries `max_per_hour` and
 `max_per_day` rate limits.
+
+## Extending ZugaMind — write your own scanner
+
+The shipped scanners (HackerNews, Reddit, GitHub issues, AI-labs feeds) are
+illustrative, not exhaustive — see [Limitations](#limitations). Watching your
+own Slack channel, Jira board, or internal API takes one function and zero
+package changes: no fork, no PR, nothing to touch inside `zugamind/` at all.
+
+Two worked examples (Slack mentions, Jira issues assigned to you) plus the
+`extra_scanners` wiring pattern that plugs them in: **[`examples/custom-scanners/`](examples/custom-scanners/)**.
+That's the same pattern this project's own maintainers dogfood for private,
+unshipped scanners — copy it for yours.
 
 ## Architecture
 
@@ -311,10 +346,11 @@ ZugaMind answers explicitly.
   mechanism.
 - The example modules in `cognition/workspace/workspace_modules.py` and the
   four world-scanners in `scanners/world/` are illustrative, not a
-  production perception stack. Replace them with your own. The Reddit
-  scanner in particular rides unauthenticated public RSS — best-effort by
-  design; it may be rate-limited or blocked without notice and fails silent
-  to an empty list.
+  production perception stack. Replace them with your own — see
+  [Extending ZugaMind](#extending-zugamind--write-your-own-scanner). The
+  Reddit scanner in particular rides unauthenticated public RSS —
+  best-effort by design; it may be rate-limited or blocked without notice
+  and fails silent to an empty list.
 - The budget model (`foundation/budget.py`) is a simple standalone monthly
   cap by design — it is not a multi-agent fleet-wide accounting system.
   Integrators running several agents against a shared budget should supply
