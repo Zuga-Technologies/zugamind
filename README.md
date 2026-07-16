@@ -52,6 +52,32 @@ pytest -q                 # 262 tests — no network, no keys, ~4s
 
 Linux, macOS, Windows all work (CI runs all three × Python 3.10–3.13).
 
+### The `zugamind` command
+
+`pip install -e .` also gives you a real `zugamind` command — not just the
+demo script. It starts the daemon **detached**, so it keeps running after
+you close the terminal, and any other terminal (a new session, tomorrow,
+whatever) can attach to the *same* running instance and watch it live:
+
+```bash
+pip install -e .
+zugamind              # starts the daemon if it isn't already running, then
+                       # attaches and streams its activity in real time
+```
+
+```bash
+zugamind start        # start it in the background, detached, and exit
+zugamind status        # one-shot snapshot: running?, state, last wake
+zugamind watch          # attach to a running daemon, stream activity live
+zugamind stop             # stop the background daemon
+```
+
+Ctrl-C on `zugamind`/`zugamind watch` only stops *watching* — the daemon
+itself keeps running until you `zugamind stop` it. This is the actual
+always-on behavior the rest of this README describes: one `zugamind` call
+and it keeps perceiving, deciding, and waking your harness on its own,
+whether or not anything is attached to watch it.
+
 ## Let your AI agent set this up
 
 You don't have to do the steps below by hand. This repo is designed to be
