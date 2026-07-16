@@ -48,7 +48,7 @@ Your function:
    one winner per cycle regardless — flooding it with 40 triggers just
    makes the competition noisier.
 
-## Four worked examples
+## Worked examples
 
 - **`slack_mentions.py`** — polls a Slack channel for messages mentioning you
   (or any string you configure), turns unread mentions into triggers. Config:
@@ -64,13 +64,27 @@ Your function:
   currently running, so an autonomous harness can check "is a human actively
   in this thing right now?" before touching its files. Config:
   `ZUGAMIND_PROCESS_WATCH` (comma-separated `label:process_name` pairs).
+- **`discord_activity.py`** — polls a Discord channel via the bot REST API for
+  new messages, turns unseen ones into triggers. Config: `DISCORD_BOT_TOKEN`,
+  `ZUGAMIND_DISCORD_CHANNEL`, optional `ZUGAMIND_DISCORD_MENTION` filter.
+- **`news_rss.py`** — polls any RSS/Atom feeds you configure (wire outlets,
+  industry trades, a competitor's blog) and turns unseen items into triggers.
+  Same parsing approach as the shipped `scan_ai_labs` world-scanner, pointed
+  at feeds you choose. Config: `ZUGAMIND_NEWS_FEEDS` (comma-separated URLs),
+  optional `ZUGAMIND_NEWS_KEYWORDS` filter, `ZUGAMIND_NEWS_CACHE_TTL`. Note on
+  "real time": RSS is poll-based, not push — most outlets publish within
+  minutes, but this is near-real-time, not instant.
 - **`run_with_custom_scanners.py`** — the launcher shape above, runnable
   as-is once you've set the env vars for whichever example(s) you want.
 
-All four are stdlib-only (`urllib.request`/`subprocess`, matching the rest of
+All are stdlib-only (`urllib.request`/`subprocess`, matching the rest of
 the package) — not a hard requirement for *your own* private scanner (only
 core PRs are stdlib-constrained, see `CONTRIBUTING.md`), but it means you can
 copy these and run them with zero `pip install`.
+
+See also `examples/hooks/` — feeding what these scanners find into a session
+you're already working in (not just a spawned headless one), via Claude Code's
+own SessionStart/UserPromptSubmit hooks.
 
 If you build something reusable — a scanner other integrators would want —
 consider PRing it into `scanners/world/` for real, following
