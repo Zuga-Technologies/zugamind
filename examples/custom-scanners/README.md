@@ -48,7 +48,7 @@ Your function:
    one winner per cycle regardless — flooding it with 40 triggers just
    makes the competition noisier.
 
-## Two worked examples
+## Four worked examples
 
 - **`slack_mentions.py`** — polls a Slack channel for messages mentioning you
   (or any string you configure), turns unread mentions into triggers. Config:
@@ -56,13 +56,21 @@ Your function:
 - **`jira_assigned.py`** — polls a Jira Cloud project for issues assigned to
   you that aren't yet Done, turns each into a trigger. Config:
   `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `ZUGAMIND_JIRA_PROJECT`.
+- **`scan_dirty_worktree.py`** — flags git repos that have had uncommitted
+  changes for too long (the "wrote it, tested it, forgot to commit it before
+  the session ended" failure mode). Config: `ZUGAMIND_WATCH_WORKTREES`,
+  `ZUGAMIND_DIRTY_THRESHOLD_HOURS` (default 24).
+- **`scan_process_conflict.py`** — flags when a configured app/process is
+  currently running, so an autonomous harness can check "is a human actively
+  in this thing right now?" before touching its files. Config:
+  `ZUGAMIND_PROCESS_WATCH` (comma-separated `label:process_name` pairs).
 - **`run_with_custom_scanners.py`** — the launcher shape above, runnable
   as-is once you've set the env vars for whichever example(s) you want.
 
-Both examples are stdlib-only (`urllib.request`, matching the rest of the
-package) — not a hard requirement for *your own* private scanner (only core
-PRs are stdlib-constrained, see `CONTRIBUTING.md`), but it means you can copy
-these and run them with zero `pip install`.
+All four are stdlib-only (`urllib.request`/`subprocess`, matching the rest of
+the package) — not a hard requirement for *your own* private scanner (only
+core PRs are stdlib-constrained, see `CONTRIBUTING.md`), but it means you can
+copy these and run them with zero `pip install`.
 
 If you build something reusable — a scanner other integrators would want —
 consider PRing it into `scanners/world/` for real, following
