@@ -48,9 +48,20 @@ Configuration (env):
                               be a nudge, not a dump.
 
 Cursor (what counts as "new since last time") is a byte offset into
-journal.jsonl, persisted to <data_dir>/engine/hook_cursor.json. Stdlib
-only. Fails silent and exits 0 on any error — a broken hook must never
-block you from using Claude Code.
+journal.jsonl, persisted PER SESSION to
+<data_dir>/engine/hook_cursors/<session_id>.json — one cursor file per
+open session, not one shared file. This matters: with a single shared
+cursor, two sessions open at once would race — whichever sends a prompt
+first consumes the finding and the second session's next prompt would
+silently find nothing, even though it never actually saw it. Per-session
+cursors mean every open session gets every finding on its own next
+prompt, independent of what any other open session already consumed.
+`session_id` comes from the hook's own stdin payload (Claude Code always
+includes it); a payload missing it (shouldn't happen, defensive only)
+falls back to a shared `_default.json` cursor rather than crashing.
+
+Stdlib only. Fails silent and exits 0 on any error — a broken hook must
+never block you from using Claude Code.
 """
 
 from __future__ import annotations
@@ -64,7 +75,7 @@ from typing import Any
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR")
                   or Path(__file__).resolve().parent.parent.parent / "zugamind" / "data")
 _JOURNAL = _DATA_DIR / "engine" / "journal.jsonl"
-_CURSOR_FILE = _DATA_DIR / "engine" / "hook_cursor.json"
+_CURSOR_DIR = _DATA_DIR / "engine" / "hook_cursors"
 _MAX_ITEMS = int(os.environ.get("ZUGAMIND_HOOK_MAX_ITEMS", "3"))
 
 _INTERESTING_KINDS = {"harness_invocation", "alarm"}
@@ -78,42 +89,29 @@ def _read_stdin_json() -> dict[str, Any]:
         return {}
 
 
-def _load_cursor() -> int:
+def _cursor_file(session_id: str) -> Path:
+    safe_id = "".join(c for c in session_id if c.isalnum() or c in "-_") or "_default"
+    return _CURSOR_DIR / f"{safe_id}.json"
+
+
+def _load_cursor(cursor_file: Path) -> int:
     try:
-        if _CURSOR_FILE.exists():
-            return int(json.loads(_CURSOR_FILE.read_text(encoding="utf-8")).get("offset", 0))
+        if cursor_file.exists():
+            return int(json.loads(cursor_file.read_text(encoding="utf-8")).get("offset", 0))
     except Exception:
         pass
     return 0
 
 
-def _save_cursor(offset: int) -> None:
+def _save_cursor(cursor_file: Path, offset: int) -> None:
     try:
-        _CURSOR_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _CURSOR_FILE.write_text(json.dumps({"offset": offset}), encoding="utf-8")
+        cursor_file.parent.mkdir(parents=True, exist_ok=True)
+        cursor_file.write_text(json.dumps({"offset": offset}), encoding="utf-8")
     except Exception:
         pass
 
 
-def _new_findings() -> tuple[list[dict], int]:
-    """Return (findings since the saved cursor, new cursor offset).
-
-    On first-ever run (no cursor file) the cursor is seeded to the
-    CURRENT end of the journal rather than 0 — otherwise the very first
-    session after wiring this hook up would dump the entire history.
-    """
-    if not _JOURNAL.exists():
-        return [], 0
-
-    size = _JOURNAL.stat().st_size
-    if not _CURSOR_FILE.exists():
-        _save_cursor(size)
-        return [], size
-
-    offset = _load_cursor()
-    if offset > size:
-        offset = 0  # journal was rotated/truncated — start fresh rather than crash
-
+def _scan_from(offset: int) -> tuple[list[dict], int]:
     findings: list[dict] = []
     with open(_JOURNAL, encoding="utf-8") as f:
         f.seek(offset)
@@ -129,6 +127,32 @@ def _new_findings() -> tuple[list[dict], int]:
                 findings.append(ev)
         new_offset = f.tell()
     return findings, new_offset
+
+
+def _new_findings(cursor_file: Path) -> tuple[list[dict], int]:
+    """Return (findings since this session's saved cursor, new cursor offset).
+
+    First-ever prompt in THIS session (no cursor file yet): shows a bounded
+    "catch-up" of the last _MAX_ITEMS findings in the whole journal,
+    regardless of when they happened — a session opened AFTER something was
+    found should still see it. This is a full scan from offset 0 capped to
+    the tail, not "everything since the beginning" (that's what "bounded"
+    buys you: recency, not a full-history dump). Every later prompt in this
+    same session only sees genuinely NEW findings since its own last check.
+    """
+    if not _JOURNAL.exists():
+        return [], 0
+
+    size = _JOURNAL.stat().st_size
+    if not cursor_file.exists():
+        all_findings, _ = _scan_from(0)
+        return all_findings[-_MAX_ITEMS:], size
+
+    offset = _load_cursor(cursor_file)
+    if offset > size:
+        offset = 0  # journal was rotated/truncated — start fresh rather than crash
+
+    return _scan_from(offset)
 
 
 def _format_findings(findings: list[dict]) -> str:
@@ -158,8 +182,11 @@ def main() -> int:
     ):
         return 0
 
-    findings, new_offset = _new_findings()
-    _save_cursor(new_offset)
+    session_id = str(payload.get("session_id") or "")
+    cursor_file = _cursor_file(session_id)
+
+    findings, new_offset = _new_findings(cursor_file)
+    _save_cursor(cursor_file, new_offset)
     if not findings:
         return 0
 

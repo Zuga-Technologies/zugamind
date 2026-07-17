@@ -23,6 +23,15 @@ session you open. That's the honest tradeoff: no true push notifications,
 but zero extra infrastructure, and it uses a mechanism Claude Code
 already ships.
 
+## Multiple sessions open at once
+
+Each session gets its own cursor, keyed by `session_id`. If you have two
+sessions open and a finding lands, BOTH sessions surface it independently
+on their own next prompt — not just whichever asks first. A brand-new
+session's first-ever prompt shows a bounded catch-up of recent findings
+(not the full history), even for things that happened before that
+session existed — a session opened after a finding still sees it.
+
 ## Setup
 
 1. Copy `zugamind_context.py` into your own project (or reference it by
