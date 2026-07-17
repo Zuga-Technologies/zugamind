@@ -56,6 +56,7 @@ BANNER = r"""
 /___|\___/ \___/ \___/_/ \_\_|  |_|___|_|\_|___/
 """
 
+ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 ANSI = sys.stdout.isatty()
 RESET = "\033[0m" if ANSI else ""
 DIM = "\033[2m" if ANSI else ""
@@ -68,6 +69,20 @@ YELLOW = "\033[93m" if ANSI else ""
 
 def _now() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+def _status_line(text: str) -> None:
+    """Overwrite the current line with `text`, padded to the FULL terminal
+    width. A fixed small pad (e.g. 15 spaces) is not enough — a shorter new
+    message written after a longer previous one leaves stale trailing
+    characters visible past the pad, which is exactly the cut-off-looking
+    garbage this was producing (found via a real screenshot, not a guess).
+    """
+    cols = shutil.get_terminal_size(fallback=(100, 24)).columns
+    visible = ANSI_RE.sub("", text)
+    pad = max(0, cols - len(visible) - 1)
+    sys.stdout.write("\r" + text + " " * pad)
+    sys.stdout.flush()
 
 
 def _read_pid() -> Optional[int]:
@@ -231,11 +246,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                         label = w.get("source_module", "(no winner)")
                         sal = w.get("salience")
                         sal_str = f"{sal:.3f}" if isinstance(sal, (int, float)) else "-"
-                        sys.stdout.write(
-                            f"\r{DIM}[{_now()}]{RESET} cycle: {label} salience={sal_str}"
-                            + " " * 15
-                        )
-                        sys.stdout.flush()
+                        _status_line(f"{DIM}[{_now()}]{RESET} cycle: {label} salience={sal_str}")
                     elif kind == "alarm":
                         print(f"\n\n{RED}{BOLD}! ALARM  [{_now()}]{RESET}  {ev.get('detail')}")
                     elif kind == "harness_invocation":
@@ -246,8 +257,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
                             print(stdout)
                         print()
             else:
-                sys.stdout.write(f"\r{DIM}[{_now()}] watching...{RESET}" + " " * 15)
-                sys.stdout.flush()
+                _status_line(f"{DIM}[{_now()}] watching...{RESET}")
     except KeyboardInterrupt:
         print(f"\n{DIM}stopped watching (the daemon itself keeps running).{RESET}")
     return 0
