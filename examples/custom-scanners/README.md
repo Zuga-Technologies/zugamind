@@ -74,6 +74,13 @@ Your function:
   optional `ZUGAMIND_NEWS_KEYWORDS` filter, `ZUGAMIND_NEWS_CACHE_TTL`. Note on
   "real time": RSS is poll-based, not push — most outlets publish within
   minutes, but this is near-real-time, not instant.
+- **`x_activity.py`** — polls X's recent-search API for posts matching a query
+  you configure. Config: `X_BEARER_TOKEN`, `ZUGAMIND_X_QUERY`, optional
+  `ZUGAMIND_X_MAX_RESULTS` / `ZUGAMIND_X_CACHE_TTL`. **Cost note:** X API v2 is
+  pay-per-use (~$0.005/post read as of 2026) — the defaults (60 min cache,
+  15 results/poll) are tuned for ~$50/month, not maximum freshness. Read the
+  module docstring's cost math before changing either default; both scale the
+  bill roughly linearly. Verified against the live API before shipping.
 - **`run_with_custom_scanners.py`** — the launcher shape above, runnable
   as-is once you've set the env vars for whichever example(s) you want.
 
