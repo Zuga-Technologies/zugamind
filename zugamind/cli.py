@@ -246,6 +246,39 @@ def cmd_watch(args: argparse.Namespace) -> int:
                         label = w.get("source_module", "(no winner)")
                         sal = w.get("salience")
                         sal_str = f"{sal:.3f}" if isinstance(sal, (int, float)) else "-"
+                        # A bidding module that DIDN'T win looks, on the
+                        # overwritten status line below, identical to no
+                        # activity at all — the winner-only line was the
+                        # actual UX bug (found 2026-07-17 dogfooding this
+                        # exact scanner against a live session). Print a
+                        # persistent (non-overwritten) line for any bid from
+                        # a real-signal module, win or lose, so "the
+                        # workspace noticed something" stays visible even
+                        # when ambient metacognition/priority_goals wins the
+                        # cycle.
+                        NOTABLE = {"code_changes", "repo_issues", "knowledge",
+                                   "schedule", "daemon"}
+                        LABELS = {
+                            "code_changes": "code activity",
+                            "repo_issues": "repo issue",
+                            "knowledge": "knowledge update",
+                            "schedule": "scheduled signal",
+                            "daemon": "background task",
+                        }
+                        bids = ev.get("bids") or []
+                        for b in bids:
+                            mod = b.get("module")
+                            if mod in NOTABLE:
+                                won = mod == label
+                                human = LABELS.get(mod, mod)
+                                if won:
+                                    content = (w.get("content") or "").strip()
+                                    print(f"\n{GREEN}{BOLD}  ⚡ NOTICED{RESET}  "
+                                          f"{DIM}[{_now()}]{RESET}")
+                                    print(f"  {human} → {content[:110]}")
+                                else:
+                                    print(f"  {DIM}· saw {human}, not urgent yet"
+                                          f"  [{_now()}]{RESET}")
                         _status_line(f"{DIM}[{_now()}]{RESET} cycle: {label} salience={sal_str}")
                     elif kind == "alarm":
                         print(f"\n\n{RED}{BOLD}! ALARM  [{_now()}]{RESET}  {ev.get('detail')}")

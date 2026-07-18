@@ -146,8 +146,14 @@ class CodeChangeModule(WorkspaceModule):
             return None
 
         commits = [t for t in self._triggers if t["type"] == "git_commit"]
-        code_changes = [t for t in self._triggers if t["type"] in
-                        ("code_change", "recent_code_change")]
+        code_changes = [t for t in self._triggers if t["type"] == "code_change"]
+        # "recent_code_change" is a misnomer left over from reusing this
+        # module's slot for live Claude Code SESSION activity (tool calls,
+        # reads, edits) — not necessarily a file edit. Session activity in a
+        # read-only review looks identical to a real edit unless labeled
+        # separately (found 2026-07-17: Buga correctly flagged "Code: N
+        # change(s)" as misleading when nothing was actually edited).
+        session_activity = [t for t in self._triggers if t["type"] == "recent_code_change"]
 
         has_issues = any("fix" in t.get("detail", "").lower() or
                          "bug" in t.get("detail", "").lower()
@@ -160,12 +166,16 @@ class CodeChangeModule(WorkspaceModule):
             salience = min(0.5, 0.2 + len(commits) * 0.05)
             valence = 0.1
         else:
-            salience = min(0.4, 0.2 + len(code_changes) * 0.03)
+            salience = min(0.4, 0.2 + len(code_changes) * 0.03 + len(session_activity) * 0.03)
             valence = 0.0
 
         projects = set(t.get("project", "?") for t in self._triggers if t.get("project"))
-        content = (f"Code: {len(self._triggers)} change(s) in "
-                   f"{', '.join(projects) if projects else 'unknown'}")
+        proj_str = ', '.join(projects) if projects else 'unknown'
+        if session_activity and not commits and not code_changes:
+            content = (f"Session activity: {len(session_activity)} update(s) in "
+                       f"{proj_str} (Claude Code working — not necessarily a file edit)")
+        else:
+            content = (f"Code: {len(self._triggers)} change(s) in {proj_str}")
 
         return SalienceBid(
             source_module=self.name,
