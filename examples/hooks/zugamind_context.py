@@ -170,8 +170,9 @@ def _format_findings(findings: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
-    mode = sys.argv[1] if len(sys.argv) > 1 else "user-prompt-submit"
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    mode = argv[0] if argv else "user-prompt-submit"
     payload = _read_stdin_json()
 
     # Don't fire on non-human events (task notifications, system blocks) —
