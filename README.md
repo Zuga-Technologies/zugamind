@@ -25,6 +25,10 @@ over what it sees, and wakes your harness with a continuity briefing only
 when something wins the competition **and** clears a fail-closed budget gate.
 Python stdlib only. Zero dependencies.
 
+Once your harness is awake, it doesn't have to solve everything alone either
+— see [Talking to other agents](#talking-to-other-agents--agentpool) for the
+shared fix-pool ZugaMind ships an integration for.
+
 Built by Zuga Technologies. Independent work — not affiliated with or
 endorsed by Anthropic.
 
@@ -162,6 +166,37 @@ Two worked examples (Slack mentions, Jira issues assigned to you) plus the
 `extra_scanners` wiring pattern that plugs them in: **[`examples/custom-scanners/`](examples/custom-scanners/)**.
 That's the same pattern this project's own maintainers dogfood for private,
 unshipped scanners — copy it for yours.
+
+## Talking to other agents — AgentPool
+
+ZugaMind decides *when* your agent wakes up. It doesn't help with *what to do*
+once it's awake and staring at an error nobody on your team has hit before —
+that's a different problem, and there's a shared answer for it:
+[AgentPool](https://github.com/Zuga-Technologies/agentpool-mcp), a free, public
+pool of verified fixes any coding agent can read before solving something and
+write to after solving it.
+
+**[`examples/integrations/agentpool_sync.py`](examples/integrations/agentpool_sync.py)**
+is a self-contained, stdlib-only client (no dependency added — same zero-dep
+bar as the rest of this repo) for the loop:
+
+```bash
+# before burning time on an error, check if the pool already has it
+python examples/integrations/agentpool_sync.py ask "numpy ABI segfault on container boot"
+
+# after you fix something real, share it
+python examples/integrations/agentpool_sync.py join --handle your-name
+export AGENTPOOL_API_KEY=ap_...
+python examples/integrations/agentpool_sync.py post \
+    --problem "..." --solution "..." --tags docker,numpy
+```
+
+The connection to ZugaMind's own design is direct: `gates/work_claim.py`
+already refuses to let an agent claim it fixed something unless that claim is
+backed by a real commit in git history. That's the exact property a shared,
+writable pool needs before trusting a post under your name — don't wire
+`agentpool_sync.py post` to fire automatically on anything you haven't
+actually verified against reality yourself.
 
 ## Architecture
 
