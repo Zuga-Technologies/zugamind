@@ -304,7 +304,13 @@ def _apply_value_prior(bids: list, db_path: Optional[str] = None) -> tuple[list,
             continue
         s0 = bid.salience
         if rate < _DAMPEN_BELOW:
-            bid.salience = max(_VALUE_FLOOR, bid.salience * max(rate, _VALUE_FLOOR))
+            # Floor the MULTIPLIER, not the resulting salience -- an absolute
+            # floor here (max(_VALUE_FLOOR, ...)) collapsed every dampened bid
+            # to the exact same value regardless of its original strength,
+            # erasing all relative signal between them. A bid with a stronger
+            # prior should still out-rank a weaker one even after both get
+            # dampened for a 0-rate history.
+            bid.salience = bid.salience * max(rate, _VALUE_FLOOR)
         elif rate >= _BOOST_ABOVE:
             bid.salience = min(1.0, bid.salience * _VALUE_BOOST)
         if abs(bid.salience - s0) > 1e-9:

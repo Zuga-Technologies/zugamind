@@ -64,8 +64,18 @@ def _fetch_sub(sub: str) -> list[dict]:
 
 
 def _fetch_all() -> list[dict]:
+    # Reddit's anon quota is ~1 req/IP per ~30s window, so back-to-back fetches
+    # meant the last sub in the list 429'd on every poll. Rotate which sub goes
+    # first (hour-based, deterministic) and sleep the actual documented window
+    # between requests so no sub is permanently starved. This only costs
+    # wall-clock on a cache MISS (once per _CACHE_TTL_SEC), never on a hit.
     posts: list[dict] = []
-    for sub in _SUBS:
+    order = list(_SUBS)
+    shift = int(time.time() // 3600) % len(order)
+    order = order[shift:] + order[:shift]
+    for i, sub in enumerate(order):
+        if i:
+            time.sleep(30)
         try:
             posts.extend(_fetch_sub(sub)[:4])  # top 4 per sub
         except (urllib.error.URLError, urllib.error.HTTPError, ET.ParseError, TimeoutError, OSError) as e:
