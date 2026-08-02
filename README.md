@@ -324,7 +324,7 @@ for that instead of assuming it away:
   the gate refuses to execute it at all. Wiring an actual notification
   (Discord, Slack, email, a ticket) onto that refusal is left to the
   integrator — the core guarantees the refusal, not the paging.
-- **Post-hoc integrity checks.** Two are wired into the shipped loop; two
+- **Post-hoc integrity checks.** Two are wired into the shipped loop; three
   ship as opt-in library modules for deployments that have the matching
   surface:
   - `gates/work_claim.py` — **wired**: every real (non-dry-run) harness
@@ -345,6 +345,12 @@ for that instead of assuming it away:
     disk-backed cooldown so a self-modification proposal can't thrash the
     same file repeatedly — for integrators whose harness has a
     self-modification lane.
+  - `gates/integrity.py` — **opt-in library**: a pure-stdlib Augmented
+    Dickey-Fuller stationarity test that classifies a drift-value time
+    series as STABLE / DRIFTING / CRITICAL — catches slow drift that stays
+    under any single-cycle threshold but trends over time. Takes a
+    `list[float]` and does no I/O: populate it from your own longitudinal
+    drift log and wire the returned `severity` to your own alerting.
 - **Fully logged.** `Workspace.get_stats()`, the attention schema's
   `get_context()`, and every gate's telemetry are structured and
   loggable every cycle — "why did it do that" should always be answerable

@@ -5,4 +5,4 @@ See README.md for the architecture, the paper mapping, and the safety design.
 Built by Zuga Technologies.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.6.0"
