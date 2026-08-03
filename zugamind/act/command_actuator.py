@@ -299,8 +299,18 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
             result = {"ok": True, "harness": name, "dry_run": True, "would_run": argv}
         else:
             timeout_sec = int(config.get("timeout_sec", _DEFAULT_TIMEOUT_SEC))
+            # Windows ships node-backed CLIs (claude, codex, npm, npx, ...) as
+            # .cmd shims. subprocess.run without a shell calls CreateProcess,
+            # which does not consult PATHEXT, so it cannot find "claude"/"codex"
+            # and raises WinError 2. Routing through cmd.exe (shell=True) lets
+            # the shell resolve the shim. POSIX keeps shell=False to preserve
+            # exact argv semantics (no shell quoting of the prompt).
+            use_shell = os.name == "nt"
             try:
-                proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_sec)
+                proc = subprocess.run(
+                    argv, capture_output=True, text=True,
+                    timeout=timeout_sec, shell=use_shell,
+                )
                 result = {
                     "ok": proc.returncode == 0,
                     "harness": name,
