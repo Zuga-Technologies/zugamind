@@ -277,7 +277,10 @@ def scan_agent_reach() -> list[dict[str, Any]]:
                     continue
                 url = r.get("url", "")
                 key = f"{query}:{url}"
-                if not url or key in seen:
+                # Absolute URLs only: some backends surface aggregator
+                # redirect paths like /goto?url=... -- a relative link is
+                # useless as a briefing citation and junk in the seen-set.
+                if not url.startswith("http") or key in seen:
                     continue
                 title = r.get("title", url)
                 candidates.append(("search", key, None, {

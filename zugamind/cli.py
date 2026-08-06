@@ -166,7 +166,17 @@ def cmd_stop(args: argparse.Namespace) -> int:
         PID_FILE.unlink(missing_ok=True)
         return 0
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T"], capture_output=True)
+        # /F is required: without it taskkill sends WM_CLOSE, which a hidden
+        # console-less daemon has no message pump to receive -- the request
+        # "succeeds", the process never dies, and every restart leaks a live
+        # daemon (8 found racing on 2026-08-06). Check the return code too:
+        # printing "stopped" unconditionally is how the leak stayed invisible.
+        result = subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                capture_output=True)
+        if result.returncode != 0:
+            print(f"FAILED to stop PID {pid} (taskkill rc={result.returncode}) "
+                  "-- pid file kept so you can retry")
+            return 1
     else:
         os.kill(pid, signal.SIGTERM)
     PID_FILE.unlink(missing_ok=True)

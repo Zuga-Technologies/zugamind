@@ -354,3 +354,24 @@ def test_search_and_watch_cadences_are_independent(monkeypatch, tmp_path):
     out = agent_reach.scan_agent_reach()
     assert calls["n"] == 1                   # search did NOT re-poll
     assert [t["type"] for t in out] == ["reach_web_update"]
+
+
+def test_search_skips_relative_redirect_urls(monkeypatch, tmp_path):
+    """Aggregator junk like /goto?url=... must not become triggers or
+    pollute the seen-set (found live 2026-08-06)."""
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.delenv("ZUGAMIND_REACH_WATCH_URLS", raising=False)
+    monkeypatch.setenv("ZUGAMIND_REACH_QUERIES", "q")
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TTL", "100")
+    _fake_clock(monkeypatch, start=50_000.0)
+
+    monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: True)
+    monkeypatch.setattr(agent_reach, "_fetch_exa_results", lambda q: [
+        {"url": "/goto?url=CAESjunk", "title": "redirect junk"},
+        {"url": "https://real.example/post", "title": "real result"},
+    ])
+    out = agent_reach.scan_agent_reach()
+    assert [t["url"] for t in out] == ["https://real.example/post"]
+    seen = json.loads(agent_reach._SEEN_FILE.read_text())
+    assert seen == ["q:https://real.example/post"]
