@@ -38,7 +38,7 @@ env override that wins over the file. During quiet hours the STREAM RUNNER
 "quiet_hours_deferred" instead — perception and journaling never stop, only
 the wake call does. See `stream/runner.py`.
 
-Stdlib-only (json + os + subprocess + tempfile).
+Stdlib-only (json + os + shutil + subprocess + sys + tempfile).
 """
 
 from __future__ import annotations
@@ -46,7 +46,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -69,6 +71,26 @@ _DEFAULT_MAX_PER_DAY = 20
 _STDOUT_STDERR_CAP = 2000
 _RATE_WINDOW_HOUR_SEC = 3600
 _RATE_WINDOW_DAY_SEC = 24 * 3600
+
+
+def _resolve_windows_shim(argv: List[Any]) -> List[Any]:
+    """Route .cmd/.bat shims through cmd.exe on Windows.
+
+    Node/npm-installed CLIs (codex, openclaw, ...) put a .cmd batch wrapper
+    on PATH, not a real .exe. subprocess.run without shell=True calls
+    CreateProcess directly, which cannot launch a batch file and fails with
+    WinError 2 ("system cannot find the file") even though the file is
+    right there on PATH. Only .cmd/.bat need this — a real .exe (e.g.
+    claude.exe) runs fine as-is. Kept as an explicit argv prefix rather than
+    shell=True so per-argument quoting (the briefing file path) stays
+    subprocess-safe instead of shell-parsed.
+    """
+    if sys.platform != "win32" or not argv:
+        return argv
+    resolved = shutil.which(str(argv[0]))
+    if resolved and resolved.lower().endswith((".cmd", ".bat")):
+        return ["cmd.exe", "/c", *argv]
+    return argv
 
 
 def _config_path() -> Path:
@@ -297,6 +319,7 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
             arg.replace("{briefing_file}", briefing_path) if isinstance(arg, str) else arg
             for arg in command
         ]
+        argv = _resolve_windows_shim(argv)
 
         if dry_run:
             result = {"ok": True, "harness": name, "dry_run": True, "would_run": argv}
