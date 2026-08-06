@@ -87,25 +87,41 @@ def test_missing_name_is_ignored(tmp_path, monkeypatch):
 
 # --- calibration completing --------------------------------------------------
 
-def test_calibrates_to_max_ambient_plus_margin(tmp_path, monkeypatch):
+def test_calibrates_to_quantile_plus_margin_ignoring_outliers(tmp_path, monkeypatch):
+    """The 1.04 regression, prevented at the root: two 0.99 outliers among
+    mostly-quiet ambient samples must NOT own the floor (max would have set
+    0.99+0.05=1.04; the p90 quantile stays with the quiet majority)."""
     _patch(tmp_path, monkeypatch)
     hc = _hc()
-    saliences = [0.1] * (floor_calibration.CALIBRATION_WINDOW - 1) + [0.42]
+    saliences = [0.25] * (floor_calibration.CALIBRATION_WINDOW - 2) + [0.99, 0.99]
     for s in saliences:
         floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=s))
-    expected = round(0.42 + floor_calibration.CALIBRATION_MARGIN, 4)
-    assert floor_calibration.resolve_floor("h") == expected
+    # p90 of (18x0.25, 2x0.99) = 0.25 -> +margin = 0.30 -> clamped up to warmup
+    assert floor_calibration.resolve_floor("h") == floor_calibration.WARMUP_FLOOR
 
 
-def test_stops_collecting_once_calibrated(tmp_path, monkeypatch):
+def test_floor_drifts_with_rolling_window(tmp_path, monkeypatch):
+    """When the environment changes (e.g. new feeds raise normal winner
+    salience), the floor must follow instead of staying frozen forever."""
     _patch(tmp_path, monkeypatch)
     hc = _hc()
     for _ in range(floor_calibration.CALIBRATION_WINDOW):
+        floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.25))
+    quiet_floor = floor_calibration.resolve_floor("h")
+    for _ in range(floor_calibration.ROLLING_WINDOW):
+        floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.6))
+    loud_floor = floor_calibration.resolve_floor("h")
+    assert loud_floor > quiet_floor
+    assert loud_floor == round(0.6 + floor_calibration.CALIBRATION_MARGIN, 4)
+
+
+def test_rolling_window_caps_sample_count(tmp_path, monkeypatch):
+    _patch(tmp_path, monkeypatch)
+    hc = _hc()
+    for _ in range(floor_calibration.ROLLING_WINDOW + 25):
         floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.3))
-    floor_before = floor_calibration.resolve_floor("h")
-    # A much higher ambient winner after calibration must NOT move the floor.
-    floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.99))
-    assert floor_calibration.resolve_floor("h") == floor_before
+    state = json.loads(floor_calibration.STATE_FILE.read_text())
+    assert len(state["h"]["samples"]) == floor_calibration.ROLLING_WINDOW
 
 
 def test_journals_exactly_once_on_completion(tmp_path, monkeypatch):
@@ -122,8 +138,9 @@ def test_journals_exactly_once_on_completion(tmp_path, monkeypatch):
 def test_harnesses_calibrate_independently(tmp_path, monkeypatch):
     _patch(tmp_path, monkeypatch)
     for _ in range(floor_calibration.CALIBRATION_WINDOW):
-        floor_calibration.maybe_record_ambient_sample(_hc("a"), _winner(salience=0.2))
-    assert floor_calibration.resolve_floor("a") != floor_calibration.WARMUP_FLOOR
+        floor_calibration.maybe_record_ambient_sample(_hc("a"), _winner(salience=0.6))
+    assert floor_calibration.resolve_floor("a") == round(
+        0.6 + floor_calibration.CALIBRATION_MARGIN, 4)
     assert floor_calibration.resolve_floor("b") == floor_calibration.WARMUP_FLOOR
 
 

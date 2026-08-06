@@ -81,9 +81,12 @@ def test_calibrate_mode_uses_learned_floor_once_calibrated(tmp_path, monkeypatch
     monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "journal.jsonl")
 
     hc = {"name": "h", "wake_min_salience": "calibrate"}
+    # 0.6 ambient keeps the learned floor above the WARMUP_FLOOR lower clamp,
+    # so this asserts the LEARNED value is enforced, not the warmup default.
     for _ in range(floor_calibration.CALIBRATION_WINDOW):
-        floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.15))
-    learned = round(0.15 + floor_calibration.CALIBRATION_MARGIN, 4)
+        floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.6))
+    learned = round(0.6 + floor_calibration.CALIBRATION_MARGIN, 4)
+    assert learned > floor_calibration.WARMUP_FLOOR
     assert not StreamRunner._harness_wants(hc, _winner(salience=learned - 0.01))
     assert StreamRunner._harness_wants(hc, _winner(salience=learned))
 

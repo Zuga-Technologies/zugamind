@@ -18,10 +18,19 @@ of in one offline pass.
 Warmup safety: before `CALIBRATION_WINDOW` ambient samples have been
 observed, `resolve_floor()` returns `WARMUP_FLOOR` — the same 0.35 the
 product has always shipped as a static default — so calibrate mode is never
-MORE permissive than today's default while it's still learning. Once the
-window fills, the floor is fixed (this deployment's traffic pattern is
-assumed roughly stationary; recalibration is a deliberate future extension,
-not automatic drift).
+MORE permissive than today's default while it's still learning.
+
+Rolling quantile, not frozen max (redesigned 2026-08-06): the original
+design froze `max(20 samples) + margin` forever. Both choices failed live
+the same week: `max` let two 0.99 outlier winners recorded as "ambient" set
+a 1.04 floor on a 1.0-bounded scale (nothing could ever wake), and freezing
+meant the bar could never recover when the environment changed (the same
+day, new sensory feeds shifted normal winner salience from ~0.25 to
+0.6-0.75). Now: keep the last `ROLLING_WINDOW` ambient samples, floor =
+`QUANTILE`th quantile + margin, recomputed on every sample, clamped to
+[WARMUP_FLOOR, FLOOR_CEILING]. A quantile barely moves for one outlier; a
+rolling window lets the bar drift with reality over ~a day instead of
+staying loyal to a stale snapshot.
 
 An "ambient" sample is a winner that reached this harness's wake decision
 but was NOT an alarm-lane winner (those bypass the floor by design — they
@@ -47,7 +56,9 @@ logger = logging.getLogger("zugamind.act.floor_calibration")
 
 STATE_FILE = DATA_DIR / "floor_calibration.json"
 
-CALIBRATION_WINDOW = 20
+CALIBRATION_WINDOW = 20   # min samples before a calibrated floor applies
+ROLLING_WINDOW = 50       # max samples kept; older ones age out
+QUANTILE = 0.9            # floor sits above ~90% of ambient noise, not above all of it
 CALIBRATION_MARGIN = 0.05
 WARMUP_FLOOR = 0.35
 # Hard ceiling on any calibrated floor. Salience is bounded at 1.0, so a
@@ -57,6 +68,17 @@ WARMUP_FLOOR = 0.35
 # calibration day. Applied at compute AND resolve so pre-existing bad state
 # files heal without manual surgery.
 FLOOR_CEILING = 0.9
+
+
+def _quantile_floor(samples: list) -> float:
+    """Floor = QUANTILEth quantile of ambient samples + margin, clamped to
+    [WARMUP_FLOOR, FLOOR_CEILING]. Conservative nearest-rank quantile —
+    stdlib-only, stable for the 20-50 sample sizes this module holds."""
+    import math
+    ordered = sorted(samples)
+    k = max(0, math.ceil(QUANTILE * len(ordered)) - 1)
+    raw = ordered[k] + CALIBRATION_MARGIN
+    return round(min(max(raw, WARMUP_FLOOR), FLOOR_CEILING), 4)
 
 
 def _load_state() -> Dict[str, Any]:
@@ -103,18 +125,17 @@ def maybe_record_ambient_sample(hc: Dict[str, Any], winner_dict: Optional[Dict[s
 
         state = _load_state()
         entry = state.setdefault(name, {"samples": [], "floor": None, "calibrated_at": None})
-        if entry.get("floor") is not None:
-            return  # already calibrated for this harness — stop collecting
 
-        entry["samples"].append(float(salience))
+        entry["samples"] = (entry["samples"] + [float(salience)])[-ROLLING_WINDOW:]
         if len(entry["samples"]) >= CALIBRATION_WINDOW:
-            floor = round(min(max(entry["samples"]) + CALIBRATION_MARGIN,
-                               FLOOR_CEILING), 4)
-            entry["floor"] = floor
-            entry["calibrated_at"] = datetime.now().isoformat()
-            journal.append_event("floor_calibrated", {
-                "harness": name, "floor": floor, "samples": len(entry["samples"]),
-            })
+            first_calibration = entry.get("floor") is None
+            entry["floor"] = _quantile_floor(entry["samples"])
+            if first_calibration:
+                entry["calibrated_at"] = datetime.now().isoformat()
+                journal.append_event("floor_calibrated", {
+                    "harness": name, "floor": entry["floor"],
+                    "samples": len(entry["samples"]),
+                })
         _save_state(state)
     except Exception as e:  # noqa: BLE001 — calibration must never break a wake cycle
         logger.warning("floor_calibration record failed (non-fatal): %s", e)
