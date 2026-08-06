@@ -17,10 +17,15 @@ trigger contract (type/detail/novelty/relevance/urgency, <=5 per cycle):
      hash is recorded as a silent baseline (no trigger — there's nothing to
      compare against yet); every fetch after that triggers `reach_web_update`
      only if the hash actually moved.
-  2. search — Exa web search via `mcporter call exa.web_search_exa`, run as
-     a subprocess. Requires `mcporter` (github.com/mcporter) on PATH; if it
-     isn't installed this channel is silently off — not an error, just one
-     fewer set of eyes, same as the other channel being unconfigured.
+  2. search — standing web-search queries, backend chain in order:
+       a. Exa via `mcporter call exa.web_search_exa` (Agent-Reach's native
+          route) when `mcporter` is on PATH;
+       b. Tavily REST (https://api.tavily.com/search) when TAVILY_API_KEY
+          is set — plain stdlib HTTPS POST, no extra install;
+       c. neither available -> channel silently off, not an error.
+     Search runs on its OWN slower cadence (ZUGAMIND_REACH_SEARCH_TTL,
+     default 6h) because every query poll is real upstream API spend,
+     unlike the watch channel's free Jina fetches.
 
 Injected scanners bypass ZugaMind's habituation filter (see the runner's
 extra_scanners contract in the README), so this adapter keeps its own
@@ -40,12 +45,16 @@ Configuration (env):
                                 Optional.
     (at least one of the above two must be set — unset means the whole
     scanner is off, returns [].)
-    ZUGAMIND_REACH_CACHE_TTL    seconds between re-fetching either channel.
-                                Default 3600 (60 min) — kept high by design,
-                                Jina Reader renders + Exa search both cost
-                                real latency and, for Exa, real API spend
-                                upstream of mcporter; this is not tuned for
-                                sub-minute freshness.
+    ZUGAMIND_REACH_CACHE_TTL    seconds between watch-channel re-fetches.
+                                Default 3600 (60 min) — not tuned for
+                                sub-minute freshness by design.
+    ZUGAMIND_REACH_SEARCH_TTL   seconds between search-channel re-polls.
+                                Default 21600 (6 h) — each poll is real
+                                upstream API spend (Exa or Tavily), and a
+                                standing query's answer set doesn't churn
+                                by the hour.
+    TAVILY_API_KEY              enables the Tavily search backend when
+                                mcporter is absent. Optional.
     ZUGAMIND_REACH_KEYWORDS     optional comma-separated keywords, case-
                                 insensitive. If set, relevance scores higher
                                 for hits and lower for misses; if unset,
@@ -85,6 +94,7 @@ logger = logging.getLogger("zugamind.examples.agent_reach")
 
 _TIMEOUT = 20.0  # Jina Reader renders + mcporter subprocess both run slower than a bare API call
 _DEFAULT_CACHE_TTL = 3600
+_DEFAULT_SEARCH_TTL = 21600
 _MAX_TRIGGERS = 5
 _SEEN_MAX = 1000
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent / "data")
@@ -170,6 +180,45 @@ def _fetch_exa_results(query: str) -> list[dict[str, Any]]:
         return []
 
 
+def _fetch_tavily_results(query: str) -> list[dict[str, Any]]:
+    """Run one Tavily search via plain REST (same request shape as the
+    known-working Documentus connector). Normalizes Tavily's `content`
+    field to `text` so the candidate loop treats both backends alike."""
+    api_key = os.environ.get("TAVILY_API_KEY", "")
+    if not api_key:
+        return []
+    try:
+        payload = json.dumps({
+            "api_key": api_key, "query": query,
+            "max_results": 5, "search_depth": "basic",
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.tavily.com/search", data=payload,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        results = data.get("results", []) if isinstance(data, dict) else []
+        return [
+            {"title": r.get("title", ""), "url": r.get("url", ""),
+             "text": r.get("content", "")}
+            for r in results if isinstance(r, dict)
+        ]
+    except Exception as e:
+        logger.debug("agent_reach: tavily search %r failed: %s", query, e)
+        return []
+
+
+def _fetch_search_results(query: str) -> list[dict[str, Any]]:
+    """Backend chain: mcporter/Exa (Agent-Reach's native route) if installed,
+    else Tavily REST if a key is set, else the channel is off."""
+    if _mcporter_available():
+        return _fetch_exa_results(query)
+    if os.environ.get("TAVILY_API_KEY"):
+        return _fetch_tavily_results(query)
+    return []
+
+
 # ------------------------------------------------------------------ scanner --
 
 def scan_agent_reach() -> list[dict[str, Any]]:
@@ -181,9 +230,13 @@ def scan_agent_reach() -> list[dict[str, Any]]:
         return []  # unconfigured = off
 
     ttl = int(os.environ.get("ZUGAMIND_REACH_CACHE_TTL", str(_DEFAULT_CACHE_TTL)))
-    cache = _load_json(_FETCH_CACHE_FILE, {"ts": 0, "watch_hashes": {}})
-    if time.time() - cache.get("ts", 0) < ttl:
-        return []  # respect the fetch cadence; both channels cost real latency/spend
+    search_ttl = int(os.environ.get("ZUGAMIND_REACH_SEARCH_TTL", str(_DEFAULT_SEARCH_TTL)))
+    cache = _load_json(_FETCH_CACHE_FILE, {"ts": 0, "search_ts": 0, "watch_hashes": {}})
+    now = time.time()
+    run_watch = bool(watch_urls) and now - cache.get("ts", 0) >= ttl
+    run_search = bool(queries) and now - cache.get("search_ts", 0) >= search_ttl
+    if not run_watch and not run_search:
+        return []  # both channels inside their cadence; fetches cost latency/spend
 
     watch_hashes: dict[str, str] = dict(cache.get("watch_hashes", {}))
     seen: set[str] = set(_load_json(_SEEN_FILE, []))
@@ -194,7 +247,7 @@ def scan_agent_reach() -> list[dict[str, Any]]:
     # lost forever.
     candidates: list[tuple[str, str, str | None, dict[str, Any]]] = []
 
-    for url in watch_urls:
+    for url in (watch_urls if run_watch else []):
         body = _fetch_jina(url)
         if body is None:
             continue
@@ -217,9 +270,9 @@ def scan_agent_reach() -> list[dict[str, Any]]:
             "url": url,
         }))
 
-    if queries and _mcporter_available():
+    if run_search:
         for query in queries:
-            for r in _fetch_exa_results(query):
+            for r in _fetch_search_results(query):
                 if not isinstance(r, dict):
                     continue
                 url = r.get("url", "")
@@ -246,7 +299,10 @@ def scan_agent_reach() -> list[dict[str, Any]]:
         else:
             seen.add(key)
 
-    cache["ts"] = time.time()
+    if run_watch:
+        cache["ts"] = now
+    if run_search:
+        cache["search_ts"] = now
     cache["watch_hashes"] = watch_hashes
     _save_json(_FETCH_CACHE_FILE, cache)
     _save_json(_SEEN_FILE, sorted(seen)[-_SEEN_MAX:])

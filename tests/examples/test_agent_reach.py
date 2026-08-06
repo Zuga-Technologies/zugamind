@@ -98,6 +98,7 @@ def test_search_seen_set_dedupes_across_cycles(monkeypatch, tmp_path):
     monkeypatch.delenv("ZUGAMIND_REACH_WATCH_URLS", raising=False)
     monkeypatch.setenv("ZUGAMIND_REACH_QUERIES", "zugamind news")
     monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TTL", "100")
     clock = _fake_clock(monkeypatch)
 
     monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: True)
@@ -263,6 +264,7 @@ def test_both_channels_combine_and_share_one_cap(monkeypatch, tmp_path):
     monkeypatch.setenv("ZUGAMIND_REACH_WATCH_URLS", ",".join(urls))
     monkeypatch.setenv("ZUGAMIND_REACH_QUERIES", "q1,q2,q3")
     monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TTL", "100")
     clock = _fake_clock(monkeypatch)
 
     monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: True)
@@ -286,3 +288,69 @@ def test_both_channels_combine_and_share_one_cap(monkeypatch, tmp_path):
     out2 = agent_reach.scan_agent_reach()
     assert len(out2) == 3
     assert all(t["type"] == "reach_web_update" for t in out2)
+
+
+# ------------------------------------------------------------ tavily backend --
+
+def test_backend_chain_prefers_mcporter_then_tavily(monkeypatch):
+    monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: True)
+    monkeypatch.setattr(agent_reach, "_fetch_exa_results", lambda q: [{"url": "http://exa"}])
+    monkeypatch.setattr(agent_reach, "_fetch_tavily_results", lambda q: [{"url": "http://tavily"}])
+    monkeypatch.setenv("TAVILY_API_KEY", "k")
+    assert agent_reach._fetch_search_results("q")[0]["url"] == "http://exa"
+
+    monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: False)
+    assert agent_reach._fetch_search_results("q")[0]["url"] == "http://tavily"
+
+    monkeypatch.delenv("TAVILY_API_KEY")
+    assert agent_reach._fetch_search_results("q") == []
+
+
+def test_tavily_normalizes_content_to_text(monkeypatch):
+    class _Resp:
+        def read(self):
+            return json.dumps({"results": [
+                {"title": "T", "url": "http://u", "content": "body text"},
+            ]}).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setenv("TAVILY_API_KEY", "k")
+    monkeypatch.setattr(agent_reach.urllib.request, "urlopen", lambda req, timeout: _Resp())
+    out = agent_reach._fetch_tavily_results("q")
+    assert out == [{"title": "T", "url": "http://u", "text": "body text"}]
+
+
+def test_tavily_fails_silently_on_network_error(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "k")
+    def boom(req, timeout):
+        raise OSError("down")
+    monkeypatch.setattr(agent_reach.urllib.request, "urlopen", boom)
+    assert agent_reach._fetch_tavily_results("q") == []
+
+
+def test_search_and_watch_cadences_are_independent(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZUGAMIND_REACH_WATCH_URLS", "http://example.com/a")
+    monkeypatch.setenv("ZUGAMIND_REACH_QUERIES", "q")
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TTL", "10000")
+    clock = _fake_clock(monkeypatch, start=50_000.0)
+
+    monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: False)
+    monkeypatch.setenv("TAVILY_API_KEY", "k")
+    calls = {"n": 0}
+    def fake_tavily(q):
+        calls["n"] += 1
+        return [{"url": f"http://t/{calls['n']}", "title": "t", "text": ""}]
+    monkeypatch.setattr(agent_reach, "_fetch_tavily_results", fake_tavily)
+    version = {"n": 0}
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: f"v{version['n']}")
+
+    agent_reach.scan_agent_reach()          # both run: baseline + search #1
+    assert calls["n"] == 1
+    clock["t"] += 200                        # watch TTL expired, search TTL not
+    version["n"] = 1
+    out = agent_reach.scan_agent_reach()
+    assert calls["n"] == 1                   # search did NOT re-poll
+    assert [t["type"] for t in out] == ["reach_web_update"]
