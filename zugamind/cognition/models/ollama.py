@@ -26,7 +26,7 @@ def ollama_query(
     system: str = "",
     timeout: int = SENTINEL_TIMEOUT,
     keep_alive: str = "10m",
-    retries: int = 1,
+    retries: int = 3,
 ) -> str | None:
     """Query the local Ollama model. Returns response text or None on error.
 
@@ -38,6 +38,11 @@ def ollama_query(
     after a short pause recovers from that transient state without needing a
     server restart; a genuinely down Ollama still returns None after both
     attempts, same as before.
+
+    Bumped 1->3 retries + backoff (2026-08-03): a real repo_issues alarm hit
+    two straight transient 404s from Ollama and got dropped as harness_skip
+    even though a manual retry moments later succeeded clean. Two attempts
+    wasn't enough margin for a real event to survive a brief hiccup.
     """
     messages = []
     if system.strip():
@@ -72,7 +77,7 @@ def ollama_query(
                 "Ollama query failed (attempt %d/%d): %s", attempt + 1, attempts, e
             )
             if not is_last:
-                time.sleep(3)
+                time.sleep(3 + attempt * 2)  # 3s, 5s, 7s -- more room per retry
     return None
 
 
