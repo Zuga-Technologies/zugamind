@@ -133,3 +133,24 @@ def test_never_raises_on_corrupt_state_file(tmp_path, monkeypatch):
     floor_calibration.STATE_FILE.write_text("not json", encoding="utf-8")
     assert floor_calibration.resolve_floor("h") == floor_calibration.WARMUP_FLOOR
     floor_calibration.maybe_record_ambient_sample(_hc(), _winner())  # must not raise
+
+
+def test_floor_never_exceeds_ceiling(tmp_path, monkeypatch):
+    """Regression: 0.99 'ambient' samples calibrated a 1.04 floor — above the
+    1.0 salience bound, silently disabling every non-alarm wake (live bug,
+    2026-08-06; wakes dead since calibration day Aug 3)."""
+    _patch(tmp_path, monkeypatch)
+    hc = _hc()
+    for _ in range(floor_calibration.CALIBRATION_WINDOW):
+        floor_calibration.maybe_record_ambient_sample(hc, _winner(salience=0.99))
+    assert floor_calibration.resolve_floor("h") <= floor_calibration.FLOOR_CEILING
+
+
+def test_resolve_clamps_preexisting_bad_floor(tmp_path, monkeypatch):
+    """A state file calibrated before the ceiling existed must heal on read."""
+    _patch(tmp_path, monkeypatch)
+    floor_calibration.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    floor_calibration.STATE_FILE.write_text(
+        json.dumps({"h": {"samples": [], "floor": 1.04, "calibrated_at": "x"}}),
+        encoding="utf-8")
+    assert floor_calibration.resolve_floor("h") == floor_calibration.FLOOR_CEILING

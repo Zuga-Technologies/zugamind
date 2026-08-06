@@ -50,6 +50,13 @@ STATE_FILE = DATA_DIR / "floor_calibration.json"
 CALIBRATION_WINDOW = 20
 CALIBRATION_MARGIN = 0.05
 WARMUP_FLOOR = 0.35
+# Hard ceiling on any calibrated floor. Salience is bounded at 1.0, so a
+# floor above ~0.9 means "never wake" — the opposite of what calibration is
+# for. Found live 2026-08-06: near-max winners (0.99) recorded as "ambient"
+# pushed max(samples)+margin to 1.04, silently disabling every wake since
+# calibration day. Applied at compute AND resolve so pre-existing bad state
+# files heal without manual surgery.
+FLOOR_CEILING = 0.9
 
 
 def _load_state() -> Dict[str, Any]:
@@ -101,7 +108,8 @@ def maybe_record_ambient_sample(hc: Dict[str, Any], winner_dict: Optional[Dict[s
 
         entry["samples"].append(float(salience))
         if len(entry["samples"]) >= CALIBRATION_WINDOW:
-            floor = round(max(entry["samples"]) + CALIBRATION_MARGIN, 4)
+            floor = round(min(max(entry["samples"]) + CALIBRATION_MARGIN,
+                               FLOOR_CEILING), 4)
             entry["floor"] = floor
             entry["calibrated_at"] = datetime.now().isoformat()
             journal.append_event("floor_calibrated", {
@@ -119,7 +127,7 @@ def resolve_floor(harness_name: str) -> float:
         state = _load_state()
         entry = state.get(harness_name)
         if entry and entry.get("floor") is not None:
-            return float(entry["floor"])
+            return min(float(entry["floor"]), FLOOR_CEILING)
     except Exception as e:  # noqa: BLE001
         logger.warning("floor_calibration resolve failed (non-fatal): %s", e)
     return WARMUP_FLOOR
