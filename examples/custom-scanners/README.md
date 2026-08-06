@@ -81,6 +81,19 @@ Your function:
   15 results/poll) are tuned for ~$50/month, not maximum freshness. Read the
   module docstring's cost math before changing either default; both scale the
   bill roughly linearly. Verified against the live API before shipping.
+- **`agent_reach.py`** — adapts two cookie-free channels from Agent-Reach
+  (github.com/Panniantong/Agent-Reach), a router that fronts several web
+  tools: a page-watch channel (any URL, fetched as markdown via Jina Reader,
+  triggers `reach_web_update` on content-hash change) and a search channel
+  (Exa web search via `mcporter call exa.web_search_exa`, triggers
+  `reach_search_result` per new result). Config: `ZUGAMIND_REACH_WATCH_URLS`,
+  `ZUGAMIND_REACH_QUERIES` (at least one required), optional
+  `ZUGAMIND_REACH_CACHE_TTL` / `ZUGAMIND_REACH_KEYWORDS`. The search channel
+  needs `mcporter` on PATH — if it isn't installed, that channel is just off,
+  same as any other unconfigured channel. First sight of a watched page
+  baselines its hash silently rather than firing a spurious "changed"
+  trigger; entries cut by the 5-trigger cap stay uncommitted so they get a
+  fair shot on the next cycle instead of being lost.
 - **`run_with_custom_scanners.py`** — the launcher shape above, runnable
   as-is once you've set the env vars for whichever example(s) you want.
 

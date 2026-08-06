@@ -27,7 +27,8 @@ def _trigger(ttype="hackernews_story", relevance=0.5, urgency=0.2, detail="HN: t
 def test_every_world_scanner_type_routes_somewhere():
     # The exact regression: these existed for months while routing nowhere.
     for ttype in ("hackernews_story", "reddit_ai_post", "ai_lab_research",
-                  "repo_star_delta", "repo_fork", "repo_release"):
+                  "repo_star_delta", "repo_fork", "repo_release",
+                  "reach_web_update", "reach_search_result"):
         assert ttype in TRIGGER_TYPE_TO_MODULE, f"{ttype} is orphaned again"
         assert TRIGGER_TYPE_TO_MODULE[ttype] == "world_signals"
 
