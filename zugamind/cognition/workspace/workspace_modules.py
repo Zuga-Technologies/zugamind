@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -505,6 +506,75 @@ class PriorityGoalsModule(WorkspaceModule):
 
 
 # =============================================================================
+# MODULE: World signals (external)
+# =============================================================================
+
+class WorldSignalsModule(WorkspaceModule):
+    """Aggregates outward-looking triggers — the world scanners' voice.
+
+    Before this module existed, none of the world scanners' trigger types
+    (hackernews_story, reddit_ai_post, ...) appeared in any TRIGGER_TYPES
+    set, so route_triggers_to_modules() silently dropped every external
+    signal before the bid pass: the engine shipped with eyes that were
+    never wired to the brain. This module is the socket they plug into.
+
+    Salience comes from the single strongest trigger, never from volume —
+    50 triggers can't shout 50x louder than one. Capped below alarm
+    territory: world news is interesting, not urgent. (A genuinely urgent
+    trigger — urgency >= 0.9 — still reaches the alarm lane on its own,
+    which reads trigger urgency directly, not bid salience.)
+
+    Deployments injecting custom scanners can extend routing without a
+    fork via ZUGAMIND_WORLD_SIGNAL_EXTRA_TYPES (comma-separated trigger
+    types), read once at import time — set it before importing the runner.
+    """
+    name = "world_signals"
+
+    TRIGGER_TYPES = {
+        "hackernews_story", "reddit_ai_post", "ai_lab_research",
+        "repo_star_delta", "repo_fork", "repo_release",
+    } | {
+        t.strip()
+        for t in os.environ.get("ZUGAMIND_WORLD_SIGNAL_EXTRA_TYPES", "").split(",")
+        if t.strip()
+    }
+
+    _SALIENCE_CAP = 0.75  # below RepoIssues' 0.7 floor + margin; never outshouts ops
+    _BASE = 0.25
+
+    def generate_bid(self, context: Dict[str, Any]) -> Optional[SalienceBid]:
+        if not self._triggers:
+            return None  # a quiet world is healthy — no bid, not a low bid
+
+        best = max(self._triggers,
+                   key=lambda t: t.get("relevance", 0.0) + t.get("urgency", 0.0))
+        salience = min(
+            self._SALIENCE_CAP,
+            self._BASE
+            + 0.4 * float(best.get("relevance", 0.0))
+            + 0.2 * float(best.get("urgency", 0.0)),
+        )
+
+        others = len(self._triggers) - 1
+        content = str(best.get("detail", "external signal"))[:200]
+        if others:
+            content += f" (+{others} more external signal{'s' if others > 1 else ''})"
+
+        return SalienceBid(
+            source_module=self.name,
+            content=content,
+            salience=salience,
+            thought_type=ThoughtType.EXTERNAL_SIGNAL,
+            context={
+                "trigger_count": len(self._triggers),
+                "top_type": best.get("type"),
+                "top_url": best.get("url"),
+                "types": sorted({str(t.get("type", "?")) for t in self._triggers}),
+            },
+        )
+
+
+# =============================================================================
 # FACTORY
 # =============================================================================
 
@@ -517,6 +587,7 @@ ALL_MODULES = [
     ScheduleModule,
     MetacognitiveModule,
     PriorityGoalsModule,
+    WorldSignalsModule,
 ]
 
 # Map trigger types to modules for routing.
