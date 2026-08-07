@@ -63,6 +63,17 @@ def test_salience_capped_below_ops_territory():
     assert mod.generate_bid({}).salience <= 0.75
 
 
+def test_link_key_surfaces_as_top_url():
+    # news_rss / ai_lab_research triggers carry their URL under "link", not
+    # "url" — reading only "url" left top_url null in every journal cycle,
+    # making those types invisible to downstream consumers (found 2026-08-06).
+    mod = WorldSignalsModule()
+    t = _trigger(ttype="ai_lab_research", relevance=0.8)
+    t["link"] = "https://openai.com/research/thing"
+    mod.set_triggers([t])
+    assert mod.generate_bid({}).context["top_url"] == "https://openai.com/research/thing"
+
+
 def test_extra_types_env_extends_routing(monkeypatch):
     monkeypatch.setenv("ZUGAMIND_WORLD_SIGNAL_EXTRA_TYPES",
                        "tester_crash, custom_signal")

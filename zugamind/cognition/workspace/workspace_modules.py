@@ -569,7 +569,7 @@ class WorldSignalsModule(WorkspaceModule):
             context={
                 "trigger_count": len(self._triggers),
                 "top_type": best.get("type"),
-                "top_url": best.get("url"),
+                "top_url": best.get("url") or best.get("link"),
                 "types": sorted({str(t.get("type", "?")) for t in self._triggers}),
             },
         )
