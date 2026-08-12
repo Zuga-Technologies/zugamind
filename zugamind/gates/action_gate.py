@@ -21,6 +21,8 @@ import re
 import time
 from typing import Any, Literal, TypedDict
 
+from foundation.failure_reason import map_local_slug
+
 logger = logging.getLogger("zugamind.action_gate")
 
 IntentKind = Literal[
@@ -218,6 +220,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "cost": 0.0,
             "model": "deferred",
             "reason": "requires_human_review",
+            "failure_reason": map_local_slug("requires_human_review"),
             "caller": caller,
         }
         _idempotency_store(intent_d, result)
@@ -236,12 +239,14 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     shield = _resolve_shield()
     shield_reason = shield(intent_d)
     if shield_reason:
+        blocked_reason = f"shield_refused:{shield_reason}"
         return {
             "ok": False,
             "response": None,
             "cost": 0.0,
             "model": "blocked",
-            "reason": f"shield_refused:{shield_reason}",
+            "reason": blocked_reason,
+            "failure_reason": map_local_slug(blocked_reason),
             "caller": caller,
         }
 
@@ -249,12 +254,14 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         can_spend, record_spend, load_budget = _resolve_budget_helpers()
     except Exception as exc:
         logger.warning("action_gate: budget import failed: %s", exc)
+        import_reason = f"import_error:{exc}"
         return {
             "ok": False,
             "response": None,
             "cost": 0.0,
             "model": "none",
-            "reason": f"import_error:{exc}",
+            "reason": import_reason,
+            "failure_reason": map_local_slug(import_reason),
             "caller": caller,
         }
 
@@ -275,12 +282,14 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         budget = load_budget()
     except Exception as exc:
         logger.warning("action_gate: load_budget failed: %s", exc)
+        budget_error_reason = f"budget_error:{exc}"
         return {
             "ok": False,
             "response": None,
             "cost": 0.0,
             "model": "none",
-            "reason": f"budget_error:{exc}",
+            "reason": budget_error_reason,
+            "failure_reason": map_local_slug(budget_error_reason),
             "tier": tier,
             "caller": caller,
         }
@@ -289,12 +298,14 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         affordable = can_spend(budget, tier)
     except Exception as exc:  # noqa: BLE001 — fail closed, matches load_budget above
         logger.warning("action_gate: can_spend check failed: %s", exc)
+        can_spend_reason = f"can_spend_error:{exc}"
         return {
             "ok": False,
             "response": None,
             "cost": 0.0,
             "model": "none",
-            "reason": f"can_spend_error:{exc}",
+            "reason": can_spend_reason,
+            "failure_reason": map_local_slug(can_spend_reason),
             "tier": tier,
             "caller": caller,
         }
@@ -306,6 +317,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "cost": 0.0,
             "model": "none",
             "reason": "budget_exhausted",
+            "failure_reason": map_local_slug("budget_exhausted"),
             "tier": tier,
             "caller": caller,
         }
@@ -324,12 +336,14 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             )
     except Exception as exc:
         logger.warning("action_gate: api_error kind=%s: %s", kind, exc)
+        api_error_reason = f"api_error:{exc}"
         return {
             "ok": False,
             "response": None,
             "cost": 0.0,
             "model": model_id,
-            "reason": f"api_error:{exc}",
+            "reason": api_error_reason,
+            "failure_reason": map_local_slug(api_error_reason),
             "tier": tier,
             "caller": caller,
         }
@@ -341,6 +355,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "cost": 0.0,
             "model": model_id,
             "reason": "api_error",
+            "failure_reason": map_local_slug("api_error"),
             "tier": tier,
             "caller": caller,
         }
@@ -391,13 +406,20 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         try:
             from continuity import journal  # noqa: WPS433 — lazy, like the other helpers
             from foundation.config import HAIKU_COST, SONNET_COST, OPUS_COST  # noqa: WPS433
+            from foundation.failure_reason import normalize  # noqa: WPS433
             estimated = {"haiku": HAIKU_COST, "sonnet": SONNET_COST,
                          "opus": OPUS_COST}.get(tier, 0.0)
+            # Unlike the ok:True `budget_not_persisted:<exc>` reason on the
+            # returned result (excluded — success rows stay NULL), this
+            # JOURNAL event IS failure-shaped: a write genuinely failed.
+            # Direct literal mapping (not map_local_slug's local-vocabulary
+            # table) per Buga's ruling.
             journal.append_event("budget_persist_failed", {
                 "tier": tier,
                 "estimated_cost": estimated,
                 "caller": caller,
                 "error": str(persist_exc),
+                "failure_reason": normalize(f"infrastructure: budget persist failed: {persist_exc}"),
             })
         except Exception as exc:  # noqa: BLE001 — trail is best-effort by contract
             logger.warning("action_gate: budget_persist_failed journaling failed: %s", exc)

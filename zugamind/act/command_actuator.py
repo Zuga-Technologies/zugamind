@@ -57,6 +57,7 @@ from typing import Any, Dict, List, Optional
 
 from continuity import journal
 from foundation.config import DATA_DIR
+from foundation.failure_reason import map_local_slug
 
 logger = logging.getLogger("zugamind.act.command_actuator")
 
@@ -274,7 +275,10 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
         # posture; treating it as zero would erase both rate limits exactly
         # when the audit trail is already broken.
         journal.append_event("harness_rate_limit_indeterminate", {"harness": name})
-        return {"ok": False, "error": "rate_limit_indeterminate", "harness": name}
+        return {
+            "ok": False, "error": "rate_limit_indeterminate", "harness": name,
+            "failure_reason": map_local_slug("rate_limit_indeterminate"),
+        }
     if hour_count >= max_per_hour:
         journal.append_event("harness_rate_limited", {
             "harness": name, "window": "hour",
@@ -283,13 +287,19 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
         return {
             "ok": False, "error": "rate_limited", "harness": name, "window": "hour",
             "max_per_hour": max_per_hour, "recent_count": hour_count,
+            "failure_reason": map_local_slug(
+                f"rate_limited (hour cap: {hour_count}/{max_per_hour})"
+            ),
         }
 
     max_per_day = int(config.get("max_per_day", _DEFAULT_MAX_PER_DAY))
     day_count = _recent_invocation_count(name, _RATE_WINDOW_DAY_SEC)
     if day_count is None:
         journal.append_event("harness_rate_limit_indeterminate", {"harness": name})
-        return {"ok": False, "error": "rate_limit_indeterminate", "harness": name}
+        return {
+            "ok": False, "error": "rate_limit_indeterminate", "harness": name,
+            "failure_reason": map_local_slug("rate_limit_indeterminate"),
+        }
     if day_count >= max_per_day:
         journal.append_event("harness_rate_limited", {
             "harness": name, "window": "day",
@@ -298,11 +308,17 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
         return {
             "ok": False, "error": "rate_limited", "harness": name, "window": "day",
             "max_per_day": max_per_day, "recent_count": day_count,
+            "failure_reason": map_local_slug(
+                f"rate_limited (day cap: {day_count}/{max_per_day})"
+            ),
         }
 
     command = config.get("command") or []
     if not command:
-        result = {"ok": False, "error": "empty_command", "harness": name, "dry_run": dry_run}
+        result = {
+            "ok": False, "error": "empty_command", "harness": name, "dry_run": dry_run,
+            "failure_reason": map_local_slug("empty_command"),
+        }
         journal.append_event("harness_invocation", result)
         return result
 
@@ -339,11 +355,20 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
                 result = {
                     "ok": False, "error": "timeout", "harness": name,
                     "dry_run": False, "timeout_sec": timeout_sec,
+                    "failure_reason": map_local_slug("timeout"),
                 }
             except Exception as e:  # noqa: BLE001 — never raise out of invoke_harness
-                result = {"ok": False, "error": f"invoke_error:{e}", "harness": name, "dry_run": False}
+                error = f"invoke_error:{e}"
+                result = {
+                    "ok": False, "error": error, "harness": name, "dry_run": False,
+                    "failure_reason": map_local_slug(error),
+                }
     except Exception as e:  # noqa: BLE001 — covers temp-file / substitution failures too
-        result = {"ok": False, "error": f"setup_error:{e}", "harness": name, "dry_run": dry_run}
+        error = f"setup_error:{e}"
+        result = {
+            "ok": False, "error": error, "harness": name, "dry_run": dry_run,
+            "failure_reason": map_local_slug(error),
+        }
     finally:
         if briefing_path:
             try:

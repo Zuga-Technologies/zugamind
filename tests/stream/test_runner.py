@@ -148,7 +148,63 @@ def test_gate_block_means_no_harness_invocation(tmp_path, monkeypatch):
 
     assert result["harness_results"] == []
     events = journal.read_events()
-    assert any(e["kind"] == "harness_skip" for e in events)
+    skip_events = [e for e in events if e["kind"] == "harness_skip"]
+    assert len(skip_events) == 1
+    assert skip_events[0]["reason"] == "budget_exhausted"
+    # The SAME map_local_slug mapping applied to the passed-through gate
+    # reason (runner.py doesn't invent its own taxonomy).
+    assert skip_events[0]["failure_reason"] == "budget: budget_exhausted"
+
+
+def test_gate_block_missing_reason_key_falls_back_to_gate_not_ok(tmp_path, monkeypatch):
+    """gate_result.get("reason", "gate_not_ok") — the defensive fallback for
+    an ok:False gate result with no "reason" key at all."""
+    _patch_engine_dir(tmp_path, monkeypatch)
+    harness_config = {
+        "name": "no-reason-harness", "command": ["x", "{briefing_file}"],
+        "timeout_sec": 10, "max_per_hour": 4, "enabled": True,
+    }
+    monkeypatch.setattr(command_actuator, "load_harness_configs", lambda *a, **kw: [harness_config])
+    monkeypatch.setattr(
+        runner_mod, "escalate_for_action",
+        lambda intent, dry_run=False: {"ok": False},
+    )
+
+    runner = StreamRunner(extra_scanners={"scan_toy_infra": _toy_infra_scanner}, dry_run=True, include_default_scanners=False)
+    result = runner.run_once()
+
+    assert result["harness_results"] == []
+    skip_events = [e for e in journal.read_events() if e["kind"] == "harness_skip"]
+    assert len(skip_events) == 1
+    assert skip_events[0]["reason"] == "gate_not_ok"
+    assert skip_events[0]["failure_reason"] == "unknown: gate_not_ok"
+
+
+def test_dispatch_exception_journals_runner_error_failure_reason(tmp_path, monkeypatch):
+    """Fail-closed path: an exception inside _dispatch_to_harnesses (e.g. the
+    gate call itself raising) is caught, journaled as harness_skip with
+    runner_error:<exc>, and never reaches a harness invocation."""
+    _patch_engine_dir(tmp_path, monkeypatch)
+    harness_config = {
+        "name": "boom-harness", "command": ["x", "{briefing_file}"],
+        "timeout_sec": 10, "max_per_hour": 4, "enabled": True,
+    }
+    monkeypatch.setattr(command_actuator, "load_harness_configs", lambda *a, **kw: [harness_config])
+
+    def _boom(intent, dry_run=False):
+        raise RuntimeError("gate blew up")
+
+    monkeypatch.setattr(runner_mod, "escalate_for_action", _boom)
+
+    runner = StreamRunner(extra_scanners={"scan_toy_infra": _toy_infra_scanner}, dry_run=True, include_default_scanners=False)
+    result = runner.run_once()
+
+    assert result["harness_results"] == []
+    skip_events = [e for e in journal.read_events() if e["kind"] == "harness_skip"]
+    assert len(skip_events) == 1
+    assert skip_events[0]["reason"].startswith("runner_error:")
+    assert "gate blew up" in skip_events[0]["reason"]
+    assert skip_events[0]["failure_reason"] == f"internal: {skip_events[0]['reason']}"
 
 
 # --- quiet hours -------------------------------------------------------------
@@ -193,6 +249,8 @@ def test_quiet_hours_suppresses_harness_invocation_and_journals_deferred(tmp_pat
     assert len(deferred) == 1
     assert deferred[0]["harness"] == "quiet-harness"
     assert deferred[0]["winner"] is not None
+    # Deliberate-skip state (Buga's ruling) — never a failure_reason.
+    assert "failure_reason" not in deferred[0]
     # No harness_invocation and no harness_skip — this is a deferral, not a gate refusal.
     assert not any(e["kind"] == "harness_invocation" for e in events)
     assert not any(e["kind"] == "harness_skip" for e in events)

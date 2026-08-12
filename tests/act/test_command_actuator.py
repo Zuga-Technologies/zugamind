@@ -95,6 +95,8 @@ def test_dry_run_never_executes_but_journals(tmp_path, monkeypatch):
     assert len(events) == 1
     assert events[0]["kind"] == "harness_invocation"
     assert events[0]["dry_run"] is True
+    # Success event (ok:True) — deliberate-skip/success law, no failure_reason.
+    assert "failure_reason" not in events[0]
 
 
 def test_real_invocation_runs_tiny_command_and_captures_output(tmp_path, monkeypatch):
@@ -126,6 +128,7 @@ def test_timeout_path_returns_ok_false_never_raises(tmp_path, monkeypatch):
     result = command_actuator.invoke_harness(config, "b", dry_run=False)
     assert result["ok"] is False
     assert result["error"] == "timeout"
+    assert result["failure_reason"] == "resource: timeout"
 
 
 def test_bogus_command_never_raises(tmp_path, monkeypatch):
@@ -134,6 +137,13 @@ def test_bogus_command_never_raises(tmp_path, monkeypatch):
     result = command_actuator.invoke_harness(config, "b", dry_run=False)
     assert result["ok"] is False
     assert "error" in result
+    # invoke_error's category depends on a substring check the module
+    # documents honestly — either bucket is a correct outcome here, but a
+    # failure_reason must always be present and must preserve the old
+    # "error" value verbatim as its detail.
+    assert result["failure_reason"] in (
+        f"internal: {result['error']}", f"infrastructure: {result['error']}",
+    )
 
 
 def test_disabled_harness_refuses_without_running(tmp_path, monkeypatch):
@@ -142,6 +152,8 @@ def test_disabled_harness_refuses_without_running(tmp_path, monkeypatch):
     result = command_actuator.invoke_harness(config, "b", dry_run=False)
     assert result["ok"] is False
     assert result["error"] == "harness_disabled"
+    # Deliberate-skip state (Buga's ruling) — never a failure_reason.
+    assert "failure_reason" not in result
 
 
 def test_empty_command_is_refused(tmp_path, monkeypatch):
@@ -149,6 +161,7 @@ def test_empty_command_is_refused(tmp_path, monkeypatch):
     result = command_actuator.invoke_harness(_config(command=[]), "b", dry_run=True)
     assert result["ok"] is False
     assert result["error"] == "empty_command"
+    assert result["failure_reason"] == "input: empty_command"
 
 
 # --- rate limiting via synthetic journal entries ---------------------------
@@ -164,6 +177,7 @@ def test_rate_limit_refuses_after_max_per_hour(tmp_path, monkeypatch):
     r3 = command_actuator.invoke_harness(config, "b", dry_run=True)
     assert r3["ok"] is False
     assert r3["error"] == "rate_limited"
+    assert r3["failure_reason"] == "rate_limit: rate_limited (hour cap: 2/2)"
 
     events = journal.read_events()
     assert sum(1 for e in events if e["kind"] == "harness_rate_limited") == 1
@@ -210,6 +224,7 @@ def test_per_day_cap_refuses_after_max_per_day(tmp_path, monkeypatch):
     assert r3["ok"] is False
     assert r3["error"] == "rate_limited"
     assert r3["window"] == "day"
+    assert r3["failure_reason"] == "rate_limit: rate_limited (day cap: 2/2)"
 
     events = journal.read_events()
     day_limited = [e for e in events if e["kind"] == "harness_rate_limited" and e.get("window") == "day"]
@@ -251,6 +266,7 @@ def test_unreadable_journal_refuses_invocation_not_resets_count(tmp_path, monkey
     result = command_actuator.invoke_harness(_config(), "b", dry_run=True)
     assert result["ok"] is False
     assert result["error"] == "rate_limit_indeterminate"
+    assert result["failure_reason"] == "infrastructure: rate_limit_indeterminate"
 
 
 def test_missing_journal_counts_as_zero_not_indeterminate(tmp_path, monkeypatch):

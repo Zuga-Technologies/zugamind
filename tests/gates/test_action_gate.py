@@ -60,6 +60,7 @@ class ActionGateTest(unittest.TestCase):
             )
         self.assertFalse(r["ok"])
         self.assertEqual(r["reason"], "requires_human_review")
+        self.assertEqual(r["failure_reason"], "escalation: requires_human_review")
         self.assertEqual(r["cost"], 0.0)
         self.assertEqual(called["n"], 0)
 
@@ -79,6 +80,7 @@ class ActionGateTest(unittest.TestCase):
             )
         self.assertFalse(r["ok"])
         self.assertEqual(r["reason"], "budget_exhausted")
+        self.assertEqual(r["failure_reason"], "budget: budget_exhausted")
         self.assertEqual(r["cost"], 0.0)
         self.assertEqual(called["n"], 0)
 
@@ -100,6 +102,8 @@ class ActionGateTest(unittest.TestCase):
             )
         self.assertTrue(r["ok"])
         self.assertEqual(r["reason"], "dry_run")
+        # Deliberate-skip state (Buga's ruling) — never a failure_reason.
+        self.assertNotIn("failure_reason", r)
         self.assertEqual(r["tier"], "sonnet")
         self.assertEqual(r["model"], action_gate.TIER_MODELS["sonnet"])
         self.assertEqual(r["cost"], 0.0)
@@ -147,6 +151,7 @@ class ActionGateTest(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertTrue(r["reason"].startswith("api_error"))
         self.assertIn("boom-net", r["reason"])
+        self.assertEqual(r["failure_reason"], f"dependency: {r['reason']}")
 
     def test_shield_refusal_blocks_destructive_shell(self):
         r = action_gate.escalate_for_action(
@@ -156,6 +161,7 @@ class ActionGateTest(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["model"], "blocked")
         self.assertTrue(r["reason"].startswith("shield_refused:"))
+        self.assertEqual(r["failure_reason"], f"unknown: {r['reason']}")
 
     def test_shield_refusal_blocks_prompt_injection(self):
         r = action_gate.escalate_for_action(
@@ -209,6 +215,8 @@ class ActionGateTest(unittest.TestCase):
         self.assertEqual(r["tier"], "sonnet")
         self.assertEqual(captured["model"], action_gate.TIER_MODELS["sonnet"])
         self.assertGreater(r["cost"], 0.0)
+        # ok:True (clean success) — no failure_reason at all.
+        self.assertNotIn("failure_reason", r)
 
     def test_can_spend_exception_returns_ok_false_not_raised(self):
         """can_spend() blowing up must fail closed, same as load_budget()."""
@@ -224,7 +232,58 @@ class ActionGateTest(unittest.TestCase):
             )
         self.assertFalse(r["ok"])
         self.assertTrue(r["reason"].startswith("can_spend_error:"))
+        # Buga's ruling: internal (not infrastructure) for consistency with
+        # setup_error's counterpart in command_actuator.py.
+        self.assertEqual(r["failure_reason"], f"internal: {r['reason']}")
         self.assertEqual(r["cost"], 0.0)
+
+    def test_budget_helper_import_failure_returns_import_error(self):
+        """Uncovered branch until this sitting: _resolve_budget_helpers()
+        itself raising (module import failure), not a downstream call."""
+        def _helpers_boom():
+            raise ImportError("no foundation.budget module")
+
+        with patch.object(action_gate, "_resolve_budget_helpers", _helpers_boom):
+            r = action_gate.escalate_for_action(
+                {"kind": "decide", "summary": "x", "caller": "test.import_error"},
+            )
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["reason"].startswith("import_error:"))
+        self.assertEqual(r["failure_reason"], f"internal: {r['reason']}")
+
+    def test_load_budget_failure_returns_budget_error(self):
+        """Uncovered branch until this sitting: load_budget() raising."""
+        def _boom_load_budget():
+            raise OSError("budget.json corrupt")
+
+        def _helpers_load_boom():
+            return _can_spend_yes, _record_spend_inc, _boom_load_budget
+
+        with patch.object(action_gate, "_resolve_budget_helpers", _helpers_load_boom):
+            r = action_gate.escalate_for_action(
+                {"kind": "decide", "summary": "x", "caller": "test.budget_error"},
+            )
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["reason"].startswith("budget_error:"))
+        self.assertEqual(r["failure_reason"], f"infrastructure: {r['reason']}")
+
+    def test_none_response_from_model_returns_bare_api_error(self):
+        """Uncovered branch until this sitting: the model call succeeds but
+        returns None (distinct from raising, which is the *other* api_error
+        site above)."""
+        def fake_claude():
+            def _api(*a, **kw):
+                return None
+            return _api
+
+        with patch.object(action_gate, "_resolve_budget_helpers", _helpers_ok), \
+             patch.object(action_gate, "_resolve_claude_caller", fake_claude):
+            r = action_gate.escalate_for_action(
+                {"kind": "decide", "summary": "x", "caller": "test.none_response"},
+            )
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["reason"], "api_error")
+        self.assertEqual(r["failure_reason"], "dependency: api_error")
 
     def test_record_spend_failure_keeps_response_but_flags_unpersisted(self):
         """A response already paid for must not be thrown away — but silently
@@ -253,6 +312,9 @@ class ActionGateTest(unittest.TestCase):
         self.assertEqual(r["response"], "paid-for-response")
         self.assertFalse(r["budget_persisted"])
         self.assertTrue(r["reason"].startswith("budget_not_persisted:"))
+        # ok:True law: degraded-success stays OUT of failure_reason even
+        # though the "reason" text looks failure-shaped.
+        self.assertNotIn("failure_reason", r)
         self.assertEqual(attempts["n"], 2, "must retry once before giving up")
 
     def test_record_spend_transient_failure_then_success_is_clean(self):
@@ -366,6 +428,11 @@ class BudgetPersistFailureJournalTest(unittest.TestCase):
         self.assertGreater(ev["estimated_cost"], 0.0)
         self.assertIn("disk wedged", ev["error"])
         self.assertEqual(ev["caller"], "test.persist")
+        # This JOURNAL event is failure-shaped (a write genuinely failed) —
+        # unlike the ok:True result's excluded budget_not_persisted reason.
+        self.assertEqual(
+            ev["failure_reason"], "infrastructure: budget persist failed: disk wedged"
+        )
 
     def test_happy_path_journals_nothing(self):
         import tempfile

@@ -86,6 +86,7 @@ from cognition.workspace import Workspace, create_all_modules, route_triggers_to
 from cognition.workspace.workspace_planner import WorkspacePlanner
 from continuity import journal
 from foundation import config as foundation_config
+from foundation.failure_reason import map_local_slug
 from foundation.state import load_state, save_state, transition_state
 from gates.action_gate import escalate_for_action
 from gates.value_gate import _apply_value_prior, score_action
@@ -422,8 +423,10 @@ class StreamRunner:
             gate_result = escalate_for_action(intent, dry_run=self.dry_run)
 
             if not gate_result.get("ok"):
+                skip_reason = gate_result.get("reason", "gate_not_ok")
                 journal.append_event("harness_skip", {
-                    "reason": gate_result.get("reason", "gate_not_ok"),
+                    "reason": skip_reason,
+                    "failure_reason": map_local_slug(skip_reason),
                 })
                 return []
 
@@ -440,7 +443,11 @@ class StreamRunner:
             return harness_results
         except Exception as e:  # noqa: BLE001 — fail-closed: no gate error reaches a harness call
             logger.warning("harness dispatch failed (fail-closed, no harness invoked): %s", e)
-            journal.append_event("harness_skip", {"reason": f"runner_error:{e}"})
+            skip_reason = f"runner_error:{e}"
+            journal.append_event("harness_skip", {
+                "reason": skip_reason,
+                "failure_reason": map_local_slug(skip_reason),
+            })
             return []
 
     def _post_action_integrity(
