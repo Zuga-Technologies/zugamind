@@ -164,11 +164,18 @@ def test_keyword_relevance_scores_hits_higher(monkeypatch):
     assert agent_reach._keyword_relevance("Urgent news about ZugaMind") == 0.7
 
 
-# -------------------------------------------------------- mcporter-absent off --
+# --------------------------------------------------- no search backend -> off --
 
-def test_mcporter_absent_disables_search_silently(monkeypatch, tmp_path):
+def test_no_search_backend_disables_search_silently(monkeypatch, tmp_path):
+    # Was "mcporter absent" only, and it started failing the moment the Tavily
+    # REST backend landed: with a TAVILY_API_KEY in the ambient environment the
+    # scan fell through to the second backend and made a REAL search request
+    # from the unit suite (found 2026-08-16 — the assertion diff was live
+    # Wiktionary hits). Both backends are neutralized here, and urlopen is
+    # armed so a future third backend can't quietly reintroduce a network call.
     _use_tmp_cache(monkeypatch, tmp_path)
     monkeypatch.delenv("ZUGAMIND_REACH_WATCH_URLS", raising=False)
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.setenv("ZUGAMIND_REACH_QUERIES", "anything")
     monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "0")
     monkeypatch.setattr(agent_reach.shutil, "which", lambda name: None)
@@ -176,7 +183,11 @@ def test_mcporter_absent_disables_search_silently(monkeypatch, tmp_path):
     def _boom(*a, **kw):
         raise AssertionError("subprocess.run must not be called when mcporter is absent")
 
+    def _no_network(*a, **kw):
+        raise AssertionError("no search backend is configured — nothing may hit the network")
+
     monkeypatch.setattr(agent_reach.subprocess, "run", _boom)
+    monkeypatch.setattr(agent_reach.urllib.request, "urlopen", _no_network)
 
     assert agent_reach.scan_agent_reach() == []
 
