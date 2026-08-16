@@ -351,11 +351,24 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
                     "stdout": (proc.stdout or "")[:_STDOUT_STDERR_CAP],
                     "stderr": (proc.stderr or "")[:_STDOUT_STDERR_CAP],
                 }
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as e:
+                # Salvage whatever the harness already produced. TimeoutExpired
+                # carries the partial output captured before the kill; dropping
+                # it made a timed-out wake indistinguishable from a wake that
+                # ran and said nothing (2026-08-16: first live wake timed out
+                # and journaled an empty result, so what it had done was lost).
+                partial_out = e.stdout or b""
+                partial_err = e.stderr or b""
+                if isinstance(partial_out, bytes):
+                    partial_out = partial_out.decode("utf-8", "replace")
+                if isinstance(partial_err, bytes):
+                    partial_err = partial_err.decode("utf-8", "replace")
                 result = {
                     "ok": False, "error": "timeout", "harness": name,
                     "dry_run": False, "timeout_sec": timeout_sec,
                     "failure_reason": map_local_slug("timeout"),
+                    "stdout": partial_out[:_STDOUT_STDERR_CAP],
+                    "stderr": partial_err[:_STDOUT_STDERR_CAP],
                 }
             except Exception as e:  # noqa: BLE001 — never raise out of invoke_harness
                 error = f"invoke_error:{e}"
