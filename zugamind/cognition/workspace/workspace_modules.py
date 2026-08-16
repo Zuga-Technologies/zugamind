@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -136,6 +137,10 @@ class DaemonModule(WorkspaceModule):
 # MODULE: Code Changes
 # =============================================================================
 
+# Whole words only: "BugaBot", "prefix", "debugger" are not bug reports.
+_ISSUE_WORD_RE = re.compile(r"\b(fix|fixes|fixed|bug|bugs|bugfix)\b", re.IGNORECASE)
+
+
 class CodeChangeModule(WorkspaceModule):
     """Wraps recent-code-change / git-commit triggers."""
     name = "code_changes"
@@ -156,9 +161,16 @@ class CodeChangeModule(WorkspaceModule):
         # change(s)" as misleading when nothing was actually edited).
         session_activity = [t for t in self._triggers if t["type"] == "recent_code_change"]
 
-        has_issues = any("fix" in t.get("detail", "").lower() or
-                         "bug" in t.get("detail", "").lower()
-                         for t in self._triggers)
+        # Only real file/commit events can claim "this looks like a fix" —
+        # session activity is raw transcript text, and matching it on the
+        # substrings "fix"/"bug" promoted pure chatter onto the high branch
+        # (0.65+ vs 0.35), the one branch that clears a wake floor. Two of
+        # ZugaMind's first production wakes were spent this way: one on a
+        # branch name (`fix/shadow-measures-candidate`) quoted inside a chat
+        # message, one on the path `...\BugaBot\music.js` — "BugaBot" contains
+        # "bug". Word boundaries, and never session_activity (2026-08-16).
+        has_issues = any(_ISSUE_WORD_RE.search(t.get("detail", ""))
+                         for t in (commits + code_changes))
 
         if has_issues:
             salience = min(0.7, 0.4 + len(self._triggers) * 0.05)
