@@ -81,13 +81,39 @@ def ollama_query(
     return None
 
 
+def _same_tag(a: str, b: str) -> bool:
+    """Compare two Ollama model refs, treating a bare name as ':latest'."""
+    norm = lambda s: s if ":" in s else f"{s}:latest"
+    return norm(a.strip()) == norm(b.strip())
+
+
 def ollama_available() -> bool:
-    """Check if Ollama is running and the local model is loaded."""
+    """Check if Ollama is running and the configured model is installed.
+
+    Matches the FULL tag, not the family prefix. It used to compare only
+    `LOCAL_MODEL.split(":")[0]` — so a configured `qwen2.5:14b-instruct`
+    was reported "available" on a box that only had `qwen2.5:7b-instruct`,
+    because the family name `qwen2.5` appeared in the list. The boot probe
+    passed and then every single real call 404'd with "model not found"
+    (BugaPC, 2026-08-16, issue #22: the daemon looked healthy and silently
+    stopped journalling for hours). A probe that checks a weaker condition
+    than the thing it guards is worse than no probe -- it converts a loud
+    startup failure into a silent runtime one.
+    """
     try:
         req = Request(f"{OLLAMA_URL}/api/tags")
         resp = urlopen(req, timeout=5)
         data = json.loads(resp.read().decode())
         models = [m.get("name", "") for m in data.get("models", [])]
-        return any(LOCAL_MODEL.split(":")[0] in m for m in models)
+        if any(_same_tag(LOCAL_MODEL, m) for m in models):
+            return True
+        logger.error(
+            "Configured LOCAL_MODEL %r is NOT installed in Ollama. Installed: %s. "
+            "Every query will 404 until this is pulled or ZUGAMIND_LOCAL_MODEL is "
+            "pointed at an installed tag.",
+            LOCAL_MODEL,
+            ", ".join(models) or "(none)",
+        )
+        return False
     except Exception:
         return False
