@@ -128,10 +128,38 @@ def test_raw_basis_still_wakes_when_the_signal_earns_it(monkeypatch):
     assert StreamRunner._harness_wants(hc, _boosted(raw=0.9, salience=0.99))
 
 
-def test_modulated_basis_is_unchanged_behaviour(monkeypatch):
+def test_modulated_basis_clamps_the_boost_during_raw_warmup(monkeypatch):
+    """The raw series needs 20 samples before the basis can flip. Until then
+    the boost must still not buy the wake — three unearned wakes landed in one
+    afternoon through exactly this gap (raw 0.60 x1.1 = 0.66 vs a 0.655 floor)."""
     monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "modulated"))
     hc = {"name": "h", "wake_min_salience": "calibrate"}
-    assert StreamRunner._harness_wants(hc, _boosted())
+    assert not StreamRunner._harness_wants(hc, _boosted())
+    assert not StreamRunner._harness_wants(hc, _boosted(raw=0.60, salience=0.66))
+
+
+def test_modulated_basis_still_wakes_when_raw_earns_it(monkeypatch):
+    """The clamp only ever subtracts what a multiplier added — a bid that
+    genuinely asked for the floor still wakes."""
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "modulated"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert StreamRunner._harness_wants(hc, _boosted(raw=0.7, salience=0.77))
+
+
+def test_modulated_basis_keeps_dampening_intact(monkeypatch):
+    """Dampening (diversity cap / streak penalty) is unchanged: modulated is
+    already the smaller number, so min() picks it and the wake stays refused."""
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "modulated"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert not StreamRunner._harness_wants(hc, _boosted(raw=0.9, salience=0.27))
+
+
+def test_unstamped_bid_unchanged_under_modulated_basis(monkeypatch):
+    """No raw_salience -> nothing to clamp against; today's behaviour stands."""
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "modulated"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert StreamRunner._harness_wants(
+        hc, {"source_module": "m", "salience": 0.9, "content": "x"})
 
 
 def test_unstamped_bid_is_not_a_free_pass_under_raw_basis(monkeypatch):

@@ -323,7 +323,8 @@ class StreamRunner:
         # was written against that number, so changing its meaning underneath
         # it would silently re-tune every hand-set floor in the fleet.
         basis = "modulated"
-        if floor == "calibrate":
+        calibrated = floor == "calibrate"
+        if calibrated:
             # Opt-in self-calibrating floor (issue #12) — resolves to the
             # learned floor once calibrated, WARMUP_FLOOR (0.35, today's old
             # static default) until then. Never more permissive than the
@@ -331,17 +332,34 @@ class StreamRunner:
             floor, basis = floor_calibration.resolve_gate(hc.get("name", ""))
         if isinstance(floor, (int, float)):
             salience = winner_dict.get("salience", 0.0)
+            raw = (winner_dict.get("context") or {}).get("raw_salience")
             if basis == "raw":
                 # What the module ASKED for, before the attention schema's
                 # monopoly-breaking multipliers rewrote it. Those exist to
                 # share attention inside the mind; they were never meant to
                 # authorise spending a real session. Measured 2026-08-17: a
                 # 0.5164 bid cleared a 0.655 floor as 0.6816 on boosts alone.
-                raw = (winner_dict.get("context") or {}).get("raw_salience")
                 # Missing raw is judged on `salience` rather than waved
                 # through: an unstamped bid must not become a free pass.
                 if isinstance(raw, (int, float)):
                     salience = raw
+            elif calibrated and isinstance(raw, (int, float)):
+                # WARMUP CLAMP (2026-08-17, third unearned wake the same day).
+                # The raw series needs CALIBRATION_WINDOW samples before the
+                # basis can flip, and stamping only began this afternoon — so
+                # for ~20 more cycles the gate above is dormant and boosts go
+                # right on buying sessions. Measured during that window: raw
+                # 0.60 x 1.1 (not-current-focus) = 0.66 vs a 0.655 floor, twice.
+                #
+                # Judging min(modulated, raw) closes it without re-tuning
+                # anything: the floor is still the one fitted on modulated
+                # samples, and the clamp can only ever subtract the part a
+                # multiplier ADDED. Dampening (diversity cap, streak penalty)
+                # still suppresses normally, because then modulated is already
+                # the smaller number and min() picks it — i.e. this is strictly
+                # "a multiplier may lower the bid but never buy a wake".
+                # Becomes a no-op once basis flips to "raw".
+                salience = min(salience, raw)
             if not isinstance(salience, (int, float)) or salience < floor:
                 return False
         return True
