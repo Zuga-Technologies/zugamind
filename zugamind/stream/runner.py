@@ -318,14 +318,30 @@ class StreamRunner:
         if (winner_dict.get("context") or {}).get("alarm_lane"):
             return True
         floor = hc.get("wake_min_salience")
+        # Which number the floor judges. Default is the post-modulation
+        # `salience` — a static `wake_min_salience: 0.6` in a harness config
+        # was written against that number, so changing its meaning underneath
+        # it would silently re-tune every hand-set floor in the fleet.
+        basis = "modulated"
         if floor == "calibrate":
             # Opt-in self-calibrating floor (issue #12) — resolves to the
             # learned floor once calibrated, WARMUP_FLOOR (0.35, today's old
             # static default) until then. Never more permissive than the
             # shipped default while still learning. See act/floor_calibration.py.
-            floor = floor_calibration.resolve_floor(hc.get("name", ""))
+            floor, basis = floor_calibration.resolve_gate(hc.get("name", ""))
         if isinstance(floor, (int, float)):
             salience = winner_dict.get("salience", 0.0)
+            if basis == "raw":
+                # What the module ASKED for, before the attention schema's
+                # monopoly-breaking multipliers rewrote it. Those exist to
+                # share attention inside the mind; they were never meant to
+                # authorise spending a real session. Measured 2026-08-17: a
+                # 0.5164 bid cleared a 0.655 floor as 0.6816 on boosts alone.
+                raw = (winner_dict.get("context") or {}).get("raw_salience")
+                # Missing raw is judged on `salience` rather than waved
+                # through: an unstamped bid must not become a free pass.
+                if isinstance(raw, (int, float)):
+                    salience = raw
             if not isinstance(salience, (int, float)) or salience < floor:
                 return False
         return True

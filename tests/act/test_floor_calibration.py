@@ -171,3 +171,73 @@ def test_resolve_clamps_preexisting_bad_floor(tmp_path, monkeypatch):
         json.dumps({"h": {"samples": [], "floor": 1.04, "calibrated_at": "x"}}),
         encoding="utf-8")
     assert floor_calibration.resolve_floor("h") == floor_calibration.FLOOR_CEILING
+
+
+# --- raw vs modulated basis (2026-08-17) ---------------------------------
+
+def _raw_winner(module="world_signals", salience=0.6816, raw=0.5164):
+    """The 2026-08-17 wake, to the digit: a 0.5164 bid the attention schema
+    multiplied by 1.2 (streak-break) then 1.1 (not-current-focus)."""
+    return {"source_module": module, "salience": salience, "content": "HN story",
+            "context": {"raw_salience": raw}}
+
+
+def test_raw_series_is_skipped_when_unstamped(tmp_path, monkeypatch):
+    """A winner with no raw_salience must NOT seed the raw window with its
+    boosted number — that contamination is what the parallel series avoids."""
+    _patch(tmp_path, monkeypatch)
+    for _ in range(floor_calibration.CALIBRATION_WINDOW):
+        floor_calibration.maybe_record_ambient_sample(_hc(), _winner(salience=0.3))
+    floor, basis = floor_calibration.resolve_gate("h")
+    assert basis == "modulated"
+    state = json.loads(floor_calibration.STATE_FILE.read_text(encoding="utf-8"))
+    assert not state["h"].get("raw_samples")
+
+
+def test_basis_stays_modulated_until_raw_window_fills(tmp_path, monkeypatch):
+    """The whole safety property: while the raw series is still filling, the
+    gate behaves byte-for-byte as it does today."""
+    _patch(tmp_path, monkeypatch)
+    for _ in range(floor_calibration.CALIBRATION_WINDOW):
+        floor_calibration.maybe_record_ambient_sample(_hc(), _winner(salience=0.3))
+    for _ in range(floor_calibration.CALIBRATION_WINDOW - 1):
+        floor_calibration.maybe_record_ambient_sample(_hc(), _raw_winner())
+    floor, basis = floor_calibration.resolve_gate("h")
+    assert basis == "modulated"
+    assert floor == floor_calibration.resolve_floor("h")
+
+
+def test_basis_switches_to_raw_once_raw_window_fills(tmp_path, monkeypatch):
+    _patch(tmp_path, monkeypatch)
+    for _ in range(floor_calibration.CALIBRATION_WINDOW):
+        floor_calibration.maybe_record_ambient_sample(_hc(), _raw_winner())
+    floor, basis = floor_calibration.resolve_gate("h")
+    assert basis == "raw"
+    # Fitted on the RAW samples (0.5164), not the modulated ones (0.6816).
+    assert floor == floor_calibration._quantile_floor(
+        [0.5164] * floor_calibration.CALIBRATION_WINDOW)
+
+
+def test_basis_switch_is_journaled_once(tmp_path, monkeypatch):
+    _patch(tmp_path, monkeypatch)
+    for _ in range(floor_calibration.CALIBRATION_WINDOW + 5):
+        floor_calibration.maybe_record_ambient_sample(_hc(), _raw_winner())
+    events = [json.loads(l) for l in
+              floor_calibration.STATE_FILE.parent.joinpath("journal.jsonl")
+              .read_text(encoding="utf-8").splitlines() if l.strip()]
+    switches = [e for e in events if e.get("kind") == "floor_basis_switched"]
+    assert len(switches) == 1
+    assert switches[0]["basis"] == "raw"
+
+
+def test_a_floor_fitted_on_one_basis_never_judges_the_other(tmp_path, monkeypatch):
+    """The trap this design exists to avoid: comparing raw numbers against a
+    floor fitted on boosted ones silently raises the bar."""
+    _patch(tmp_path, monkeypatch)
+    floor_calibration.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    floor_calibration.STATE_FILE.write_text(json.dumps({"h": {
+        "samples": [0.6] * 50, "floor": 0.655, "calibrated_at": "x",
+        "raw_samples": [0.5] * 3, "raw_floor": None,
+    }}), encoding="utf-8")
+    floor, basis = floor_calibration.resolve_gate("h")
+    assert (floor, basis) == (0.655, "modulated")

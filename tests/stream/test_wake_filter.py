@@ -97,3 +97,57 @@ def test_alarm_lane_bypasses_calibrate_floor_too(tmp_path, monkeypatch):
     winner = _winner(salience=0.01)
     winner["context"] = {"alarm_lane": True}
     assert StreamRunner._harness_wants(hc, winner)
+
+
+# --- raw-basis gating (2026-08-17) ---------------------------------------
+
+def _boosted(raw=0.5164, salience=0.6816):
+    """The real 2026-08-17 winner: bid 0.5164, journaled 0.6816 after a x1.2
+    streak-break boost and a x1.1 not-current-focus boost."""
+    return {"source_module": "world_signals", "salience": salience,
+            "content": "HN [202pts]", "context": {"raw_salience": raw}}
+
+
+def test_static_floor_still_judges_the_modulated_number(monkeypatch):
+    """A hand-set wake_min_salience was written against `salience`; changing
+    its meaning underneath every fleet config would be a silent re-tune."""
+    hc = {"wake_min_salience": 0.6}
+    assert StreamRunner._harness_wants(hc, _boosted())
+
+
+def test_raw_basis_refuses_a_wake_the_boost_would_have_bought(tmp_path, monkeypatch):
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "raw"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    # 0.6816 clears 0.655; 0.5164 — what it actually asked for — does not.
+    assert not StreamRunner._harness_wants(hc, _boosted())
+
+
+def test_raw_basis_still_wakes_when_the_signal_earns_it(monkeypatch):
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "raw"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert StreamRunner._harness_wants(hc, _boosted(raw=0.9, salience=0.99))
+
+
+def test_modulated_basis_is_unchanged_behaviour(monkeypatch):
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "modulated"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert StreamRunner._harness_wants(hc, _boosted())
+
+
+def test_unstamped_bid_is_not_a_free_pass_under_raw_basis(monkeypatch):
+    """No raw_salience -> fall back to `salience`, never wave it through."""
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "raw"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert not StreamRunner._harness_wants(
+        hc, {"source_module": "m", "salience": 0.1, "content": "x"})
+    assert StreamRunner._harness_wants(
+        hc, {"source_module": "m", "salience": 0.9, "content": "x"})
+
+
+def test_alarm_lane_still_bypasses_under_raw_basis(monkeypatch):
+    """A critical must surface even when its raw bid is below the floor."""
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.655, "raw"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    w = _boosted(raw=0.01, salience=0.02)
+    w["context"]["alarm_lane"] = True
+    assert StreamRunner._harness_wants(hc, w)

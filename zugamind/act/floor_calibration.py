@@ -37,6 +37,35 @@ but was NOT an alarm-lane winner (those bypass the floor by design — they
 are not the noise the floor exists to filter) and DID pass the harness's
 own `wake_modules` allowlist, if any.
 
+RAW vs MODULATED — which number the gate compares (2026-08-17)
+--------------------------------------------------------------
+A bid's `salience` is rewritten in place by the attention schema before it
+reaches the wake decision: a module gets a x1.2 boost when a DIFFERENT
+identity has held attention for 3 cycles, and x1.1 when it is not the
+current focus. Those multipliers exist to stop one module monopolising the
+mind's INTERNAL attention. Letting them also authorise spending a real
+Claude session is a side effect nobody chose. Measured live: a Hacker News
+story bid 0.5164 against a 0.655 floor — 0.14 BELOW it — and woke a session
+anyway, because 0.5164 x 1.2 x 1.1 = 0.6816.
+
+So the gate should compare `context["raw_salience"]` (what the module
+actually asked for) rather than `salience`. The trap: this floor was fitted
+on MODULATED samples, so switching the comparison alone silently raises the
+effective bar — the same change has to re-fit the floor on raw values, or
+the fix is worse than the bug.
+
+Historical samples cannot be converted: the multipliers that produced them
+were never journaled, so there is no way to divide them back out. Instead
+both series are recorded in parallel and the gate switches basis only once
+the RAW series is independently calibrated:
+
+    raw_samples < CALIBRATION_WINDOW  ->  basis "modulated", today's floor,
+                                          behaviour byte-for-byte unchanged
+    raw_samples >= CALIBRATION_WINDOW ->  basis "raw", floor fitted on raw
+
+There is never a window where a floor fitted on one basis judges the other.
+The basis switch is journaled once, as `floor_basis_switched`.
+
 State persisted to `<data_dir>/floor_calibration.json`, keyed by harness
 name. The floor-change is journaled exactly once, when the window fills —
 not every cycle. Stdlib-only, never raises (mirrors the rest of act/).
@@ -136,6 +165,32 @@ def maybe_record_ambient_sample(hc: Dict[str, Any], winner_dict: Optional[Dict[s
                     "harness": name, "floor": entry["floor"],
                     "samples": len(entry["samples"]),
                 })
+
+        # Parallel RAW series — see the RAW vs MODULATED section in the module
+        # docstring. Deliberately SKIPPED rather than defaulted to `salience`
+        # when raw_salience is absent: falling back would seed the raw window
+        # with boosted numbers, which is exactly the contamination this series
+        # exists to avoid. Absence is transitional (records written before
+        # workspace.py started stamping it), so the window fills a little
+        # slower rather than filling with the wrong thing.
+        raw = (winner_dict.get("context") or {}).get("raw_salience")
+        if isinstance(raw, (int, float)):
+            entry["raw_samples"] = (entry.get("raw_samples") or [])
+            entry["raw_samples"] = (entry["raw_samples"] + [float(raw)])[-ROLLING_WINDOW:]
+            if len(entry["raw_samples"]) >= CALIBRATION_WINDOW:
+                first_raw = entry.get("raw_floor") is None
+                entry["raw_floor"] = _quantile_floor(entry["raw_samples"])
+                if first_raw:
+                    entry["raw_calibrated_at"] = datetime.now().isoformat()
+                    journal.append_event("floor_basis_switched", {
+                        "harness": name,
+                        "basis": "raw",
+                        "raw_floor": entry["raw_floor"],
+                        "previous_modulated_floor": entry.get("floor"),
+                        "samples": len(entry["raw_samples"]),
+                        "why": ("the gate now compares what the module asked for, "
+                                "not the attention-boosted number"),
+                    })
         _save_state(state)
     except Exception as e:  # noqa: BLE001 — calibration must never break a wake cycle
         logger.warning("floor_calibration record failed (non-fatal): %s", e)
@@ -152,3 +207,29 @@ def resolve_floor(harness_name: str) -> float:
     except Exception as e:  # noqa: BLE001
         logger.warning("floor_calibration resolve failed (non-fatal): %s", e)
     return WARMUP_FLOOR
+
+
+def resolve_gate(harness_name: str) -> tuple:
+    """Return `(floor, basis)` — the floor AND which number to compare it to.
+
+    basis "raw"       -> compare `context["raw_salience"]`, what the module
+                         actually asked for, against a floor fitted on raw
+                         samples.
+    basis "modulated" -> compare `salience` against the existing floor, i.e.
+                         exactly today's behaviour.
+
+    The basis is whichever series is calibrated; raw wins once it is. A floor
+    fitted on one basis is NEVER used to judge the other — that mismatch is
+    the whole trap this function exists to avoid. Never raises."""
+    try:
+        state = _load_state()
+        entry = state.get(harness_name) or {}
+        raw_floor = entry.get("raw_floor")
+        raw_n = len(entry.get("raw_samples") or [])
+        if raw_floor is not None and raw_n >= CALIBRATION_WINDOW:
+            return min(float(raw_floor), FLOOR_CEILING), "raw"
+        if entry.get("floor") is not None:
+            return min(float(entry["floor"]), FLOOR_CEILING), "modulated"
+    except Exception as e:  # noqa: BLE001
+        logger.warning("floor_calibration resolve_gate failed (non-fatal): %s", e)
+    return WARMUP_FLOOR, "modulated"
