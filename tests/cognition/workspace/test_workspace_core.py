@@ -121,6 +121,31 @@ def test_registered_modulator_reweights_before_attention_schema():
     assert content.source_module == "low"  # modulator ran before selection
 
 
+def test_raw_salience_records_what_the_module_asked_for():
+    """The journal's winner record must stay auditable after modulation:
+    `salience` is what won, `context["raw_salience"]` is what the module
+    actually bid. Without the second number, "did the signal earn this wake
+    or did a boost lift it over the floor?" can't be answered from the log."""
+    def boost_low(bids, context):
+        for b in bids:
+            if b.source_module == "low":
+                b.salience = 0.99
+        return bids
+
+    random.seed(20260708)
+    ws = Workspace()
+    ws.register_modulator(boost_low)
+    ws.register_module(_FixedBidModule("low", 0.05))
+    ws.register_module(_FixedBidModule("high", 0.05))
+    content = ws.run_cycle({})
+    boosted = next(b for b in ws.last_cycle_bids if b.source_module == "low")
+    # The attention schema gets the last word after the modulator (novelty
+    # multiplier), so pin the invariant, not the exact post-modulation value.
+    assert boosted.salience >= 0.99
+    assert boosted.context["raw_salience"] == 0.05
+    assert content is not None
+
+
 def test_runner_up_is_recorded():
     ws = Workspace()
     ws.register_module(_FixedBidModule("first", 0.9))

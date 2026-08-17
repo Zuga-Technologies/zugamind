@@ -232,6 +232,15 @@ def build_briefing(
             salience = winner.get("salience")
             sal_str = f"{salience:.2f}" if isinstance(salience, (int, float)) else "?"
             lines.append(f"- **{module}** (salience {sal_str}): {content}")
+            # For an external signal the URL *is* the payload — the content
+            # line is only a headline ("HN [202pts]: On AI regulation and
+            # messaging"). Dropping it forced the 2026-08-17 17:45 wake to
+            # grep journal.jsonl to learn what the signal even pointed at.
+            # Same exemption from size-cap trimming as the rest of this
+            # section, so it's capped per-line here.
+            top_url = (winner.get("context") or {}).get("top_url")
+            if top_url:
+                lines.append(f"  Link: {str(top_url)[:300]}")
             # A winning bid can batch several triggers; the content line above
             # carries only the module's summary of the first/hottest one.
             # Enumerate every trigger so nothing that won attention is lost

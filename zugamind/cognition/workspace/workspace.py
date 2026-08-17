@@ -495,6 +495,17 @@ class Workspace:
             logger.debug("[Workspace] No bids this cycle")
             return None
 
+        # Stamp what each module actually asked for, BEFORE any modulator or
+        # attention-health correction rewrites `salience` in place. Without
+        # this the journal records only the post-modulation number, so "did
+        # this signal earn the wake, or did a boost lift it over the floor?"
+        # can only be answered by re-deriving the scanner's formula by hand
+        # (2026-08-17 wake: winner 0.682 vs floor 0.655 was really a 0.516
+        # bid times the x1.2 streak-break boost and the x1.1 novelty boost).
+        for b in bids:
+            if isinstance(b.context, dict):
+                b.context["raw_salience"] = round(b.salience, 4)
+
         for modulator in self._modulators:
             try:
                 bids = modulator(bids, context) or bids

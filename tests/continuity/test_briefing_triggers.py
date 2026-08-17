@@ -80,6 +80,31 @@ def test_no_other_criticals_no_extra_section(tmp_path, monkeypatch):
     assert "Other active alarms" not in briefing
 
 
+def test_external_signal_url_reaches_the_briefing(tmp_path, monkeypatch):
+    """A world_signals bid carries no `triggers` list — its `top_url` is the
+    only pointer to what was seen. The 2026-08-17 17:45 wake got the headline
+    without the link and had to grep the journal to find the story."""
+    _patch_journal(tmp_path, monkeypatch)
+    winner = {
+        "source_module": "world_signals",
+        "content": "HN [202pts]: On AI regulation and messaging",
+        "salience": 0.68,
+        "context": {
+            "trigger_count": 1,
+            "top_type": "hackernews_story",
+            "top_url": "https://example.com/story/49325789",
+        },
+    }
+    briefing = journal.build_briefing(None, winner=winner)
+    assert "https://example.com/story/49325789" in briefing
+
+
+def test_winner_without_url_gets_no_empty_link_line(tmp_path, monkeypatch):
+    _patch_journal(tmp_path, monkeypatch)
+    briefing = journal.build_briefing(None, winner=_winner_with_triggers(["[ID-Q] solo"]))
+    assert "Link:" not in briefing
+
+
 def test_trigger_list_is_capped_not_unbounded(tmp_path, monkeypatch):
     _patch_journal(tmp_path, monkeypatch)
     details = [f"[ID-{i:03d}] failure number {i}" for i in range(40)]
