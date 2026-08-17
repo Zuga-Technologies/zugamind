@@ -154,6 +154,24 @@ def _max_briefing_chars() -> int:
         return _DEFAULT_BRIEFING_MAX_CHARS
 
 
+def _wake_gate_hint() -> Optional[tuple]:
+    """`(floor, basis)` the live wake gate is using, or None if unavailable.
+
+    Lazily imported and best-effort on purpose: `act.floor_calibration`
+    imports THIS module, so a top-level import here is circular, and a
+    briefing must still render if the act/ layer is missing entirely.
+    Reports the first enabled harness in "calibrate" mode — the gate a
+    self-calibrating deployment is actually judged by."""
+    try:
+        from act import command_actuator, floor_calibration
+        for hc in command_actuator.load_harness_configs():
+            if hc.get("enabled", True) and hc.get("wake_min_salience") == "calibrate":
+                return floor_calibration.resolve_gate(hc.get("name", ""))
+    except Exception as e:  # noqa: BLE001 — a hint must never break the briefing
+        logger.debug("briefing: wake gate hint unavailable: %s", e)
+    return None
+
+
 def build_briefing(
     since_iso: Optional[str],
     winner: Optional[Dict[str, Any]] = None,
@@ -232,6 +250,29 @@ def build_briefing(
             salience = winner.get("salience")
             sal_str = f"{salience:.2f}" if isinstance(salience, (int, float)) else "?"
             lines.append(f"- **{module}** (salience {sal_str}): {content}")
+            # Was this wake EARNED, or did the attention schema's
+            # monopoly-breaking multipliers carry it over the bar? Those
+            # multipliers exist to share attention INSIDE the mind; the
+            # briefing showed only their output, so on 2026-08-17 two
+            # separate wakes (17:54 and 18:34) each spent a whole paid
+            # session re-deriving the answer from journal.jsonl by hand.
+            # Same lesson as the Link line below: the one number the woken
+            # session needs to judge its own wake belongs HERE, next to the
+            # salience it would otherwise take at face value.
+            raw = (winner.get("context") or {}).get("raw_salience")
+            if (isinstance(raw, (int, float)) and isinstance(salience, (int, float))
+                    and abs(raw - salience) > 1e-9):
+                note = (f"  Bid {raw:.2f}, woke on {salience:.2f} "
+                        f"after attention-health modulation")
+                gate = _wake_gate_hint()
+                if gate:
+                    gate_floor, basis = gate
+                    if basis == "modulated" and raw < gate_floor <= salience:
+                        note += (f" — NOT EARNED: the bar is {gate_floor:.3f} and the "
+                                 f"module asked below it. Weigh this signal accordingly")
+                    else:
+                        note += f" (bar {gate_floor:.3f}, judged on {basis})"
+                lines.append(note + ".")
             # For an external signal the URL *is* the payload — the content
             # line is only a headline ("HN [202pts]: On AI regulation and
             # messaging"). Dropping it forced the 2026-08-17 17:45 wake to
