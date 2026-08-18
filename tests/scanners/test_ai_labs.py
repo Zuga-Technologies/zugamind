@@ -8,6 +8,14 @@ a hardcoded urgency. Both are asserted here.
 Extended the same evening: relevance was hardcoded too, which put every fresh
 lab post at exactly the 0.600 wake floor and let an OpenAI national-security
 policy announcement buy a Claude session at 20:11Z.
+
+Extended again 3h25m after that, when an OpenAI customer case study ("How
+NVIDIA scales expertise with ChatGPT Work") bought a session on the same 0.600
+at 23:48Z. One demotion tier took the subject from 1 value to 2; it needed
+range, not another word. Relevance is now three tiers and the asserted
+invariant is ORDERING -- a model launch must out-bid an unclassified post,
+which must out-bid the lab's own marketing -- so the gate keeps working when
+the self-calibrating wake floor moves.
 """
 from __future__ import annotations
 
@@ -189,14 +197,12 @@ def _salience(relevance, urgency):
 ])
 def test_public_affairs_posts_price_below_the_wake_floor(title):
     relevance = ai_labs._relevance_for(title)
-    assert relevance == ai_labs._RELEVANCE_PUBLIC_AFFAIRS
+    assert relevance == ai_labs._RELEVANCE_NON_WORK
     assert _salience(relevance, 0.25) < 0.600
 
 
 @pytest.mark.parametrize("title", [
-    "Introducing Claude Opus 5",
     "How Claude's text watermark works",
-    "Improving Fable 5's biology safeguards",
     "Investigating three real-world incidents in our cybersecurity evaluations",
     # terms with a technical reading must NOT read as public affairs
     "A new policy gradient method for agent training",
@@ -223,15 +229,16 @@ def test_the_summary_counts_not_just_the_title(cache_dir):
     assert ai_labs._relevance_for(
         "The Defender's Window",
         "What this means for lawmakers drafting the next AI act.",
-    ) == ai_labs._RELEVANCE_PUBLIC_AFFAIRS
+    ) == ai_labs._RELEVANCE_NON_WORK
 
 
-def test_a_fresh_policy_post_no_longer_clears_the_floor(cache_dir):
-    """The 2026-08-18 20:11Z wake, replayed end to end.
+def test_both_wakes_replayed_end_to_end(cache_dir):
+    """The 2026-08-18 20:11Z and 23:48Z wakes, replayed together.
 
     A fresh lab post used to price at exactly 0.600 whatever its subject, and
     the gate filters on `salience < floor` — so every one of them cleared the
-    0.600 floor by a margin of zero.
+    0.600 floor by a margin of zero. Four equally-fresh posts, so urgency is
+    held constant and only the subject can move the number.
     """
     now = time.time()
     _seed([_item(slug="baseline")])
@@ -240,15 +247,88 @@ def test_a_fresh_policy_post_no_longer_clears_the_floor(cache_dir):
     _seed([_item(slug="baseline"),
            _item(lab="openai", slug="policy", published=now - HOUR,
                  title="Strengthening Democratic Oversight in National Security"),
+           _item(lab="openai", slug="advert", published=now - HOUR,
+                 title="How NVIDIA scales expertise with ChatGPT Work"),
+           _item(lab="deepmind", slug="paper", published=now - HOUR,
+                 title="Towards demystifying the creativity of diffusion models"),
            _item(lab="anthropic", slug="model", published=now - HOUR,
                  title="Introducing Claude Opus 5")])
     by_title = {t["title"]: t for t in ai_labs.scan_ai_labs()}
 
     policy = by_title["Strengthening Democratic Oversight in National Security"]
+    advert = by_title["How NVIDIA scales expertise with ChatGPT Work"]
+    paper = by_title["Towards demystifying the creativity of diffusion models"]
     model = by_title["Introducing Claude Opus 5"]
-    assert policy["urgency"] == model["urgency"] == 0.25  # equally fresh
+
+    assert policy["urgency"] == advert["urgency"] == 0.25  # equally fresh
+    assert paper["urgency"] == model["urgency"] == 0.25
     assert _salience(policy["relevance"], policy["urgency"]) == pytest.approx(0.46)
-    assert _salience(model["relevance"], model["urgency"]) == pytest.approx(0.60)
+    assert _salience(advert["relevance"], advert["urgency"]) == pytest.approx(0.46)
+    assert _salience(paper["relevance"], paper["urgency"]) == pytest.approx(0.60)
+    assert _salience(model["relevance"], model["urgency"]) == pytest.approx(0.68)
+
+
+# --------------------------------------------------------------------------
+# relevance has RANGE — the 23:48Z wake, and why one more word was not the fix
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("title", [
+    # the post that woke a session on 2026-08-18 at 23:48Z
+    "How NVIDIA scales expertise with ChatGPT Work",
+    "Asana cleared 5 years of engineering work in 2 weeks with Codex",
+    "Model ML completes finance work more efficiently with GPT-5.6 Sol",
+    "From assistance to execution: How enterprises put AI to work",
+    "How Canada uses Claude: Findings from the Anthropic Economic Index",
+    "A Contoso case study: shipping faster",
+    # organisational PR the docstring already claimed to cover, and did not
+    "OpenAI appoints Dali Rajic as Chief Revenue Officer",
+    "OpenAI's letter to Governor Abbott on responsible AI infrastructure",
+    "Partnering with CodeAI to prepare the first AI generation",
+    "OpenAI joins PORTS-Pike project",
+])
+def test_promotional_and_org_posts_price_below_the_wake_floor(title):
+    assert ai_labs._relevance_for(title) == ai_labs._RELEVANCE_NON_WORK
+    assert _salience(ai_labs._relevance_for(title), 0.25) < 0.600
+
+
+@pytest.mark.parametrize("title", [
+    "Introducing Claude Opus 5",
+    "Introducing Gemini 3.7 Flash",
+    "Previewing Ultrafast mode: GPT-5.6 Sol at up to 14X the speed",
+    "Improving Fable 5's biology safeguards",
+    "Updated pricing for the Batch API",
+    "Deprecating the legacy completions endpoint",
+])
+def test_shipping_posts_clear_the_floor_with_margin(title):
+    """A moving floor is the point. The wake floor self-calibrates, and at
+    0.600 a model launch cleared it by exactly zero — three more such winners
+    would have ratcheted it to 0.65 and silenced the feed, launches included.
+    """
+    assert ai_labs._relevance_for(title) == ai_labs._RELEVANCE_HIGH
+    assert _salience(ai_labs._relevance_for(title), 0.25) > 0.600
+
+
+def test_marketing_that_names_a_model_is_still_marketing():
+    """Order of the two checks, asserted. A case study quotes the product it
+    sells, so a model token inside one must not buy it the HIGH tier."""
+    assert ai_labs._relevance_for(
+        "Model ML completes finance work more efficiently with GPT-5.6 Sol"
+    ) == ai_labs._RELEVANCE_NON_WORK
+
+
+def test_promotion_reads_the_title_only_demotion_reads_the_summary():
+    """Asymmetric on purpose: a wrong demotion costs silence, a wrong
+    promotion spends a Claude session. Measured on the live sweep — a
+    document-extraction paper cleared HIGH because its ABSTRACT said
+    "sonnet-5"."""
+    assert ai_labs._relevance_for(
+        "Valid Per-Field Selective Risk Control for Document Extraction",
+        "We evaluate against gpt-5.6 and sonnet-5 on three benchmarks.",
+    ) == ai_labs._RELEVANCE_DEFAULT
+    assert ai_labs._relevance_for(
+        "The Defender's Window",
+        "What this means for lawmakers drafting the next AI act.",
+    ) == ai_labs._RELEVANCE_NON_WORK
 
 
 # --------------------------------------------------------------------------

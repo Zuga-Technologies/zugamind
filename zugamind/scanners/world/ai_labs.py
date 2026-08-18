@@ -18,16 +18,40 @@ eight separate times over twelve days and bought a harness wake:
    seen-set is baselined SILENTLY (whole feed marked seen, zero triggers) so
    deploying this never dumps a month of back-catalogue into the workspace.
 
-2. RELEVANCE IS THE POST'S SUBJECT, NOT A CONSTANT. WorldSignals prices a
-   trigger at 0.25 + 0.4*relevance + 0.2*urgency, so a hardcoded
-   relevance=0.75 put EVERY fresh lab post at exactly 0.600 -- the wake
-   floor, cleared by a margin of zero. That is how a government-policy
+2. RELEVANCE IS THE POST'S SUBJECT, NOT A CONSTANT, AND IT NEEDS RANGE.
+   WorldSignals prices a trigger at 0.25 + 0.4*relevance + 0.2*urgency, so a
+   hardcoded relevance=0.75 put EVERY fresh lab post at exactly 0.600 -- the
+   wake floor, cleared by a margin of zero. That is how a government-policy
    announcement bought a Claude session on 2026-08-18 20:11Z: the topic
-   never entered the math. A lab's public-affairs output (policy,
-   regulation, elections, global affairs, economic-index reports) is real
-   news that has no bearing on building on these APIs, so it prices below
-   the floor. Everything else keeps the operational default -- an
-   unrecognized subject fails OPEN at 0.75, same principle as (3).
+   never entered the math.
+
+   The first fix that morning added ONE demotion tier, which took the
+   subject from 1 value to 2 -- still near-constant. It held for 3h25m: at
+   23:48Z an OpenAI customer case study ("How NVIDIA scales expertise with
+   ChatGPT Work") bought a session on the identical 0.600, because it is
+   marketing rather than public affairs and the word list only knew the
+   latter. A word list stops the shape it was written for; only range stops
+   the class. So relevance is three tiers, and the classes are ordered by
+   what they DO to a builder:
+
+     HIGH (0.95, bids 0.68)  ships something to build on -- a model launch,
+                             pricing, API/SDK, a deprecation.
+     DEFAULT (0.75, bids 0.60)  unrecognized. Unchanged, fails OPEN.
+     NON-WORK (0.40, bids 0.46)  the lab talking about itself -- public
+                             affairs (policy, regulation, elections,
+                             appointments, partnerships, economic-index
+                             reports) AND promotion (customer case studies,
+                             enterprise success stories). Real news, no
+                             bearing on building on these APIs.
+
+   NON-WORK is checked FIRST and wins over HIGH: a case study names the
+   product it is selling ("...with GPT-5.6 Sol"), so letting a model token
+   promote it would re-open the exact hole. Range is what makes the gate
+   survive a floor that MOVES -- the wake floor self-calibrates
+   (act/floor_calibration.py), and at 0.600 every non-demoted post cleared
+   it by zero while three more such winners would have ratcheted it to 0.65
+   and silenced the whole feed, model launches included. HIGH sits above
+   that; DEFAULT deliberately does not.
 
 3. URGENCY DECAYS WITH PUBLISH AGE. Feed order is not recency order —
    anthropic.com/news leads with a pinned/featured block, so its FIRST card
@@ -65,8 +89,9 @@ _MAX_TRIGGERS = 4
 _SEEN_MAX = 800     # seven feeds x eight items = 56 keys/sweep; this holds ~2 weeks
 _FRESH_HOURS = 24   # published inside this window scores full urgency
 _STALE_HOURS = 72   # published beyond this scores zero — backlog, not news
-_RELEVANCE_DEFAULT = 0.75        # research/product/model post — bids 0.60 fresh
-_RELEVANCE_PUBLIC_AFFAIRS = 0.40 # policy/comms post — bids 0.46 fresh, under the floor
+_RELEVANCE_HIGH = 0.95      # ships something to build on — bids 0.68 fresh, clears a moving floor
+_RELEVANCE_DEFAULT = 0.75   # unrecognized subject — bids 0.60 fresh, exactly today's floor
+_RELEVANCE_NON_WORK = 0.40  # the lab talking about itself — bids 0.46 fresh, under the floor
 # Honors ZUGAMIND_DATA_DIR without importing foundation — scanners stay standalone.
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent.parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
@@ -177,35 +202,111 @@ def _parse_date(value: str) -> float | None:
     return None
 
 
-# A frontier lab publishes two kinds of thing. One is the work — models,
-# releases, pricing, research, safety findings — which changes what can be
-# built and how. The other is public affairs — policy positions, regulatory
-# comment, government partnerships, executive appointments, economic-impact
-# reports — which is real news that changes nothing about the building. Only
-# phrases that are unambiguous in the second sense belong here; a term that
-# also has a technical reading ("governance", "alignment policy", an RL
-# "policy") would make the scanner deaf to actual work. Checked against a
-# 56-item live sweep (7 feeds, 2026-08-18): 5 matched, all public affairs,
-# no research or product post among them.
+# A frontier lab publishes three kinds of thing, and they are worth
+# different amounts to someone BUILDING on the APIs.
+#
+# NON-WORK, tier one: public affairs — policy positions, regulatory comment,
+# government relations, executive appointments, org partnerships,
+# economic-impact reports. Real news that changes nothing about the building.
+# Only phrases unambiguous in that sense belong here; a term with a technical
+# reading ("governance", "alignment policy", an RL "policy") would make the
+# scanner deaf to actual work. Checked against a 56-item live sweep (7 feeds,
+# 2026-08-18): 5 matched on the original list, all public affairs, no research
+# or product post among them. The appointment/partnership/government-relations
+# phrases were added 2026-08-19 — the module docstring already CLAIMED to cover
+# "executive appointments", but no pattern did, and "OpenAI appoints Dali Rajic
+# as Chief Revenue Officer" won the workspace at full relevance on 2026-08-13.
 _PUBLIC_AFFAIRS_RE = re.compile(
     r"national\s+security|democratic\s+oversight|public\s+policy"
     r"|\bai\s+policy\b|policy\s+ideas|policymaker|regulator|regulation"
     r"|legislation|lawmaker|\bcongress\b|\bparliament\b|\bai\s+act\b"
     r"|\belections?\b|\bgovernments?\b|global\s+affairs|public\s+affairs"
-    r"|philanthrop|\bnonprofit\b|economic\s+index|economic\s+research",
+    r"|philanthrop|\bnonprofit\b|economic\s+index|economic\s+research"
+    r"|\bappoints?\b|\bappointment\b|chief\s+\w+\s+officer"
+    r"|to\s+join\s+\w+\s+as\b|\bboard\s+of\s+directors\b|\bgovernor\b"
+    r"|\bpartnering\s+with\b|\bpartnership\b|\bletter\s+to\b|\bstatement\s+on\b"
+    r"|\b(?:joins|joining)\s+(?:the\s+)?[\w-]+\s+"
+    r"(?:project|initiative|coalition|alliance|consortium|council|pledge)\b",
     re.IGNORECASE,
 )
+
+# NON-WORK, tier two: promotion — a customer case study is the lab selling its
+# product with a named buyer as the proof. It reads technical (it names models,
+# quotes engineering outcomes) and is worth nothing to a builder: you cannot act
+# on the news that Asana was happy. Two headline grammars carry essentially all
+# of it, and both are matched CASE-SENSITIVELY on the buyer's proper noun —
+# that capital letter is the whole discriminator. Without it "How Claude's text
+# watermark works" (technical) reads the same as "How NVIDIA scales expertise
+# with ChatGPT Work" (an ad).
+_PROMO_BUYER = r"[A-Z][\w.&'’-]*(?:\s+[A-Z][\w.&'’-]*){0,3}"
+_PROMO_OUTCOME = (
+    r"uses?|used|is\s+using|scales?|scaled|builds?|built|cuts?|cut|saves?|saved"
+    r"|reduces?|reduced|automat\w+|transform\w+|accelerat\w+|deploys?|deployed"
+    r"|puts?|put|completes?|completed|clears?|cleared|ships?|shipped|grew|grows?"
+)
+# "How NVIDIA scales expertise with ChatGPT Work"
+_PROMO_HOW_RE = re.compile(rf"\bHow\s+{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b")
+# "Asana cleared 5 years of engineering work in 2 weeks with Codex"
+_PROMO_OUTCOME_RE = re.compile(
+    rf"^{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b.*\bwith\s+[A-Z]"
+)
+_PROMO_KEYWORD_RE = re.compile(
+    r"\bcase\s+stud|customer\s+stor|\bsuccess\s+stor|\btestimonial"
+    r"|\bhow\s+enterprises\b",
+    re.IGNORECASE,
+)
+
+# HIGH: the post changes what can be built or what it costs. Deliberately NOT
+# "is this research" — hf_papers alone publishes ten papers a day, and promoting
+# that firehose would spend a session on each. Shipping changes only.
+#
+# Matched against the TITLE ALONE, unlike the demotion patterns above. Every
+# paper abstract benchmarks against frontier models, so reading summaries here
+# promotes the whole firehose on a passing mention: measured on the live sweep,
+# a document-extraction paper cleared HIGH purely because its abstract contained
+# "sonnet-5". Demotion reads the summary because openai's RSS carries the
+# subject in the description and a wrong demotion only costs silence; promotion
+# does not, because a wrong promotion spends a Claude session.
+_HIGH_RELEVANCE_RE = re.compile(
+    r"\bintroducing\b|\bannouncing\b|\bpreviewing\b|\blaunching\b"
+    r"|\bnow\s+available\b|\bgenerally\s+available\b|\bdeprecat\w+"
+    r"|\bsunsett?ing\b|\bbreaking\s+change|\bmigration\s+guide\b"
+    r"|\bpricing\b|\brate\s+limits?\b|\brelease\s+notes\b|\bchangelog\b"
+    r"|\bapis?\b|\bsdks?\b"
+    r"|\b(?:gpt|claude|gemini|llama|qwen|opus|sonnet|haiku|fable|codex)"
+    r"[\s‑-]?\d",
+    re.IGNORECASE,
+)
+
+
+def _is_non_work(text: str) -> bool:
+    """The lab talking about itself — public affairs or promotion."""
+    return bool(
+        _PUBLIC_AFFAIRS_RE.search(text)
+        or _PROMO_HOW_RE.search(text)
+        or _PROMO_OUTCOME_RE.search(text)
+        or _PROMO_KEYWORD_RE.search(text)
+    )
 
 
 def _relevance_for(title: str, summary: str = "") -> float:
     """How much this post bears on building with these models.
 
-    Unrecognized subject fails OPEN at the operational default: a post this
-    scanner cannot classify stays as loud as it is today, so a vocabulary
-    that drifts out of date makes the mind no deafer than it already is.
+    Order is load-bearing. NON-WORK is asked FIRST because promotional copy
+    quotes the product it sells, so a model token inside a case study must not
+    buy it the HIGH tier. NON-WORK reads title AND summary; HIGH reads the
+    title only — see the comment above _HIGH_RELEVANCE_RE for why the two
+    directions do not get the same evidence.
+
+    An unrecognized subject fails OPEN at the operational default: a post this
+    scanner cannot classify stays exactly as loud as it is today, so a
+    vocabulary that drifts out of date makes the mind no deafer than it
+    already is.
     """
-    if _PUBLIC_AFFAIRS_RE.search(f"{title or ''} {summary or ''}"):
-        return _RELEVANCE_PUBLIC_AFFAIRS
+    if _is_non_work(f"{title or ''} {summary or ''}"):
+        return _RELEVANCE_NON_WORK
+    if _HIGH_RELEVANCE_RE.search(title or ''):
+        return _RELEVANCE_HIGH
     return _RELEVANCE_DEFAULT
 
 
