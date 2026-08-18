@@ -16,7 +16,11 @@ trigger contract (type/detail/novelty/relevance/urgency, <=5 per cycle):
      Change is detected by content hash: the first time a URL is seen its
      hash is recorded as a silent baseline (no trigger — there's nothing to
      compare against yet); every fetch after that triggers `reach_web_update`
-     only if the hash actually moved.
+     only if the hash actually moved. A moved hash is then DIFFED against the
+     previous line-set, and the trigger carries the lines that were ADDED —
+     not the top of the page — with relevance scored on those added lines
+     alone. A change that adds nothing (reorder, removal, rotating promo)
+     advances the baseline silently instead of reporting itself as news.
   2. search — standing web-search queries, backend chain in order:
        a. Exa via `mcporter call exa.web_search_exa` (Agent-Reach's native
           route) when `mcporter` is on PATH;
@@ -60,7 +64,8 @@ Configuration (env):
                                 for hits and lower for misses; if unset,
                                 every trigger gets a neutral 0.5 relevance.
 
-Dedupe: web_watch keys off a per-URL content hash persisted to disk; search
+Dedupe: web_watch keys off a per-URL content hash plus the per-URL line-set
+that hash summarizes, both persisted to disk; search
 keys off "seen (query, result-url) pair" persisted to disk, same "seen set
 capped at 1000" pattern as the other examples in this directory. If more
 candidates surface in one cycle than the 5-trigger cap allows, only the
@@ -97,6 +102,7 @@ _DEFAULT_CACHE_TTL = 3600
 _DEFAULT_SEARCH_TTL = 21600
 _MAX_TRIGGERS = 5
 _SEEN_MAX = 1000
+_WATCH_LINES_MAX = 600  # per-URL line-key budget; ~40KB of page holds well under this
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
 _FETCH_CACHE_FILE = _CACHE_DIR / "agent_reach_fetch.json"
@@ -140,6 +146,36 @@ def _keyword_relevance(text: str) -> float:
 
 
 # ---------------------------------------------------------------- web_watch --
+
+def _content_lines(body: str) -> list[str]:
+    """Whitespace-normalized, non-empty lines — the unit a page diff is taken
+    in. Normalizing here means a reflow or an indent change is not mistaken
+    for new content."""
+    return [line for line in (" ".join(l.split()) for l in body.splitlines()) if line]
+
+
+def _line_key(line: str) -> str:
+    """Short digest of one line — the cache stores keys, not the page, so a
+    watched page costs ~12 bytes/line on disk instead of its full body."""
+    return hashlib.sha1(line.encode("utf-8")).hexdigest()[:12]
+
+
+def _added_lines(body: str, previous_keys: list[str]) -> list[str]:
+    """Lines present now that were not present at the last baseline.
+
+    Set membership, not a positional diff: a reordered page (a promo card
+    rotating to the top, a "featured" slot reshuffling) yields ZERO added
+    lines, which is the honest answer — nothing new was published."""
+    seen = set(previous_keys)
+    out, emitted = [], set()
+    for line in _content_lines(body):
+        key = _line_key(line)
+        if key in seen or key in emitted:
+            continue
+        emitted.add(key)
+        out.append(line)
+    return out
+
 
 def _fetch_jina(url: str) -> str | None:
     """Any page as markdown via Jina Reader — plain GET, no key, no deps."""
@@ -239,33 +275,57 @@ def scan_agent_reach() -> list[dict[str, Any]]:
         return []  # both channels inside their cadence; fetches cost latency/spend
 
     watch_hashes: dict[str, str] = dict(cache.get("watch_hashes", {}))
+    watch_lines: dict[str, list[str]] = dict(cache.get("watch_lines", {}))
     seen: set[str] = set(_load_json(_SEEN_FILE, []))
 
     # Each candidate carries what it takes to commit itself to disk *after*
     # the cap is applied, so overflow candidates are left uncommitted (and
     # therefore still eligible next cycle) instead of being marked done and
     # lost forever.
-    candidates: list[tuple[str, str, str | None, dict[str, Any]]] = []
+    candidates: list[tuple[str, str, str | None, list[str] | None, dict[str, Any]]] = []
 
     for url in (watch_urls if run_watch else []):
         body = _fetch_jina(url)
         if body is None:
             continue
         digest = hashlib.sha1(body.encode("utf-8")).hexdigest()[:16]
+        line_keys = [_line_key(l) for l in _content_lines(body)][-_WATCH_LINES_MAX:]
         previous = watch_hashes.get(url)
-        if previous is None:
+        previous_lines = watch_lines.get(url)
+        if previous is None or previous_lines is None:
             # First sight: baseline silently. Committed immediately (not cap-
-            # gated) since there's no trigger competing for a slot here.
+            # gated) since there's no trigger competing for a slot here. A
+            # cache written before the line-set existed re-baselines the same
+            # silent way rather than reporting the whole page as "new".
             watch_hashes[url] = digest
+            watch_lines[url] = line_keys
             continue
         if digest == previous:
             continue
-        head = " ".join(body.split())[:160]
-        candidates.append(("watch", url, digest, {
+        added = _added_lines(body, previous_lines)
+        if not added:
+            # The bytes moved but nothing was ADDED — a reorder, a removal, a
+            # rotating promo slot. Advance the baseline silently: reporting
+            # this as a signal is what let a page with no new headline buy a
+            # real session (2026-08-18).
+            watch_hashes[url] = digest
+            watch_lines[url] = line_keys
+            continue
+        added_text = " | ".join(added)
+        candidates.append(("watch", url, digest, line_keys, {
             "type": "reach_web_update",
-            "detail": f"Watched page changed: {url} -- {head}"[:280],
-            "novelty": 0.7,
-            "relevance": _keyword_relevance(body[:5000]),
+            # The DIFF, not the top of the page. The old head-of-body detail
+            # was the same skip-link boilerplate on every fire, so neither the
+            # mind nor a woken session could tell a new headline from a footer
+            # tweak.
+            "detail": f"Watched page changed: {url} -- +{len(added)} new: {added_text}"[:280],
+            "novelty": min(0.85, 0.55 + 0.05 * len(added)),
+            # Scored on what CHANGED, not on the whole page. Scoring the body
+            # pinned a keyword-rich page at the 0.9 relevance ceiling forever:
+            # any byte-change to anthropic.com/news bid a fixed 0.25 + 0.4*0.9
+            # + 0.2*0.3 = 0.67 against a 0.600 wake floor, so that one URL was
+            # a standing wake voucher regardless of what it published.
+            "relevance": _keyword_relevance(added_text[:5000]),
             "urgency": 0.3,
             "url": url,
         }))
@@ -283,7 +343,7 @@ def scan_agent_reach() -> list[dict[str, Any]]:
                 if not url.startswith("http") or key in seen:
                     continue
                 title = r.get("title", url)
-                candidates.append(("search", key, None, {
+                candidates.append(("search", key, None, None, {
                     "type": "reach_search_result",
                     "detail": f"[{query}] {title} -- {url}"[:280],
                     "novelty": 0.6,
@@ -295,10 +355,12 @@ def scan_agent_reach() -> list[dict[str, Any]]:
 
     emitted = candidates[:_MAX_TRIGGERS]
     triggers: list[dict[str, Any]] = []
-    for kind, key, digest, trigger in emitted:
+    for kind, key, digest, line_keys, trigger in emitted:
         triggers.append(trigger)
         if kind == "watch":
             watch_hashes[key] = digest
+            if line_keys is not None:
+                watch_lines[key] = line_keys
         else:
             seen.add(key)
 
@@ -307,6 +369,7 @@ def scan_agent_reach() -> list[dict[str, Any]]:
     if run_search:
         cache["search_ts"] = now
     cache["watch_hashes"] = watch_hashes
+    cache["watch_lines"] = watch_lines
     _save_json(_FETCH_CACHE_FILE, cache)
     _save_json(_SEEN_FILE, sorted(seen)[-_SEEN_MAX:])
     return triggers

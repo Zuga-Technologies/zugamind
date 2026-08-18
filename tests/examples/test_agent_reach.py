@@ -386,3 +386,124 @@ def test_search_skips_relative_redirect_urls(monkeypatch, tmp_path):
     assert [t["url"] for t in out] == ["https://real.example/post"]
     seen = json.loads(agent_reach._SEEN_FILE.read_text())
     assert seen == ["q:https://real.example/post"]
+
+
+# ------------------------------------------------- web_watch: what CHANGED --
+#
+# A watched page fires on a moved content hash, but the hash says only THAT
+# something moved. Until 2026-08-18 the trigger reported the first 160 chars
+# of the page (on anthropic.com/news: the "Skip to main content" skip-link,
+# every single time) and scored relevance on the whole body — so a keyword-
+# rich page bid a fixed 0.25 + 0.4*0.9 + 0.2*0.3 = 0.67 against a 0.600 wake
+# floor on ANY byte change, and neither the mind nor the woken session could
+# tell a new headline from a footer tweak. These cover the diff that fixed it.
+
+def _watch_only(monkeypatch, tmp_path, ttl="100"):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZUGAMIND_REACH_WATCH_URLS", "http://example.com/page")
+    monkeypatch.delenv("ZUGAMIND_REACH_QUERIES", raising=False)
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", ttl)
+    return _fake_clock(monkeypatch)
+
+
+def test_reordered_page_adds_nothing_and_stays_silent(monkeypatch, tmp_path):
+    """A promo card rotating to the top moves the hash and publishes nothing."""
+    clock = _watch_only(monkeypatch, tmp_path)
+    first = "headline one\nheadline two\nheadline three"
+    bodies = iter([first, "headline three\nheadline one\nheadline two", first])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []      # baseline
+    clock["t"] += 200
+    assert agent_reach.scan_agent_reach() == []      # reorder -> nothing added
+    clock["t"] += 200
+    # Baseline advanced to the reordered page, so flipping back is also silent.
+    assert agent_reach.scan_agent_reach() == []
+
+
+def test_detail_carries_the_addition_not_the_top_of_the_page(monkeypatch, tmp_path):
+    clock = _watch_only(monkeypatch, tmp_path)
+    head = "Skip to main content\nNewsroom\nolder post from last week"
+    bodies = iter([head, head + "\nAug 18 2026 Product Introducing something new"])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()
+
+    assert len(out) == 1
+    assert "Introducing something new" in out[0]["detail"]
+    assert "Skip to main content" not in out[0]["detail"]
+    assert "+1 new" in out[0]["detail"]
+    assert len(out[0]["detail"]) <= 280
+
+
+def test_relevance_scores_the_addition_not_the_whole_body(monkeypatch, tmp_path):
+    """The page is wall-to-wall keywords; the ADDITION is not. Scoring the body
+    pinned this page at the 0.9 ceiling forever — that is the bug."""
+    clock = _watch_only(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "claude,anthropic,agent")
+    page = "claude and anthropic ship an agent\nmore claude news\nagent updates"
+    bodies = iter([page, page + "\ncookie banner text refreshed"])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()
+
+    assert len(out) == 1
+    assert out[0]["relevance"] == 0.2          # keyword miss on the addition
+    assert agent_reach._keyword_relevance(page) == 0.9   # ...and 0.9 on the body
+
+
+def test_relevance_still_peaks_when_the_addition_is_the_news(monkeypatch, tmp_path):
+    clock = _watch_only(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "claude,anthropic,agent")
+    page = "some unrelated boilerplate\nnavigation links"
+    bodies = iter([page, page + "\nAnthropic ships a new Claude agent today"])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()
+
+    assert out[0]["relevance"] == 0.9
+
+
+def test_cache_without_a_line_set_rebaselines_silently(monkeypatch, tmp_path):
+    """Migration: a cache written before line-sets existed must not report the
+    entire page as new on the first upgraded fetch."""
+    import hashlib
+    clock = _watch_only(monkeypatch, tmp_path)
+    old_body = "headline one\nheadline two"
+    (tmp_path / "agent_reach_fetch.json").write_text(json.dumps({
+        "ts": 0, "search_ts": 0,
+        "watch_hashes": {
+            "http://example.com/page":
+                hashlib.sha1(old_body.encode()).hexdigest()[:16],
+        },
+    }), encoding="utf-8")
+
+    bodies = iter([old_body + "\nheadline three", old_body + "\nheadline four"])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    # Hash moved, but there is no line-set to diff against -> silent baseline.
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()
+    assert len(out) == 1
+    assert "headline four" in out[0]["detail"]
+
+
+def test_novelty_scales_with_how_much_was_added(monkeypatch, tmp_path):
+    clock = _watch_only(monkeypatch, tmp_path)
+    base = "one"
+    bodies = iter([base, base + "\ntwo", base + "\ntwo\nthree\nfour\nfive\nsix"])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    small = agent_reach.scan_agent_reach()[0]["novelty"]
+    clock["t"] += 200
+    big = agent_reach.scan_agent_reach()[0]["novelty"]
+    assert small < big <= 0.85
