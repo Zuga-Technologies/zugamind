@@ -58,8 +58,10 @@ Your function:
   `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `ZUGAMIND_JIRA_PROJECT`.
 - **`scan_dirty_worktree.py`** — flags git repos that have had uncommitted
   changes for too long (the "wrote it, tested it, forgot to commit it before
-  the session ended" failure mode). Config: `ZUGAMIND_WATCH_WORKTREES`,
-  `ZUGAMIND_DIRTY_THRESHOLD_HOURS` (default 24).
+  the session ended" failure mode). Weights each trigger by what is actually
+  dirty, so lockfile churn and an already-reported-and-ignored dirty set stay
+  below the wake floor while real carried work clears it. Config:
+  `ZUGAMIND_WATCH_WORKTREES`, `ZUGAMIND_DIRTY_THRESHOLD_HOURS` (default 24).
 - **`scan_process_conflict.py`** — flags when a configured app/process is
   currently running, so an autonomous harness can check "is a human actively
   in this thing right now?" before touching its files. Config:
