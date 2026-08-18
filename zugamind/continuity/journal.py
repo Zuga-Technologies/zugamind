@@ -267,11 +267,15 @@ def build_briefing(
                 gate = _wake_gate_hint()
                 if gate:
                     gate_floor, basis = gate
-                    if basis == "modulated" and raw < gate_floor <= salience:
-                        note += (f" — NOT EARNED: the bar is {gate_floor:.3f} and the "
-                                 f"module asked below it. Weigh this signal accordingly")
-                    else:
-                        note += f" (bar {gate_floor:.3f}, judged on {basis})"
+                    # Report the number the gate ACTUALLY compared. It judges
+                    # min(bid, modulated) whenever the floor self-calibrates —
+                    # the only case this hint reports — so naming a single
+                    # basis ("judged on raw") understated it, and on 2026-08-18
+                    # that wording described a wake as gate-approved on 0.67
+                    # while the mind had damped the same signal to 0.25.
+                    judged = min(raw, salience)
+                    note += (f" (bar {gate_floor:.3f} fitted on the {basis} series; "
+                             f"judged on min(bid, modulated) = {judged:.2f})")
                 lines.append(note + ".")
             # For an external signal the URL *is* the payload — the content
             # line is only a headline ("HN [202pts]: On AI regulation and

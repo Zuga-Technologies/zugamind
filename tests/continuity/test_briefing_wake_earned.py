@@ -10,9 +10,16 @@ against a 0.655 bar), and both times the woken session burned its context
 re-deriving that from journal.jsonl because the briefing showed only the
 post-boost number.
 
-So: when raw and modulated differ, the briefing shows both, and when the
-gate is judging the modulated number while the raw one sits below the bar,
-it says so in as many words.
+So: when raw and modulated differ, the briefing shows both, plus the number
+the gate ACTUALLY judged.
+
+Updated 2026-08-18. The gate now clamps to min(bid, modulated) on either
+fitted basis, so "a boost carried a bid below the bar" is unreachable —
+that winner is filtered before a briefing is ever built (runner filters
+harnesses at _harness_wants, then calls build_briefing). What replaced the
+NOT-EARNED flag is the judged number itself, because the reverse case is
+live: an alarm-lane winner bypasses the floor entirely, and a wake whose
+bid was DAMPED must not be described as gate-approved on its raw bid.
 """
 from __future__ import annotations
 
@@ -28,15 +35,32 @@ def _winner(raw, modulated):
     }
 
 
-def test_boosted_wake_below_the_bar_is_flagged_not_earned(tmp_path, monkeypatch):
+def test_damped_wake_is_judged_on_the_damped_number(tmp_path, monkeypatch):
+    """Asked 0.70, damped to 0.66: the clamp judges 0.66, and so must the note."""
     monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "journal.jsonl")
     monkeypatch.setattr(journal, "_wake_gate_hint", lambda: (0.655, "modulated"))
 
-    briefing = journal.build_briefing(None, winner=_winner(0.60, 0.66))
+    briefing = journal.build_briefing(None, winner=_winner(0.70, 0.66))
 
-    assert "NOT EARNED" in briefing
-    assert "Bid 0.60" in briefing
+    assert "Bid 0.70, woke on 0.66" in briefing
+    assert "judged on min(bid, modulated) = 0.66" in briefing
     assert "0.655" in briefing
+
+
+def test_alarm_lane_wake_never_claims_the_raw_bid_was_approved(tmp_path, monkeypatch):
+    """The exact 2026-08-18 shape: raw 0.67, damped to 0.25, bar 0.600.
+
+    The floor no longer passes this, but the alarm lane still bypasses the
+    floor by design (EXP-003), so a heavily damped winner can reach a
+    briefing. When it does, the note must show 0.25 — the number the gate
+    would have judged — not the 0.67 the module asked for."""
+    monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "journal.jsonl")
+    monkeypatch.setattr(journal, "_wake_gate_hint", lambda: (0.600, "raw"))
+
+    briefing = journal.build_briefing(None, winner=_winner(0.67, 0.25))
+
+    assert "judged on min(bid, modulated) = 0.25" in briefing
+    assert "judged on raw" not in briefing
 
 
 def test_wake_earned_on_its_own_bid_is_not_flagged(tmp_path, monkeypatch):
@@ -48,18 +72,21 @@ def test_wake_earned_on_its_own_bid_is_not_flagged(tmp_path, monkeypatch):
 
     assert "NOT EARNED" not in briefing
     assert "Bid 0.70" in briefing
+    # The boost is discarded, not credited: the clamp judged the 0.70 bid.
+    assert "judged on min(bid, modulated) = 0.70" in briefing
 
 
-def test_raw_basis_gate_is_never_labelled_not_earned(tmp_path, monkeypatch):
-    """Once the gate judges the raw number, a boost cannot carry anything —
-    there is no unearned case left to flag, only the basis to report."""
+def test_note_names_the_fitted_series_and_the_judged_number(tmp_path, monkeypatch):
+    """Which series the floor was FITTED on and which number it JUDGED are two
+    different facts, and the woken session needs both to check its own wake."""
     monkeypatch.setattr(journal, "JOURNAL_FILE", tmp_path / "journal.jsonl")
     monkeypatch.setattr(journal, "_wake_gate_hint", lambda: (0.58, "raw"))
 
     briefing = journal.build_briefing(None, winner=_winner(0.60, 0.66))
 
     assert "NOT EARNED" not in briefing
-    assert "judged on raw" in briefing
+    assert "fitted on the raw series" in briefing
+    assert "judged on min(bid, modulated) = 0.60" in briefing
 
 
 def test_unmodulated_bid_adds_no_noise(tmp_path, monkeypatch):

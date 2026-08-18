@@ -333,32 +333,39 @@ class StreamRunner:
         if isinstance(floor, (int, float)):
             salience = winner_dict.get("salience", 0.0)
             raw = (winner_dict.get("context") or {}).get("raw_salience")
-            if basis == "raw":
-                # What the module ASKED for, before the attention schema's
-                # monopoly-breaking multipliers rewrote it. Those exist to
-                # share attention inside the mind; they were never meant to
-                # authorise spending a real session. Measured 2026-08-17: a
-                # 0.5164 bid cleared a 0.655 floor as 0.6816 on boosts alone.
-                # Missing raw is judged on `salience` rather than waved
-                # through: an unstamped bid must not become a free pass.
-                if isinstance(raw, (int, float)):
-                    salience = raw
-            elif calibrated and isinstance(raw, (int, float)):
-                # WARMUP CLAMP (2026-08-17, third unearned wake the same day).
-                # The raw series needs CALIBRATION_WINDOW samples before the
-                # basis can flip, and stamping only began this afternoon — so
-                # for ~20 more cycles the gate above is dormant and boosts go
-                # right on buying sessions. Measured during that window: raw
-                # 0.60 x 1.1 (not-current-focus) = 0.66 vs a 0.655 floor, twice.
+            if calibrated and isinstance(raw, (int, float)):
+                # ONE CLAMP, BOTH BASES: min(modulated, raw). The principle is
+                # "a multiplier may LOWER a bid but never buy a wake", and it
+                # takes both halves of this min() to hold it.
                 #
-                # Judging min(modulated, raw) closes it without re-tuning
-                # anything: the floor is still the one fitted on modulated
-                # samples, and the clamp can only ever subtract the part a
-                # multiplier ADDED. Dampening (diversity cap, streak penalty)
-                # still suppresses normally, because then modulated is already
-                # the smaller number and min() picks it — i.e. this is strictly
-                # "a multiplier may lower the bid but never buy a wake".
-                # Becomes a no-op once basis flips to "raw".
+                # raw guards the BOOST half. The attention schema's
+                # monopoly-breaking multipliers exist to share attention
+                # inside the mind; they were never meant to authorise spending
+                # a real session. Measured 2026-08-17: a 0.5164 bid cleared a
+                # 0.655 floor as 0.6816 on boosts alone.
+                #
+                # modulated guards the DAMPENING half, and judging raw ALONE
+                # threw it away — the "becomes a no-op once basis flips to
+                # raw" note this comment replaced was wrong about that.
+                # Dampening (diversity cap, streak penalty) is the mind's own
+                # "this module is monopolising, quiet it", and it was the only
+                # thing standing between a repeat source and a session.
+                # Measured 2026-08-18: world_signals bid raw 0.670, was damped
+                # to 0.250 — the hardest damping in the whole 90-sample
+                # raw-stamped record — and the gate waved it through on 0.670
+                # vs a 0.600 floor, for a watched page whose newest headline
+                # was four days old.
+                #
+                # Cross-basis is safe in this direction only. A raw-fitted
+                # floor must never judge modulated on its own (modulated runs
+                # systematically higher, so the floor would go permissive —
+                # the trap resolve_gate() exists to avoid); min() can only
+                # ever subtract, so it makes the gate stricter, never looser.
+                #
+                # Missing raw is judged on `salience` rather than waved
+                # through: an unstamped bid must not become a free pass. A
+                # hand-set static floor (not `calibrate`) keeps judging
+                # modulated untouched — it was written against that number.
                 salience = min(salience, raw)
             if not isinstance(salience, (int, float)) or salience < floor:
                 return False

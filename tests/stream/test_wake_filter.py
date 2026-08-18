@@ -179,3 +179,17 @@ def test_alarm_lane_still_bypasses_under_raw_basis(monkeypatch):
     w = _boosted(raw=0.01, salience=0.02)
     w["context"]["alarm_lane"] = True
     assert StreamRunner._harness_wants(hc, w)
+
+
+def test_raw_basis_keeps_dampening_intact(monkeypatch):
+    """The hole the raw basis opened (2026-08-18): judging raw ALONE also
+    discarded DAMPENING, and dampening is the mind's own "this module is
+    monopolising, quiet it". Live shape — world_signals asked 0.670, the
+    attention schema damped it to 0.250 (hardest damping in the whole
+    90-sample raw-stamped record), and the gate woke a session on 0.670
+    against a 0.600 floor for a watched page with no new headline."""
+    monkeypatch.setattr(floor_calibration, "resolve_gate", lambda n: (0.600, "raw"))
+    hc = {"name": "h", "wake_min_salience": "calibrate"}
+    assert not StreamRunner._harness_wants(hc, _boosted(raw=0.67, salience=0.25))
+    # ...and the same bid, undamped, still earns its wake.
+    assert StreamRunner._harness_wants(hc, _boosted(raw=0.67, salience=0.67))
