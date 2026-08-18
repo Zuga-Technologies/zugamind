@@ -18,7 +18,18 @@ eight separate times over twelve days and bought a harness wake:
    seen-set is baselined SILENTLY (whole feed marked seen, zero triggers) so
    deploying this never dumps a month of back-catalogue into the workspace.
 
-2. URGENCY DECAYS WITH PUBLISH AGE. Feed order is not recency order —
+2. RELEVANCE IS THE POST'S SUBJECT, NOT A CONSTANT. WorldSignals prices a
+   trigger at 0.25 + 0.4*relevance + 0.2*urgency, so a hardcoded
+   relevance=0.75 put EVERY fresh lab post at exactly 0.600 -- the wake
+   floor, cleared by a margin of zero. That is how a government-policy
+   announcement bought a Claude session on 2026-08-18 20:11Z: the topic
+   never entered the math. A lab's public-affairs output (policy,
+   regulation, elections, global affairs, economic-index reports) is real
+   news that has no bearing on building on these APIs, so it prices below
+   the floor. Everything else keeps the operational default -- an
+   unrecognized subject fails OPEN at 0.75, same principle as (3).
+
+3. URGENCY DECAYS WITH PUBLISH AGE. Feed order is not recency order —
    anthropic.com/news leads with a pinned/featured block, so its FIRST card
    was a month old while the newest post sat fifth and was never reached.
    A trigger's numbers have to be evidence: a constant urgency means the bid
@@ -54,6 +65,8 @@ _MAX_TRIGGERS = 4
 _SEEN_MAX = 800     # seven feeds x eight items = 56 keys/sweep; this holds ~2 weeks
 _FRESH_HOURS = 24   # published inside this window scores full urgency
 _STALE_HOURS = 72   # published beyond this scores zero — backlog, not news
+_RELEVANCE_DEFAULT = 0.75        # research/product/model post — bids 0.60 fresh
+_RELEVANCE_PUBLIC_AFFAIRS = 0.40 # policy/comms post — bids 0.46 fresh, under the floor
 # Honors ZUGAMIND_DATA_DIR without importing foundation — scanners stay standalone.
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent.parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
@@ -162,6 +175,38 @@ def _parse_date(value: str) -> float | None:
             except ValueError:
                 return None
     return None
+
+
+# A frontier lab publishes two kinds of thing. One is the work — models,
+# releases, pricing, research, safety findings — which changes what can be
+# built and how. The other is public affairs — policy positions, regulatory
+# comment, government partnerships, executive appointments, economic-impact
+# reports — which is real news that changes nothing about the building. Only
+# phrases that are unambiguous in the second sense belong here; a term that
+# also has a technical reading ("governance", "alignment policy", an RL
+# "policy") would make the scanner deaf to actual work. Checked against a
+# 56-item live sweep (7 feeds, 2026-08-18): 5 matched, all public affairs,
+# no research or product post among them.
+_PUBLIC_AFFAIRS_RE = re.compile(
+    r"national\s+security|democratic\s+oversight|public\s+policy"
+    r"|\bai\s+policy\b|policy\s+ideas|policymaker|regulator|regulation"
+    r"|legislation|lawmaker|\bcongress\b|\bparliament\b|\bai\s+act\b"
+    r"|\belections?\b|\bgovernments?\b|global\s+affairs|public\s+affairs"
+    r"|philanthrop|\bnonprofit\b|economic\s+index|economic\s+research",
+    re.IGNORECASE,
+)
+
+
+def _relevance_for(title: str, summary: str = "") -> float:
+    """How much this post bears on building with these models.
+
+    Unrecognized subject fails OPEN at the operational default: a post this
+    scanner cannot classify stays as loud as it is today, so a vocabulary
+    that drifts out of date makes the mind no deafer than it already is.
+    """
+    if _PUBLIC_AFFAIRS_RE.search(f"{title or ''} {summary or ''}"):
+        return _RELEVANCE_PUBLIC_AFFAIRS
+    return _RELEVANCE_DEFAULT
 
 
 def _urgency_for(published: float | None, now: float) -> float:
@@ -333,7 +378,7 @@ def scan_ai_labs() -> list[dict[str, Any]]:
             "summary": it.get("summary", ""),
             "published": published,
             "novelty": 0.8,
-            "relevance": 0.75,
+            "relevance": _relevance_for(it["title"], it.get("summary", "")),
             "urgency": _urgency_for(published, now),
         })
 

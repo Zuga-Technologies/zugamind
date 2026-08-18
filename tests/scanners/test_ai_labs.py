@@ -1,9 +1,13 @@
-"""ai_labs: an item triggers once, and its urgency is its publish age.
+"""ai_labs: an item triggers once, and its numbers are evidence.
 
 Regression suite for the 2026-08-18 finding — "Introducing Claude Opus 5"
 (published Jul 24) won the global workspace eight times over twelve days and
 bought a harness wake, because the scanner had no per-item dedupe and shipped
 a hardcoded urgency. Both are asserted here.
+
+Extended the same evening: relevance was hardcoded too, which put every fresh
+lab post at exactly the 0.600 wake floor and let an OpenAI national-security
+policy announcement buy a Claude session at 20:11Z.
 """
 from __future__ import annotations
 
@@ -131,8 +135,8 @@ def test_unknown_publish_date_fails_open(cache_dir):
 
 
 def test_stale_item_bids_below_a_fresh_one(cache_dir):
-    """WorldSignals prices 0.25 + 0.4*relevance + 0.2*urgency. With relevance
-    fixed at 0.75, urgency is the only term that can separate a month-old post
+    """WorldSignals prices 0.25 + 0.4*relevance + 0.2*urgency. At the
+    operational relevance of 0.75, urgency is what separates a month-old post
     from this morning's — 0.60 (at the default 0.600 floor) vs 0.55."""
     now = time.time()
     _seed([_item(slug="baseline")])
@@ -163,6 +167,88 @@ def test_newest_first_within_a_lab(cache_dir):
         _item(slug="newest", title="Newest", published=now - HOUR),
     ])
     assert [t["title"] for t in ai_labs.scan_ai_labs()][0] == "Newest"
+
+
+# --------------------------------------------------------------------------
+# relevance is evidence
+# --------------------------------------------------------------------------
+
+def _salience(relevance, urgency):
+    """WorldSignalsModule.generate_bid, verbatim."""
+    return min(0.75, 0.25 + 0.4 * relevance + 0.2 * urgency)
+
+
+@pytest.mark.parametrize("title", [
+    # the post that woke a session on 2026-08-18 at 20:11Z, and its siblings
+    "Strengthening Democratic Oversight in National Security",
+    "New policy ideas for the Intelligence Age",
+    "Our comment on the EU AI Act",
+    "Working with the U.S. Congress on AI",
+    "Tino Cuellar to join Anthropic as Chief Global Affairs Officer",
+    "Findings from the Anthropic Economic Index",
+])
+def test_public_affairs_posts_price_below_the_wake_floor(title):
+    relevance = ai_labs._relevance_for(title)
+    assert relevance == ai_labs._RELEVANCE_PUBLIC_AFFAIRS
+    assert _salience(relevance, 0.25) < 0.600
+
+
+@pytest.mark.parametrize("title", [
+    "Introducing Claude Opus 5",
+    "How Claude's text watermark works",
+    "Improving Fable 5's biology safeguards",
+    "Investigating three real-world incidents in our cybersecurity evaluations",
+    # terms with a technical reading must NOT read as public affairs
+    "A new policy gradient method for agent training",
+    "AI governance for model deployment",
+    "Echoverse: evolving environments for computer-use agents",
+])
+def test_work_posts_keep_the_operational_relevance(title):
+    assert ai_labs._relevance_for(title) == ai_labs._RELEVANCE_DEFAULT
+
+
+def test_unrecognized_subject_fails_open(cache_dir):
+    """A vocabulary that drifts out of date must not make the scanner deaf."""
+    assert ai_labs._relevance_for("", "") == ai_labs._RELEVANCE_DEFAULT
+    assert ai_labs._relevance_for("Qwertyuiop asdfghjkl") == ai_labs._RELEVANCE_DEFAULT
+
+    _seed([_item(slug="baseline")])
+    ai_labs.scan_ai_labs()
+    _seed([_item(slug="baseline"), _item(slug="odd", title="Zxcvbnm")])
+    assert ai_labs.scan_ai_labs()[0]["relevance"] == ai_labs._RELEVANCE_DEFAULT
+
+
+def test_the_summary_counts_not_just_the_title(cache_dir):
+    """openai's RSS carries the subject in the description, not the headline."""
+    assert ai_labs._relevance_for(
+        "The Defender's Window",
+        "What this means for lawmakers drafting the next AI act.",
+    ) == ai_labs._RELEVANCE_PUBLIC_AFFAIRS
+
+
+def test_a_fresh_policy_post_no_longer_clears_the_floor(cache_dir):
+    """The 2026-08-18 20:11Z wake, replayed end to end.
+
+    A fresh lab post used to price at exactly 0.600 whatever its subject, and
+    the gate filters on `salience < floor` — so every one of them cleared the
+    0.600 floor by a margin of zero.
+    """
+    now = time.time()
+    _seed([_item(slug="baseline")])
+    ai_labs.scan_ai_labs()
+
+    _seed([_item(slug="baseline"),
+           _item(lab="openai", slug="policy", published=now - HOUR,
+                 title="Strengthening Democratic Oversight in National Security"),
+           _item(lab="anthropic", slug="model", published=now - HOUR,
+                 title="Introducing Claude Opus 5")])
+    by_title = {t["title"]: t for t in ai_labs.scan_ai_labs()}
+
+    policy = by_title["Strengthening Democratic Oversight in National Security"]
+    model = by_title["Introducing Claude Opus 5"]
+    assert policy["urgency"] == model["urgency"] == 0.25  # equally fresh
+    assert _salience(policy["relevance"], policy["urgency"]) == pytest.approx(0.46)
+    assert _salience(model["relevance"], model["urgency"]) == pytest.approx(0.60)
 
 
 # --------------------------------------------------------------------------
