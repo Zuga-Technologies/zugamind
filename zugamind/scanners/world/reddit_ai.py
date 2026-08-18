@@ -13,6 +13,14 @@ Subreddits chosen for AI implementation inspiration:
   - r/MachineLearning   (research + papers)
   - r/LocalLLaMA        (open-weights, self-hostable models)
   - r/singularity       (broader AI news + speculation)
+
+A post triggers ONCE, ever (scanners.seen_items). /hot is not a queue of new
+things — a stickied post sits at the top of it indefinitely, and before this
+scanner remembered what it had emitted, engine habituation was the only thing
+between it and the workspace. Habituation forgets after HABITUATION_HOURS, so
+r/singularity's "Discord Server Link" won the global workspace twelve times
+between Aug 9 and Aug 18, r/MachineLearning's self-promotion thread nine, and
+r/LocalLLaMA's monthly megathread eight. None of them were ever news.
 """
 
 import json
@@ -25,6 +33,8 @@ import urllib.error
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from scanners.seen_items import read_seen, write_seen
+
 logger = logging.getLogger("zugamind.scanners.reddit_ai")
 
 _SUBS = ["MachineLearning", "LocalLLaMA", "singularity"]
@@ -32,6 +42,7 @@ _FEED_URL = "https://www.reddit.com/r/{sub}/hot/.rss?limit=8"
 _ATOM_NS = "{http://www.w3.org/2005/Atom}"
 _CACHE_TTL_SEC = 60 * 60
 _TIMEOUT_SEC = 5
+_SEEN_MAX = 600  # three subs x eight items per sweep; this holds many weeks
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -43,6 +54,15 @@ def _cache_path() -> Path:
     cache_dir = data_dir / "scanner_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     return cache_dir / "reddit_ai.json"
+
+
+def _seen_path() -> Path:
+    return _cache_path().parent / "reddit_ai_seen.json"
+
+
+def _post_key(post: dict) -> str:
+    """Stable identity for one post: reddit's own id, else its permalink."""
+    return str(post.get("id") or post.get("link") or post.get("title") or "")
 
 
 def _fetch_sub(sub: str) -> list[dict]:
@@ -111,10 +131,25 @@ def scan_reddit_ai() -> list[dict]:
     brand_re = (re.compile("|".join(re.escape(t) for t in brand_terms), re.IGNORECASE)
                 if brand_terms else None)
 
+    if not posts:
+        return []  # feed dark: stay cold rather than baseline an empty sweep
+
+    seen = read_seen(_seen_path())
+    if seen is None:
+        # Cold start: baseline the sweep silently. /hot is mostly days old at
+        # any moment, so emitting it on first run would hand the workspace a
+        # backlog and call it news.
+        write_seen(_seen_path(), {_post_key(p): time.time() for p in posts}, _SEEN_MAX)
+        return []
+
+    now = time.time()
+    fresh = [p for p in posts if _post_key(p) not in seen]
+
     triggers: list[dict] = []
-    for p in posts[:6]:  # cap at 6 across subs
+    for p in fresh[:6]:  # cap at 6 across subs
         slug = (p.get("id") or p.get("link") or "")[-40:]
         brand_hit = bool(brand_re and brand_re.search(p.get("title", "") or ""))
+        seen[_post_key(p)] = now
         triggers.append(
             {
                 "type": "reddit_ai_post",
@@ -130,4 +165,7 @@ def scan_reddit_ai() -> list[dict]:
                 "subreddit": p.get("sub", ""),
             }
         )
+
+    if triggers:
+        write_seen(_seen_path(), seen, _SEEN_MAX)
     return triggers

@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.text_format import truncate_title
+from scanners.seen_items import read_seen, write_seen
 
 logger = logging.getLogger("zugamind.scanners.ai_labs")
 
@@ -109,31 +110,12 @@ def _write_cache(payload: dict[str, Any]) -> None:
 
 
 def _read_seen() -> dict[str, float] | None:
-    """Item key -> epoch first emitted. None means "no seen-set on disk yet",
-    which is a COLD START and must be distinguished from an empty one — the
-    first is baselined silently, the second really has nothing seen."""
-    try:
-        path = _seen_file()
-        if not path.exists():
-            return None
-        d = json.loads(path.read_text())
-        return {str(k): float(v) for k, v in d.items()} if isinstance(d, dict) else None
-    except Exception:
-        return None
+    """None means COLD START — see scanners.seen_items.read_seen."""
+    return read_seen(_seen_file())
 
 
 def _write_seen(seen: dict[str, float]) -> None:
-    """Persist newest _SEEN_MAX keys. Pruning is by recency, never by key
-    order: an alphabetical cap would evict a live feed item and let it fire
-    again the next sweep."""
-    try:
-        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        if len(seen) > _SEEN_MAX:
-            keep = sorted(seen.items(), key=lambda kv: kv[1], reverse=True)[:_SEEN_MAX]
-            seen = dict(keep)
-        _seen_file().write_text(json.dumps(seen))
-    except Exception:
-        pass
+    write_seen(_seen_file(), seen, _SEEN_MAX)
 
 
 def _item_key(it: dict[str, Any]) -> str:
