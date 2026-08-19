@@ -16,6 +16,12 @@ range, not another word. Relevance is now three tiers and the asserted
 invariant is ORDERING -- a model launch must out-bid an unclassified post,
 which must out-bid the lab's own marketing -- so the gate keeps working when
 the self-calibrating wake floor moves.
+
+Extended again 2026-08-19, when the DEFAULT tier's own volume on the hf_papers
+firehose was found setting the floor that HIGH has to clear (two sessions,
+02:08Z and 02:44Z, both unrecognized paper abstracts). "Unrecognized" is a
+near-miss on a curated feed but the base case on a feed with a fixed daily
+quota, so unrecognized items are now priced per FEED, not just per subject.
 """
 from __future__ import annotations
 
@@ -306,6 +312,47 @@ def test_shipping_posts_clear_the_floor_with_margin(title):
     """
     assert ai_labs._relevance_for(title) == ai_labs._RELEVANCE_HIGH
     assert _salience(ai_labs._relevance_for(title), 0.25) > 0.600
+
+
+@pytest.mark.parametrize("title", [
+    # the two papers that bought consecutive sessions, 02:08Z and 02:44Z
+    "Agentic ESOpt: Fine-Tuning Long-Horizon LLM Agents with Minimal GPU Requirements",
+    "GS-Voxel: Fitting-Free Structured Latents for Large-Scale 3DGS Generation",
+    "Accuracy and Order Sensitivity Diverge Under Label-Free Strategies",
+])
+def test_a_firehose_papers_unrecognized_item_prices_below_the_floor(title):
+    """On hf_papers, "unrecognized" is the daily quota, not a near-miss. Fail
+    open there and the feed pays wake price ten times a day -- and its own
+    0.600 bids become the p90 that lifts the floor it has to clear."""
+    assert ai_labs._relevance_for(title, "", "hf_papers") == ai_labs._RELEVANCE_FIREHOSE
+    assert _salience(ai_labs._relevance_for(title, "", "hf_papers"), 0.25) < 0.590
+    # identical title on a curated feed still fails OPEN
+    assert ai_labs._relevance_for(title, "", "anthropic") == ai_labs._RELEVANCE_DEFAULT
+
+
+def test_the_firehose_demotion_does_not_blind_the_feed():
+    """Priced, not silenced: HIGH is asked before the demotion, so a paper
+    feed that does announce a shipped thing still clears the floor."""
+    assert ai_labs._relevance_for(
+        "Introducing Qwen-3.8", "", "hf_papers"
+    ) == ai_labs._RELEVANCE_HIGH
+    assert _salience(
+        ai_labs._relevance_for("Introducing Qwen-3.8", "", "hf_papers"), 0.25
+    ) > 0.600
+
+
+def test_the_lab_reaches_relevance_from_the_scan(cache_dir):
+    """End-to-end: the demotion is worthless if the call site drops `lab`."""
+    _seed([_item(lab="hf_papers", slug="baseline")])
+    ai_labs.scan_ai_labs()
+    _seed([
+        _item(lab="hf_papers", slug="baseline"),
+        _item(lab="hf_papers", slug="paper", title="Zxcvbnm Asdfgh For Long-Horizon Agents"),
+        _item(lab="anthropic", slug="post", title="Zxcvbnm Asdfgh For Long-Horizon Agents"),
+    ])
+    by_lab = {t["lab"]: t["relevance"] for t in ai_labs.scan_ai_labs()}
+    assert by_lab["hf_papers"] == ai_labs._RELEVANCE_FIREHOSE
+    assert by_lab["anthropic"] == ai_labs._RELEVANCE_DEFAULT
 
 
 def test_marketing_that_names_a_model_is_still_marketing():

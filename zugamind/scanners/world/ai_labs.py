@@ -36,7 +36,9 @@ eight separate times over twelve days and bought a harness wake:
 
      HIGH (0.95, bids 0.68)  ships something to build on -- a model launch,
                              pricing, API/SDK, a deprecation.
-     DEFAULT (0.75, bids 0.60)  unrecognized. Unchanged, fails OPEN.
+     DEFAULT (0.75, bids 0.60)  unrecognized on a curated feed. Fails OPEN.
+     FIREHOSE (0.40, bids 0.46)  unrecognized on a feed with a daily quota.
+                             See 4 below.
      NON-WORK (0.40, bids 0.46)  the lab talking about itself -- public
                              affairs (policy, regulation, elections,
                              appointments, partnerships, economic-index
@@ -51,7 +53,39 @@ eight separate times over twelve days and bought a harness wake:
    (act/floor_calibration.py), and at 0.600 every non-demoted post cleared
    it by zero while three more such winners would have ratcheted it to 0.65
    and silenced the whole feed, model launches included. HIGH sits above
-   that; DEFAULT deliberately does not.
+   that.
+
+4. FAIL-OPEN IS A PROPERTY OF THE FEED, NOT A CONSTANT.
+   DEFAULT was set to 0.600 and described as both "fails OPEN" and "sits
+   below the floor". Those cannot both hold, because the floor MOVES: it is
+   p90 of the last 50 ambient winners + 0.05, and it had settled at 0.590 by
+   2026-08-19T02Z. So DEFAULT cleared it -- by 0.007 and by 0.008 -- and
+   bought two consecutive Claude sessions 36 minutes apart, at 02:08Z and
+   02:44Z, both for HuggingFace daily-paper abstracts (evolution strategies
+   for LLM agents; 3D Gaussian Splatting generation). Neither ships anything.
+
+   Worse, the same posts were what SET the 0.590. Over the 51 world_signals
+   winners of 2026-08-18, ambient chatter bid 0.51-0.55 and the only samples
+   above it were ai_labs DEFAULT items at 0.597-0.600. A high-volume feed
+   priced at exactly the floor is a self-referential trap: its own bids
+   become the p90, the p90 lifts the floor toward 0.65, and HIGH's 0.68 is
+   left with 0.03 of headroom before model launches go silent too.
+
+   The volume is what makes it a trap, and the volume is a property of the
+   FEED. anthropic/openai/deepmind publish when something happened; hf_papers
+   serves a fixed ten a day whether or not it did, so on that feed
+   "unrecognized" is the base case rather than a near-miss, and fail-open
+   pays wake price for the whole quota. `_FIREHOSE_LABS` prices unrecognized
+   items from those feeds at NON-WORK level. They still enter the workspace
+   as research input -- bidding into the workspace is not the same as buying
+   a session. Fail-open is kept intact on the six curated feeds, where the
+   whole record shows no DEFAULT-tier wake that was not a subject the word
+   lists have since learned.
+
+   NOT fixed by this, and worth knowing: the floor still chases whatever the
+   loudest routine source is, and HIGH is a fixed 0.68. If ambient chatter
+   ever drifts above 0.63, model launches go deaf and no change in this file
+   can stop it.
 
 3. URGENCY DECAYS WITH PUBLISH AGE. Feed order is not recency order —
    anthropic.com/news leads with a pinned/featured block, so its FIRST card
@@ -90,8 +124,15 @@ _SEEN_MAX = 800     # seven feeds x eight items = 56 keys/sweep; this holds ~2 w
 _FRESH_HOURS = 24   # published inside this window scores full urgency
 _STALE_HOURS = 72   # published beyond this scores zero — backlog, not news
 _RELEVANCE_HIGH = 0.95      # ships something to build on — bids 0.68 fresh, clears a moving floor
-_RELEVANCE_DEFAULT = 0.75   # unrecognized subject — bids 0.60 fresh, exactly today's floor
+_RELEVANCE_DEFAULT = 0.75   # unrecognized subject on a curated feed — bids 0.60 fresh
+_RELEVANCE_FIREHOSE = 0.40  # unrecognized subject on a firehose feed — bids 0.46 fresh, under the floor
 _RELEVANCE_NON_WORK = 0.40  # the lab talking about itself — bids 0.46 fresh, under the floor
+# Feeds that publish a fixed quota per day regardless of whether anything
+# happened. On these, "unrecognized" is the BASE CASE, not a near-miss, so
+# fail-open prices the whole quota at wake level — see the FIREHOSE section of
+# the module docstring. FIREHOSE and NON_WORK price the same today for
+# different reasons; they are separate constants so either can move alone.
+_FIREHOSE_LABS = frozenset({"hf_papers"})
 # Honors ZUGAMIND_DATA_DIR without importing foundation — scanners stay standalone.
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent.parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
@@ -289,7 +330,7 @@ def _is_non_work(text: str) -> bool:
     )
 
 
-def _relevance_for(title: str, summary: str = "") -> float:
+def _relevance_for(title: str, summary: str = "", lab: str = "") -> float:
     """How much this post bears on building with these models.
 
     Order is load-bearing. NON-WORK is asked FIRST because promotional copy
@@ -298,15 +339,23 @@ def _relevance_for(title: str, summary: str = "") -> float:
     title only — see the comment above _HIGH_RELEVANCE_RE for why the two
     directions do not get the same evidence.
 
-    An unrecognized subject fails OPEN at the operational default: a post this
-    scanner cannot classify stays exactly as loud as it is today, so a
+    HIGH is asked BEFORE the firehose demotion, so a paper feed that does
+    announce a shipped thing still promotes — the demotion prices the quota,
+    it does not blind the feed.
+
+    An unrecognized subject fails OPEN at the operational default, so a
     vocabulary that drifts out of date makes the mind no deafer than it
-    already is.
+    already is — but only on a feed where "unrecognized" is a near-miss. On a
+    firehose it is the base case, and fail-open there means paying for the
+    quota. `lab` defaults to "" (curated) so an unlabelled call keeps the old
+    answer.
     """
     if _is_non_work(f"{title or ''} {summary or ''}"):
         return _RELEVANCE_NON_WORK
     if _HIGH_RELEVANCE_RE.search(title or ''):
         return _RELEVANCE_HIGH
+    if lab in _FIREHOSE_LABS:
+        return _RELEVANCE_FIREHOSE
     return _RELEVANCE_DEFAULT
 
 
@@ -479,7 +528,7 @@ def scan_ai_labs() -> list[dict[str, Any]]:
             "summary": it.get("summary", ""),
             "published": published,
             "novelty": 0.8,
-            "relevance": _relevance_for(it["title"], it.get("summary", "")),
+            "relevance": _relevance_for(it["title"], it.get("summary", ""), it["lab"]),
             "urgency": _urgency_for(published, now),
         })
 
