@@ -274,11 +274,11 @@ _PUBLIC_AFFAIRS_RE = re.compile(
 # NON-WORK, tier two: promotion — a customer case study is the lab selling its
 # product with a named buyer as the proof. It reads technical (it names models,
 # quotes engineering outcomes) and is worth nothing to a builder: you cannot act
-# on the news that Asana was happy. Two headline grammars carry essentially all
-# of it, and both are matched CASE-SENSITIVELY on the buyer's proper noun —
-# that capital letter is the whole discriminator. Without it "How Claude's text
-# watermark works" (technical) reads the same as "How NVIDIA scales expertise
-# with ChatGPT Work" (an ad).
+# on the news that Asana was happy. Two headline grammars carry most of it, and
+# both are matched CASE-SENSITIVELY on the buyer's proper noun — that capital
+# letter is the whole discriminator. Without it "How Claude's text watermark
+# works" (technical) reads the same as "How NVIDIA scales expertise with
+# ChatGPT Work" (an ad).
 _PROMO_BUYER = r"[A-Z][\w.&'’-]*(?:\s+[A-Z][\w.&'’-]*){0,3}"
 _PROMO_OUTCOME = (
     r"uses?|used|is\s+using|scales?|scaled|builds?|built|cuts?|cut|saves?|saved"
@@ -291,9 +291,17 @@ _PROMO_HOW_RE = re.compile(rf"\bHow\s+{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b")
 _PROMO_OUTCOME_RE = re.compile(
     rf"^{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b.*\bwith\s+[A-Z]"
 )
+# A third grammar needs no buyer capture at all: "powered by" is a partner
+# describing whose engine runs under their own product, and no lab post about
+# its OWN model is ever phrased that way about itself. Caught the 2026-08-19
+# 14:29Z wake — "Replit expands access to software creation with GPT-5.6
+# Luna" / "Replit introduces Free Mode, powered by GPT-5.6 Luna" — neither
+# _PROMO_HOW_RE ("expands" opens the title, not "How") nor _PROMO_OUTCOME_RE
+# ("expands" and "introduces" are not outcome verbs) matched, so the model
+# token alone bought it HIGH.
 _PROMO_KEYWORD_RE = re.compile(
     r"\bcase\s+stud|customer\s+stor|\bsuccess\s+stor|\btestimonial"
-    r"|\bhow\s+enterprises\b",
+    r"|\bhow\s+enterprises\b|\bpowered\s+by\b",
     re.IGNORECASE,
 )
 

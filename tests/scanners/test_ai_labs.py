@@ -22,6 +22,12 @@ firehose was found setting the floor that HIGH has to clear (two sessions,
 02:08Z and 02:44Z, both unrecognized paper abstracts). "Unrecognized" is a
 near-miss on a curated feed but the base case on a feed with a fixed daily
 quota, so unrecognized items are now priced per FEED, not just per subject.
+
+Extended again the same day at 14:29Z: "Replit expands access to software
+creation with GPT-5.6 Luna" bought a session because it is a THIRD promotion
+grammar neither existing pattern covers -- "expands" does not open with "How"
+and is not an outcome verb, so the "GPT-5" token alone reached HIGH. "Powered
+by" is now its own tell: no lab writes that phrase about its own model.
 """
 from __future__ import annotations
 
@@ -361,6 +367,21 @@ def test_marketing_that_names_a_model_is_still_marketing():
     assert ai_labs._relevance_for(
         "Model ML completes finance work more efficiently with GPT-5.6 Sol"
     ) == ai_labs._RELEVANCE_NON_WORK
+
+
+def test_powered_by_is_promotion_without_a_buyer_capture():
+    """The 2026-08-19 14:29Z wake. Neither _PROMO_HOW_RE ("expands" does not
+    open the title with "How") nor _PROMO_OUTCOME_RE ("expands" and
+    "introduces" are not outcome verbs) matched, so the model token alone
+    bought "Replit expands access to software creation with GPT-5.6 Luna"
+    the HIGH tier."""
+    title = "Replit expands access to software creation with GPT-5.6 Luna"
+    summary = (
+        "Replit introduces Free Mode, powered by GPT-5.6 Luna, so anyone "
+        "can turn ideas into working software without worrying about tokens."
+    )
+    assert ai_labs._relevance_for(title, summary) == ai_labs._RELEVANCE_NON_WORK
+    assert _salience(ai_labs._relevance_for(title, summary), 0.25) < 0.600
 
 
 def test_promotion_reads_the_title_only_demotion_reads_the_summary():
