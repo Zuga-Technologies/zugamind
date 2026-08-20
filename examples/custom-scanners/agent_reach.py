@@ -88,6 +88,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -103,6 +104,7 @@ _DEFAULT_SEARCH_TTL = 21600
 _MAX_TRIGGERS = 5
 _SEEN_MAX = 1000
 _WATCH_LINES_MAX = 600  # per-URL line-key budget; ~40KB of page holds well under this
+_WATCH_LINKS_MAX = 400  # per-URL link budget; a news index carries tens, not hundreds
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
 _FETCH_CACHE_FILE = _CACHE_DIR / "agent_reach_fetch.json"
@@ -158,6 +160,19 @@ def _line_key(line: str) -> str:
     """Short digest of one line — the cache stores keys, not the page, so a
     watched page costs ~12 bytes/line on disk instead of its full body."""
     return hashlib.sha1(line.encode("utf-8")).hexdigest()[:12]
+
+
+_LINK_RE = re.compile(r"https?://[^\s)\]<>\"']+")
+
+
+def _page_links(body: str) -> list[str]:
+    """Every URL the page currently points at, in order, deduped."""
+    out, seen = [], set()
+    for url in _LINK_RE.findall(body):
+        if url not in seen:
+            seen.add(url)
+            out.append(url)
+    return out
 
 
 def _added_lines(body: str, previous_keys: list[str]) -> list[str]:
