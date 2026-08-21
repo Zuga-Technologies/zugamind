@@ -127,6 +127,17 @@ eight separate times over twelve days and bought a harness wake:
    actually turns on; added alone rather than paired with either broader
    word.
 
+7. GEOSPATIAL/MOBILITY RESEARCH IS THE SAME CLASS AS 5, NOT A NEW ONE.
+   [google_res] "How mobility gives language models a deeper understanding
+   of place" won the workspace on DEFAULT at 0.66 on 2026-08-21: real Earth
+   AI research (visit-intent prediction, price-level classification,
+   busyness estimation from anonymized mobility data), zero shipping
+   language, so same miss as WeatherNext/Skala -- "AI applied to a field"
+   just has more fields than the four point 5 enumerated. Extended
+   `_SCI_DOMAIN_RE` rather than adding a point 8 next time this class
+   recurs with a still-different field; the pattern is the category, not
+   each individual subject.
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -342,12 +353,16 @@ _PROMO_KEYWORD_RE = re.compile(
 )
 
 # NON-WORK, tier three: AI applied to a different scientific field. Real lab
-# research, but nothing here bears on building with the models -- see point 5
-# in the module docstring for the evidence (WeatherNext x3, Skala/DFT). Kept
-# to unambiguous phrases from confirmed hits plus the same flagship "AI for
-# science" categories (protein folding, drug discovery, materials discovery),
-# not a bare acronym like "DFT" alone, which also means Discrete Fourier
-# Transform and could false-positive on a real architecture post.
+# research, but nothing here bears on building with the models -- see points
+# 5 and 7 in the module docstring for the evidence (WeatherNext x3, Skala/DFT,
+# mobility/POI understanding). Kept to unambiguous phrases from confirmed
+# hits plus the same flagship "AI for science" categories (protein folding,
+# drug discovery, materials discovery), not a bare acronym like "DFT" alone,
+# which also means Discrete Fourier Transform and could false-positive on a
+# real architecture post. Same reasoning for "mobility" -- not matched bare,
+# since robotics posts use it for actuation/movement, not geospatial data --
+# only paired with the geospatial-data phrasing this class of post actually
+# uses.
 _SCI_DOMAIN_RE = re.compile(
     r"weather\s+forecast|forecast\w*\s+(?:weather|cyclones?|hurricanes?|storms?)"
     r"|(?:cyclones?|hurricanes?|storms?)\s+forecast|climate\s+model"
@@ -355,7 +370,8 @@ _SCI_DOMAIN_RE = re.compile(
     r"|quantum\s+chemistry|molecular\s+dynamics"
     r"|protein\s+fold|protein\s+structure\s+predict"
     r"|drug\s+discovery|drug\s+design"
-    r"|materials?\s+discovery",
+    r"|materials?\s+discovery"
+    r"|mobility\s+(?:data|patterns?)|understanding\s+of\s+place",
     re.IGNORECASE,
 )
 

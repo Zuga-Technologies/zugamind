@@ -37,6 +37,13 @@ words. Not "governance" or "power": both have a technical reading the
 existing comment already warns off (see test_work_posts_keep_the_operational_
 relevance's "AI governance for model deployment"). "individual freedom" does
 not.
+
+Extended again 2026-08-21, wake on [google_res] "How mobility gives language
+models a deeper understanding of place" at 0.66: same class as the point-5
+WeatherNext/Skala finding, not a new one -- Earth AI research (visit-intent
+prediction, price-level classification, busyness estimation from anonymized
+mobility data), zero shipping language. _SCI_DOMAIN_RE extended rather than
+adding a fourth science-domain point next time; the pattern is the category.
 """
 from __future__ import annotations
 
@@ -440,6 +447,29 @@ def test_a_societal_impact_essay_is_public_affairs_by_different_words():
     )
     assert ai_labs._relevance_for(title, summary) == ai_labs._RELEVANCE_NON_WORK
     assert _salience(ai_labs._relevance_for(title, summary), 0.25) < 0.600
+
+
+def test_geospatial_mobility_research_is_the_same_class_as_weathernext():
+    """Point 7 in the module docstring, the 2026-08-21 wake. [google_res]
+    "How mobility gives language models a deeper understanding of place" is
+    Earth AI research (visit-intent prediction, price-level classification,
+    busyness estimation from anonymized mobility data) — same "AI applied to
+    a different scientific field" class as WeatherNext/Skala, just a field
+    point 5 didn't enumerate. "mobility" alone is not matched (robotics posts
+    use it for actuation/movement) — only paired with the geospatial-data
+    phrasing this class of post actually uses."""
+    title = "How mobility gives language models a deeper understanding of place"
+    summary = (
+        "Mobility-Embedded POIs combine static text metadata with real-world "
+        "mobility patterns and mobility data to improve visit intent "
+        "prediction, price level classification, and busyness estimation."
+    )
+    assert ai_labs._relevance_for(title, summary, "google_res") == ai_labs._RELEVANCE_NON_WORK
+    # a robotics post using "mobility" for actuation must NOT be demoted
+    assert ai_labs._relevance_for(
+        "Introducing a new robot mobility controller for uneven terrain",
+        "The controller improves legged robot mobility over rocky terrain",
+    ) != ai_labs._RELEVANCE_NON_WORK
 
 
 # --------------------------------------------------------------------------
