@@ -87,6 +87,21 @@ eight separate times over twelve days and bought a harness wake:
    ever drifts above 0.63, model launches go deaf and no change in this file
    can stop it.
 
+5. A LAB APPLYING AI TO ANOTHER SCIENTIFIC FIELD IS ALSO NOT BUILDER NEWS.
+   A post about weather forecasting, quantum chemistry, protein folding, or
+   drug discovery is real research from the lab itself, so it is neither
+   public affairs nor promotion -- the existing NON-WORK checks miss it --
+   and it carries no HIGH-tier language (no "introducing", no model
+   name+version, no API/pricing), so it lands on DEFAULT and buys a full
+   wake same as any model launch. This is not a one-off: [deepmind]
+   "WeatherNext: AI model achieves breakthrough in forecasting cyclones"
+   won the workspace three times in 30h (2026-08-06 to -08), and
+   [msft_research] "Broadening access to Skala creates a faster path to
+   predictive DFT" won again on 2026-08-20 -- a brand-new post, so the
+   dedupe fix in (1) does not touch this, only a subject check does.
+   Demoted the same way as public affairs/promo: checked FIRST, before
+   HIGH, on title+summary.
+
 3. URGENCY DECAYS WITH PUBLISH AGE. Feed order is not recency order —
    anthropic.com/news leads with a pinned/featured block, so its FIRST card
    was a month old while the newest post sat fifth and was never reached.
@@ -94,6 +109,23 @@ eight separate times over twelve days and bought a harness wake:
    is identical whether the item is an hour old or a year old. Age unknown
    (unparseable date) fails OPEN at the fresh value — a parser regression
    must not silently make the scanner deaf.
+
+6. THE PUBLIC-AFFAIRS LIST ITSELF STILL GOES STALE, SAME AS ANY WORD LIST.
+   [openai] "Introducing AI Futures" won the workspace at HIGH on 2026-08-20
+   20:13Z: the title's "Introducing" satisfies _HIGH_RELEVANCE_RE, and the
+   post is a societal-impact essay ("...reshape power, governance, the
+   economy, and individual freedom") -- public affairs by kind, same as the
+   2026-08-18 "Strengthening Democratic Oversight in National Security"
+   post that started this tier -- but it uses none of that post's words.
+   Not fixed by adding "governance": the comment above _PUBLIC_AFFAIRS_RE
+   already flags "governance" as a term with a technical reading (see
+   test_work_posts_keep_the_operational_relevance's "AI governance for
+   model deployment", which must stay DEFAULT), so a bare match there would
+   re-open the hole point 2's "policy" caveat was written to avoid. "power"
+   is worse -- compute/processing "power" is routine builder vocabulary.
+   "individual freedom" has no such reading and is the phrase this post
+   actually turns on; added alone rather than paired with either broader
+   word.
 
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
@@ -257,6 +289,9 @@ def _parse_date(value: str) -> float | None:
 # phrases were added 2026-08-19 — the module docstring already CLAIMED to cover
 # "executive appointments", but no pattern did, and "OpenAI appoints Dali Rajic
 # as Chief Revenue Officer" won the workspace at full relevance on 2026-08-13.
+# "individual freedom" was added 2026-08-20 for a societal-impact essay that
+# used none of the words above — see point 6 in the module docstring for why
+# it is not "governance" or "power" instead.
 _PUBLIC_AFFAIRS_RE = re.compile(
     r"national\s+security|democratic\s+oversight|public\s+policy"
     r"|\bai\s+policy\b|policy\s+ideas|policymaker|regulator|regulation"
@@ -267,7 +302,8 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     r"|to\s+join\s+\w+\s+as\b|\bboard\s+of\s+directors\b|\bgovernor\b"
     r"|\bpartnering\s+with\b|\bpartnership\b|\bletter\s+to\b|\bstatement\s+on\b"
     r"|\b(?:joins|joining)\s+(?:the\s+)?[\w-]+\s+"
-    r"(?:project|initiative|coalition|alliance|consortium|council|pledge)\b",
+    r"(?:project|initiative|coalition|alliance|consortium|council|pledge)\b"
+    r"|\bindividual\s+freedom\b",
     re.IGNORECASE,
 )
 
@@ -305,6 +341,24 @@ _PROMO_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# NON-WORK, tier three: AI applied to a different scientific field. Real lab
+# research, but nothing here bears on building with the models -- see point 5
+# in the module docstring for the evidence (WeatherNext x3, Skala/DFT). Kept
+# to unambiguous phrases from confirmed hits plus the same flagship "AI for
+# science" categories (protein folding, drug discovery, materials discovery),
+# not a bare acronym like "DFT" alone, which also means Discrete Fourier
+# Transform and could false-positive on a real architecture post.
+_SCI_DOMAIN_RE = re.compile(
+    r"weather\s+forecast|forecast\w*\s+(?:weather|cyclones?|hurricanes?|storms?)"
+    r"|(?:cyclones?|hurricanes?|storms?)\s+forecast|climate\s+model"
+    r"|exchange-correlation\s+functional|density\s+functional\s+theory|predictive\s+dft"
+    r"|quantum\s+chemistry|molecular\s+dynamics"
+    r"|protein\s+fold|protein\s+structure\s+predict"
+    r"|drug\s+discovery|drug\s+design"
+    r"|materials?\s+discovery",
+    re.IGNORECASE,
+)
+
 # HIGH: the post changes what can be built or what it costs. Deliberately NOT
 # "is this research" — hf_papers alone publishes ten papers a day, and promoting
 # that firehose would spend a session on each. Shipping changes only.
@@ -329,12 +383,15 @@ _HIGH_RELEVANCE_RE = re.compile(
 
 
 def _is_non_work(text: str) -> bool:
-    """The lab talking about itself — public affairs or promotion."""
+    """The lab talking about itself, selling itself, or doing science that
+    isn't about the models — public affairs, promotion, or an off-topic
+    scientific domain."""
     return bool(
         _PUBLIC_AFFAIRS_RE.search(text)
         or _PROMO_HOW_RE.search(text)
         or _PROMO_OUTCOME_RE.search(text)
         or _PROMO_KEYWORD_RE.search(text)
+        or _SCI_DOMAIN_RE.search(text)
     )
 
 

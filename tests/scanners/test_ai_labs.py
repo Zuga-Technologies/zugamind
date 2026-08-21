@@ -28,6 +28,15 @@ creation with GPT-5.6 Luna" bought a session because it is a THIRD promotion
 grammar neither existing pattern covers -- "expands" does not open with "How"
 and is not an outcome verb, so the "GPT-5" token alone reached HIGH. "Powered
 by" is now its own tell: no lab writes that phrase about its own model.
+
+Extended again 2026-08-20 20:13Z: "Introducing AI Futures" ("...reshape
+power, governance, the economy, and individual freedom") bought a session on
+HIGH via "Introducing" alone -- public affairs by kind, same as the very
+first post this tier was built for, but phrased with none of that post's
+words. Not "governance" or "power": both have a technical reading the
+existing comment already warns off (see test_work_posts_keep_the_operational_
+relevance's "AI governance for model deployment"). "individual freedom" does
+not.
 """
 from __future__ import annotations
 
@@ -397,6 +406,40 @@ def test_promotion_reads_the_title_only_demotion_reads_the_summary():
         "The Defender's Window",
         "What this means for lawmakers drafting the next AI act.",
     ) == ai_labs._RELEVANCE_NON_WORK
+
+
+def test_ai_applied_to_another_scientific_field_is_not_builder_news():
+    """Point 5 in the module docstring. Real lab research, but nothing here
+    bears on building with the models, so neither NON-WORK check (not public
+    affairs, not promotion) nor HIGH (no model/API language) catches it —
+    both won the workspace on DEFAULT before this demotion: WeatherNext
+    three times in 30h (2026-08-06 to -08) and Skala/DFT fresh again on
+    2026-08-20, a brand-new post the dedupe fix does not touch."""
+    assert ai_labs._relevance_for(
+        "WeatherNext: AI model achieves breakthrough in forecasting cyclones",
+        "", "deepmind",
+    ) == ai_labs._RELEVANCE_NON_WORK
+    assert ai_labs._relevance_for(
+        "Broadening access to Skala creates a faster path to predictive DFT",
+        "Skala 1.1, the updated deep-learning exchange-correlation functional "
+        "from Microsoft Research, provides greater accuracy",
+        "msft_research",
+    ) == ai_labs._RELEVANCE_NON_WORK
+
+
+def test_a_societal_impact_essay_is_public_affairs_by_different_words():
+    """The 2026-08-20 20:13Z wake. "Introducing" alone reached HIGH; the
+    existing public-affairs phrase list had nothing for "power, governance,
+    the economy, and individual freedom" because it is a new vocabulary for
+    the same kind of post, not a new kind of post."""
+    title = "Introducing AI Futures"
+    summary = (
+        "Introducing AI Futures, a new OpenAI blog exploring how "
+        "transformative AI could reshape power, governance, the economy, "
+        "and individual freedom."
+    )
+    assert ai_labs._relevance_for(title, summary) == ai_labs._RELEVANCE_NON_WORK
+    assert _salience(ai_labs._relevance_for(title, summary), 0.25) < 0.600
 
 
 # --------------------------------------------------------------------------
