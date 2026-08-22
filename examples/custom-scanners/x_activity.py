@@ -79,6 +79,39 @@ def _save_json(path: Path, payload: Any) -> None:
         logger.debug("x_activity cache save failed (%s): %s", path.name, e)
 
 
+# Seen-set eviction (changed 2026-08-22) — see news_rss.py for the full
+# rationale: {id: last_seen_epoch} with refresh-on-observe + TTL eviction
+# (Stripe-style, by age not count) replaces the old alphabetical
+# `sorted(ids)[-1000:]` trim. _SEEN_MAX is a memory backstop only,
+# oldest-first. Legacy bare-list files load fine.
+_SEEN_TTL_SECONDS = 30 * 86400
+_SEEN_MAX = 5000
+
+
+def _load_seen(path: Path) -> dict[str, float]:
+    raw = _load_json(path, {})
+    now = time.time()
+    if isinstance(raw, list):  # legacy format: bare id list
+        return {str(i): now for i in raw}
+    if isinstance(raw, dict):
+        out: dict[str, float] = {}
+        for k, v in raw.items():
+            try:
+                out[str(k)] = float(v)
+            except (TypeError, ValueError):
+                out[str(k)] = now
+        return out
+    return {}
+
+
+def _save_seen(path: Path, seen: dict[str, float], now: float) -> None:
+    cutoff = now - _SEEN_TTL_SECONDS
+    kept = {k: v for k, v in seen.items() if v >= cutoff}
+    if len(kept) > _SEEN_MAX:
+        kept = dict(sorted(kept.items(), key=lambda kv: kv[1])[-_SEEN_MAX:])
+    _save_json(path, kept)
+
+
 def _fetch_recent(query: str, token: str, max_results: int) -> list[dict[str, Any]]:
     params = urllib.parse.urlencode({
         "query": query,
@@ -112,6 +145,7 @@ def scan_x_activity() -> list[dict[str, Any]]:
     max_results = int(os.environ.get("ZUGAMIND_X_MAX_RESULTS", str(_DEFAULT_MAX_RESULTS)))
 
     fetch_cache = _load_json(_FETCH_CACHE_FILE, {"ts": 0, "posts": []})
+    fetched_now = False
     if time.time() - fetch_cache.get("ts", 0) > ttl:
         try:
             posts = _fetch_recent(query, token, max_results)
@@ -124,14 +158,20 @@ def scan_x_activity() -> list[dict[str, Any]]:
         else:
             fetch_cache = {"ts": time.time(), "posts": posts}
             _save_json(_FETCH_CACHE_FILE, fetch_cache)
+            fetched_now = True
 
-    seen: set[str] = set(_load_json(_SEEN_FILE, []))
+    seen = _load_seen(_SEEN_FILE)
+    now = time.time()
     triggers: list[dict[str, Any]] = []
     newly_seen: set[str] = set()
 
     for post in fetch_cache.get("posts", []):
         pid = post.get("id")
-        if not pid or pid in seen:
+        if not pid:
+            continue
+        is_new = pid not in seen
+        seen[pid] = now  # refresh-on-observe
+        if not is_new:
             continue
         newly_seen.add(pid)
         text = (post.get("text") or "")[:250]
@@ -149,8 +189,7 @@ def scan_x_activity() -> list[dict[str, Any]]:
         if len(triggers) >= _MAX_TRIGGERS:
             break
 
-    if newly_seen:
-        merged = seen | newly_seen
-        _save_json(_SEEN_FILE, sorted(merged)[-1000:])
+    if newly_seen or fetched_now:
+        _save_seen(_SEEN_FILE, seen, now)
 
     return triggers

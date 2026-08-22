@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -43,20 +44,43 @@ _SEEN_FILE = _CACHE_DIR / "discord_activity_seen.json"
 _API = "https://discord.com/api/v10/channels/{channel}/messages"
 
 
-def _load_seen() -> set[str]:
+# Seen-set eviction (changed 2026-08-22) — see news_rss.py for the full
+# rationale: {id: last_seen_epoch} with refresh-on-observe + TTL eviction
+# (Stripe-style, by age not count) replaces the old `sorted(ids)[-500:]`
+# trim. _SEEN_MAX is a memory backstop only, oldest-first. Legacy bare-list
+# files load fine.
+_SEEN_TTL_SECONDS = 30 * 86400
+_SEEN_MAX = 5000
+
+
+def _load_seen() -> dict[str, float]:
+    now = time.time()
     try:
         if _SEEN_FILE.exists():
-            return set(json.loads(_SEEN_FILE.read_text(encoding="utf-8")))
+            raw = json.loads(_SEEN_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, list):  # legacy format: bare id list
+                return {str(i): now for i in raw}
+            if isinstance(raw, dict):
+                out: dict[str, float] = {}
+                for k, v in raw.items():
+                    try:
+                        out[str(k)] = float(v)
+                    except (TypeError, ValueError):
+                        out[str(k)] = now
+                return out
     except Exception as e:
         logger.debug("discord_activity seen-cache load failed: %s", e)
-    return set()
+    return {}
 
 
-def _save_seen(seen: set[str]) -> None:
+def _save_seen(seen: dict[str, float], now: float) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        trimmed = sorted(seen)[-500:]
-        _SEEN_FILE.write_text(json.dumps(trimmed), encoding="utf-8")
+        cutoff = now - _SEEN_TTL_SECONDS
+        kept = {k: v for k, v in seen.items() if v >= cutoff}
+        if len(kept) > _SEEN_MAX:
+            kept = dict(sorted(kept.items(), key=lambda kv: kv[1])[-_SEEN_MAX:])
+        _SEEN_FILE.write_text(json.dumps(kept), encoding="utf-8")
     except Exception as e:
         logger.debug("discord_activity seen-cache save failed: %s", e)
 
@@ -93,14 +117,21 @@ def scan_discord_activity() -> list[dict[str, Any]]:
         return []
 
     seen = _load_seen()
+    now = time.time()
     triggers: list[dict[str, Any]] = []
     newly_seen: set[str] = set()
+    touched = False
 
     for msg in messages:
         mid = msg.get("id")
         content = msg.get("content") or ""
         author = (msg.get("author") or {}).get("username", "?")
-        if not mid or mid in seen:
+        if not mid:
+            continue
+        is_new = mid not in seen
+        seen[mid] = now  # refresh-on-observe
+        touched = True
+        if not is_new:
             continue
         if mention and mention not in content.lower():
             continue
@@ -120,7 +151,7 @@ def scan_discord_activity() -> list[dict[str, Any]]:
         if len(triggers) >= _MAX_TRIGGERS:
             break
 
-    if newly_seen:
-        _save_seen(seen | newly_seen)
+    if touched:
+        _save_seen(seen, now)
 
     return triggers

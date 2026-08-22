@@ -84,6 +84,46 @@ def _save_json(path: Path, payload: Any) -> None:
         logger.debug("news_rss cache save failed (%s): %s", path.name, e)
 
 
+# Seen-set eviction (changed 2026-08-22): the seen-set used to be a bare id
+# list trimmed to `sorted(ids)[-1000:]` — which evicts ALPHABETICALLY, not by
+# age, so for URLs the 1000-cap threw away arbitrary entries and a still-live
+# feed item could be re-announced. It's now {id: last_seen_epoch}: every id
+# observed in a fetch is re-stamped (refresh-on-observe), and an id is evicted
+# only after it has been ABSENT from fetches for _SEEN_TTL_SECONDS — so a
+# slow feed that keeps an item around for months can never see it re-fire,
+# while genuinely gone items age out. TTL-not-count is the same policy the
+# widely-cited production precedent uses (Stripe's idempotency keys: pruned
+# by age, never by count). _SEEN_MAX stays only as a memory backstop and
+# evicts OLDEST-first. Legacy bare-list files load fine (treated as "seen
+# just now"), so upgrading in place is safe.
+_SEEN_TTL_SECONDS = 30 * 86400
+_SEEN_MAX = 5000
+
+
+def _load_seen(path: Path) -> dict[str, float]:
+    raw = _load_json(path, {})
+    now = time.time()
+    if isinstance(raw, list):  # legacy format: bare id list
+        return {str(i): now for i in raw}
+    if isinstance(raw, dict):
+        out: dict[str, float] = {}
+        for k, v in raw.items():
+            try:
+                out[str(k)] = float(v)
+            except (TypeError, ValueError):
+                out[str(k)] = now
+        return out
+    return {}
+
+
+def _save_seen(path: Path, seen: dict[str, float], now: float) -> None:
+    cutoff = now - _SEEN_TTL_SECONDS
+    kept = {k: v for k, v in seen.items() if v >= cutoff}
+    if len(kept) > _SEEN_MAX:
+        kept = dict(sorted(kept.items(), key=lambda kv: kv[1])[-_SEEN_MAX:])
+    _save_json(path, kept)
+
+
 def _fetch(url: str) -> str | None:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ZugaMind/example-scanner"})
@@ -136,6 +176,7 @@ def scan_news_rss() -> list[dict[str, Any]]:
                 os.environ.get("ZUGAMIND_NEWS_KEYWORDS", "").split(",") if k.strip()]
 
     fetch_cache = _load_json(_FETCH_CACHE_FILE, {"ts": 0, "items": []})
+    fetched_now = False
     if time.time() - fetch_cache.get("ts", 0) > ttl:
         items: list[dict[str, str]] = []
         for url in feed_urls:
@@ -145,14 +186,20 @@ def scan_news_rss() -> list[dict[str, Any]]:
             items.extend(_parse_feed(txt, url))
         fetch_cache = {"ts": time.time(), "items": items}
         _save_json(_FETCH_CACHE_FILE, fetch_cache)
+        fetched_now = True
 
-    seen: set[str] = set(_load_json(_SEEN_FILE, []))
+    seen = _load_seen(_SEEN_FILE)
+    now = time.time()
     triggers: list[dict[str, Any]] = []
     newly_seen: set[str] = set()
 
     for it in fetch_cache.get("items", []):
         link = it.get("link", "")
-        if not link or link in seen:
+        if not link:
+            continue
+        is_new = link not in seen
+        seen[link] = now  # refresh-on-observe: still in the feed -> still seen
+        if not is_new:
             continue
         newly_seen.add(link)
         text = f"{it.get('title', '')} {it.get('summary', '')}".lower()
@@ -174,8 +221,10 @@ def scan_news_rss() -> list[dict[str, Any]]:
         if len(triggers) >= _MAX_TRIGGERS:
             break
 
-    if newly_seen:
-        merged = seen | newly_seen
-        _save_json(_SEEN_FILE, sorted(merged)[-1000:])
+    # Persist when something is new OR a fresh fetch re-stamped the window —
+    # refresh-on-observe only works if the refreshed stamps reach disk at
+    # least once per fetch.
+    if newly_seen or fetched_now:
+        _save_seen(_SEEN_FILE, seen, now)
 
     return triggers
