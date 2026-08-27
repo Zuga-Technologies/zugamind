@@ -138,6 +138,25 @@ eight separate times over twelve days and bought a harness wake:
    recurs with a still-different field; the pattern is the category, not
    each individual subject.
 
+8. EVALUATION-GOVERNANCE WORK WITH OUTSIDE INSTITUTES IS PUBLIC AFFAIRS.
+   [deepmind] "Piloting the world's first double-blind AI evaluations"
+   bought a wake on DEFAULT at exactly 0.600 vs a 0.590 floor on
+   2026-08-27 — the first curated-feed DEFAULT wake since point 4 was
+   written. The post: a methodology pilot with the Singapore AI Safety
+   Institute, OpenMined, AVERI and MLCommons — assurance infrastructure
+   for evaluators and institutes, nothing that changes what a builder can
+   build or what it costs. The deepmind feed's summary is the title
+   verbatim, so the headline was the only evidence available. Two things
+   deliberately NOT done: "piloting" was not added to _HIGH_RELEVANCE_RE
+   (this post is the proof that a pilot is not a launch, even though it
+   rhymes with "previewing"), and bare "evaluation" was not demoted (it
+   has a technical reading — see test_work_posts_keep_the_operational_
+   relevance's "cybersecurity evaluations" title, which must stay
+   DEFAULT). "double-blind" is the phrase-level tell — clinical-trial
+   vocabulary no shipping post uses — and "safety institute(s)" names the
+   institutional class directly, for the sibling posts that will phrase
+   the same news as a partnership.
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -302,7 +321,11 @@ def _parse_date(value: str) -> float | None:
 # as Chief Revenue Officer" won the workspace at full relevance on 2026-08-13.
 # "individual freedom" was added 2026-08-20 for a societal-impact essay that
 # used none of the words above — see point 6 in the module docstring for why
-# it is not "governance" or "power" instead.
+# it is not "governance" or "power" instead. "double-blind" and "safety
+# institute(s)" were added 2026-08-27 for an evaluation-governance pilot with
+# national AI safety institutes — see point 8 for why the match is these two
+# phrases and not "evaluation" (which has a technical reading the work-posts
+# test protects) or "piloting" promoted to HIGH (a pilot is not a launch).
 _PUBLIC_AFFAIRS_RE = re.compile(
     r"national\s+security|democratic\s+oversight|public\s+policy"
     r"|\bai\s+policy\b|policy\s+ideas|policymaker|regulator|regulation"
@@ -314,7 +337,7 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     r"|\bpartnering\s+with\b|\bpartnership\b|\bletter\s+to\b|\bstatement\s+on\b"
     r"|\b(?:joins|joining)\s+(?:the\s+)?[\w-]+\s+"
     r"(?:project|initiative|coalition|alliance|consortium|council|pledge)\b"
-    r"|\bindividual\s+freedom\b",
+    r"|\bindividual\s+freedom\b|\bdouble-blind\b|\bsafety\s+institutes?\b",
     re.IGNORECASE,
 )
 

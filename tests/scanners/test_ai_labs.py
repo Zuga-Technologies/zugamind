@@ -472,6 +472,30 @@ def test_geospatial_mobility_research_is_the_same_class_as_weathernext():
     ) != ai_labs._RELEVANCE_NON_WORK
 
 
+def test_an_eval_governance_pilot_with_institutes_is_public_affairs():
+    """Point 8 in the module docstring, the 2026-08-27 22:34Z wake. [deepmind]
+    "Piloting the world's first double-blind AI evaluations" is a methodology
+    pilot with national AI safety institutes — assurance infrastructure, not
+    builder news — and the deepmind feed's summary is the title verbatim, so
+    the headline is the only evidence. "double-blind" is the phrase-level
+    tell; "safety institute(s)" catches the sibling posts phrased as a
+    partnership. "piloting" must NOT promote to HIGH (a pilot is not a
+    launch), and bare "evaluation" must NOT demote (the work-posts test's
+    "cybersecurity evaluations" title keeps its technical reading)."""
+    title = "Piloting the world's first double-blind AI evaluations"
+    relevance = ai_labs._relevance_for(title, title)  # summary == title, as shipped
+    assert relevance == ai_labs._RELEVANCE_NON_WORK
+    assert _salience(relevance, 0.25) < 0.600
+    # the partnership phrasing of the same class, no "double-blind" anywhere
+    assert ai_labs._relevance_for(
+        "Working with the UK AI Safety Institute on frontier model testing",
+    ) == ai_labs._RELEVANCE_NON_WORK
+    # "piloting" alone is not launch language and not demotion language either
+    assert ai_labs._relevance_for(
+        "Piloting qwertyuiop asdfghjkl",
+    ) == ai_labs._RELEVANCE_DEFAULT
+
+
 # --------------------------------------------------------------------------
 # date extraction
 # --------------------------------------------------------------------------
