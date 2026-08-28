@@ -55,9 +55,14 @@ def _load_cache() -> dict[str, Any]:
 
 
 def _save_cache(cache: dict[str, Any]) -> None:
+    """Atomic write (tmp + replace) — a cache torn mid-write by a killed
+    process is worse than a stale one; the TTL gate above means a lost
+    write just costs one extra fetch next cycle."""
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
+        tmp = _CACHE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache), encoding="utf-8")
+        tmp.replace(_CACHE_FILE)
     except Exception as e:
         logger.debug("jira_assigned cache save failed: %s", e)
 
@@ -69,7 +74,11 @@ def _fetch_assigned(base_url: str, email: str, token: str, project: str) -> list
         "maxResults": 10,
         "fields": "summary,status,updated",
     })
-    url = f"{base_url.rstrip('/')}/rest/api/3/search?{query}"
+    # /search/jql replaced /search: Atlassian removed GET /rest/api/3/search
+    # entirely (progressive shutdown Aug-Oct 2025) — the old path returns
+    # 410 Gone. Same jql/maxResults/fields params; pagination (unused here)
+    # moved from startAt to nextPageToken.
+    url = f"{base_url.rstrip('/')}/rest/api/3/search/jql?{query}"
     auth = base64.b64encode(f"{email}:{token}".encode("utf-8")).decode("ascii")
     req = urllib.request.Request(
         url,
@@ -81,7 +90,7 @@ def _fetch_assigned(base_url: str, email: str, token: str, project: str) -> list
     )
     with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
         data = json.loads(resp.read().decode("utf-8", errors="replace"))
-    return data.get("issues", [])
+    return data.get("issues") or []
 
 
 def scan_jira_assigned() -> list[dict[str, Any]]:
@@ -99,6 +108,11 @@ def scan_jira_assigned() -> list[dict[str, Any]]:
             issues = _fetch_assigned(base_url, email, token, project)
         except Exception as e:
             logger.debug("jira_assigned fetch failed: %s", e)
+            # Back off on failure too (incl. 429) — bump ts without touching items so
+            # a persistent outage/rate-limit retries at the normal TTL cadence instead
+            # of hammering the API every cycle until it recovers.
+            cache["ts"] = time.time()
+            _save_cache(cache)
             issues = cache.get("items", [])  # keep serving stale data over a transient error
         else:
             cache["ts"] = time.time()
@@ -111,15 +125,18 @@ def scan_jira_assigned() -> list[dict[str, Any]]:
         fields = issue.get("fields") or {}
         if not key:
             continue
+        # `or {}` guards a `status` key present-but-null, not just absent — plain
+        # `.get("status", {})` misses that case and defaults never apply.
+        status_name = (fields.get("status") or {}).get("name", "?")
+        detail = f"{key} ({status_name}): {(fields.get('summary') or '')[:180]}"
         triggers.append({
             "type": "jira_assigned",
-            "detail": f"{key} ({fields.get('status', {}).get('name', '?')}): "
-                      f"{(fields.get('summary') or '')[:180]}",
+            "detail": detail[:280],
             "novelty": 0.6,
             "relevance": 0.8,
             "urgency": 0.4,
             "issue_key": key,
-            "issue_status": (fields.get("status") or {}).get("name", "?"),
+            "issue_status": status_name,
             "issue_url": f"{base_url.rstrip('/')}/browse/{key}",
         })
 

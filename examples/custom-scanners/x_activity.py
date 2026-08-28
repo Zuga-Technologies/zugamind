@@ -74,7 +74,11 @@ def _load_json(path: Path, default: Any) -> Any:
 def _save_json(path: Path, payload: Any) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        # tmp + replace: a crash mid-write must not leave truncated JSON
+        # (os.replace is atomic on both POSIX and Windows).
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        tmp.replace(path)
     except Exception as e:
         logger.debug("x_activity cache save failed (%s): %s", path.name, e)
 
@@ -155,10 +159,13 @@ def scan_x_activity() -> list[dict[str, Any]]:
         except Exception as e:
             logger.debug("x_activity fetch failed: %s", e)
             posts = fetch_cache.get("posts", [])
-        else:
-            fetch_cache = {"ts": time.time(), "posts": posts}
-            _save_json(_FETCH_CACHE_FILE, fetch_cache)
-            fetched_now = True
+        # ts advances even when the fetch failed (429, timeout, bad token) —
+        # otherwise a stuck/erroring API leaves the TTL gate permanently open
+        # and this re-hits the pay-per-use endpoint every cycle instead of
+        # once per ttl, blowing the cost budget in the docstring above.
+        fetch_cache = {"ts": time.time(), "posts": posts}
+        _save_json(_FETCH_CACHE_FILE, fetch_cache)
+        fetched_now = True
 
     seen = _load_seen(_SEEN_FILE)
     now = time.time()

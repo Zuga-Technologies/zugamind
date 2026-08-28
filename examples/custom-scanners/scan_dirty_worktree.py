@@ -92,29 +92,60 @@ def _is_generated(path: str) -> bool:
     return any(part in norm for part in _GENERATED_DIR_PARTS)
 
 
+# Sentinel: "the check itself failed" (missing git, deleted path, not a repo,
+# dead network drive) — distinct from `None` ("checked fine, repo is clean").
+# Conflating the two would wipe a repo's accumulated first_seen the instant a
+# transient error hit it, which defeats the whole point of tracking "how long
+# has this been dirty."
+_SURVEY_ERROR = object()
+
+
 def _survey(repo_path: str) -> dict[str, Any] | None:
     """What is actually sitting uncommitted here, not merely whether something is.
 
-    Returns None when the repo is clean.
+    Returns None when the repo is clean, or _SURVEY_ERROR when the check
+    itself couldn't be completed — callers must not treat the latter as clean.
     """
     try:
         status = subprocess.run(
-            ["git", "-C", repo_path, "status", "--porcelain"],
-            capture_output=True, text=True, timeout=10,
+            ["git", "-C", repo_path, "status", "--porcelain", "-z"],
+            capture_output=True, text=True, timeout=10, errors="replace",
         )
-        lines = [line for line in status.stdout.splitlines() if line.strip()]
-        if not lines:
+        if status.returncode != 0:
+            # Deleted path, not a git repo, permission error — git exits
+            # non-zero with empty stdout, which reads identically to "clean"
+            # if we don't check this.
+            return _SURVEY_ERROR
+
+        # -z: NUL-terminated records with no core.quotePath escaping (so
+        # non-ASCII/quoted names come through literally), and a rename/copy
+        # is two consecutive NUL-terminated fields (new path, then orig path)
+        # instead of one "orig -> new" text blob that `line[3:]` would mangle.
+        tokens = status.stdout.split("\0")
+        paths = []
+        i = 0
+        while i < len(tokens):
+            rec = tokens[i]
+            i += 1
+            if not rec:
+                continue
+            code, path = rec[:2], rec[3:]
+            paths.append(path)
+            if "R" in code or "C" in code:
+                i += 1  # skip the orig-path field a rename/copy record carries
+        if not paths:
             return None
 
-        paths = [line[3:].strip().strip('"') for line in lines]
         authored = [pth for pth in paths if not _is_generated(pth)]
 
         # --shortstat covers tracked changes; untracked files contribute no
         # lines to it, but their mere existence is the hazard this scanner is
-        # for, so they are counted by path via `authored` instead.
+        # for, so they are counted by path via `authored` instead. A repo with
+        # no commits yet fails this call (no HEAD to diff against) — stdout is
+        # empty either way, so `stat` just degrades to "".
         churn = subprocess.run(
             ["git", "-C", repo_path, "diff", "--shortstat", "HEAD"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, errors="replace",
         )
         stat = churn.stdout.strip()
 
@@ -131,7 +162,7 @@ def _survey(repo_path: str) -> dict[str, Any] | None:
         }
     except Exception as e:
         logger.debug("git survey failed for %s: %s", repo_path, e)
-        return None
+        return _SURVEY_ERROR
 
 
 def _load_state() -> dict[str, dict[str, Any]]:
@@ -140,15 +171,22 @@ def _load_state() -> dict[str, dict[str, Any]]:
     The first format was `{repo: first_seen_epoch}`; entries now also carry the
     fingerprint of the dirty set as last reported. An old file still loads — a
     bare timestamp becomes an entry with no fingerprint, which reads as "moved"
-    on its first pass and so reports once at full strength.
+    on its first pass and so reports once at full strength. A `first_seen` that
+    isn't actually a number (hand-edited or foreign file) is treated as "just
+    seen now" rather than raising later when the caller does age arithmetic on it.
     """
     try:
         if _STATE_FILE.exists():
             raw = json.loads(_STATE_FILE.read_text("utf-8"))
-            return {
-                key: (val if isinstance(val, dict) else {"first_seen": val})
-                for key, val in raw.items()
-            }
+            out: dict[str, dict[str, Any]] = {}
+            for key, val in raw.items():
+                entry = val if isinstance(val, dict) else {"first_seen": val}
+                try:
+                    entry["first_seen"] = float(entry.get("first_seen"))
+                except (TypeError, ValueError):
+                    entry["first_seen"] = time.time()
+                out[key] = entry
+            return out
     except Exception:
         pass
     return {}
@@ -157,7 +195,11 @@ def _load_state() -> dict[str, dict[str, Any]]:
 def _save_state(state: dict[str, dict[str, Any]]) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _STATE_FILE.write_text(json.dumps(state), "utf-8")
+        # tmp + replace: a crash mid-write must not leave truncated JSON
+        # (os.replace is atomic on both POSIX and Windows).
+        tmp = _STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(state), "utf-8")
+        tmp.replace(_STATE_FILE)
     except Exception as e:
         logger.debug("dirty_worktree state save failed (non-fatal): %s", e)
 
@@ -170,13 +212,22 @@ def scan_dirty_worktree() -> list[dict[str, Any]]:
 
     threshold = _threshold_seconds()
     now = time.time()
-    state = _load_state()
+    # Drop entries for repos no longer in the config — otherwise a state file
+    # built up over months of `ZUGAMIND_WATCH_WORKTREES` edits keeps every repo
+    # ever watched, forever, since nothing else ever removes a stale key.
+    watched = set(repos)
+    state = {repo: entry for repo, entry in _load_state().items() if repo in watched}
     triggers: list[dict[str, Any]] = []
     candidates: list[tuple[dict[str, Any], str]] = []
 
     for repo in repos:
         survey = _survey(repo)
         entry = state.get(repo)
+
+        if survey is _SURVEY_ERROR:
+            # Couldn't check this repo this cycle — leave any tracked
+            # first_seen alone rather than reading the failure as "clean".
+            continue
 
         if survey is None:
             if entry is not None:
@@ -208,7 +259,7 @@ def scan_dirty_worktree() -> list[dict[str, Any]]:
 
         candidates.append(({
             "type": "dirty_worktree",
-            "detail": detail,
+            "detail": detail[:280],
             **weights,
             "repo": repo,
             "dirty_hours": round(hours, 1),

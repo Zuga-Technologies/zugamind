@@ -57,16 +57,23 @@ def _watch_pairs() -> list[tuple[str, str]]:
         if not entry or ":" not in entry:
             continue
         label, proc = entry.split(":", 1)
-        pairs.append((label.strip(), proc.strip()))
+        label, proc = label.strip(), proc.strip()
+        if not label or not proc:
+            continue
+        pairs.append((label, proc))
     return pairs
 
 
 def _running_process_names() -> set[str]:
     try:
         if platform.system() == "Windows":
+            # errors="replace": a non-ASCII process name must not take the whole
+            # listing down with a strict-decode crash — that would silently
+            # disable this scanner's safety check for every watched process,
+            # not just the one with the odd name.
             result = subprocess.run(
                 ["tasklist", "/fo", "csv", "/nh"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True, text=True, timeout=10, errors="replace",
             )
             names = set()
             for line in result.stdout.splitlines():
@@ -75,7 +82,10 @@ def _running_process_names() -> set[str]:
                     names.add(parts[0].strip('"').lower())
             return names
         else:
-            result = subprocess.run(["ps", "-A", "-o", "comm="], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ["ps", "-A", "-o", "comm="],
+                capture_output=True, text=True, timeout=10, errors="replace",
+            )
             return {line.strip().lower() for line in result.stdout.splitlines() if line.strip()}
     except Exception as e:
         logger.debug("process list failed: %s", e)
@@ -85,7 +95,17 @@ def _running_process_names() -> set[str]:
 def _load_cache() -> dict[str, Any]:
     try:
         if _CACHE_FILE.exists():
-            return json.loads(_CACHE_FILE.read_text("utf-8"))
+            data = json.loads(_CACHE_FILE.read_text("utf-8"))
+            if isinstance(data, dict):
+                # Normalize instead of trusting the file verbatim — a hand-edited,
+                # foreign, or future-format cache with the wrong field types must
+                # fall back to defaults here, not raise two lines later in the caller.
+                ts = data.get("ts")
+                labels = data.get("running_labels")
+                return {
+                    "ts": ts if isinstance(ts, (int, float)) else 0,
+                    "running_labels": labels if isinstance(labels, list) else [],
+                }
     except Exception:
         pass
     return {"ts": 0, "running_labels": []}
@@ -94,7 +114,11 @@ def _load_cache() -> dict[str, Any]:
 def _save_cache(cache: dict[str, Any]) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(json.dumps(cache), "utf-8")
+        # tmp + replace: a crash mid-write must not leave truncated JSON
+        # (os.replace is atomic on both POSIX and Windows).
+        tmp = _CACHE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache), "utf-8")
+        tmp.replace(_CACHE_FILE)
     except Exception as e:
         logger.debug("process_conflict cache save failed (non-fatal): %s", e)
 
@@ -121,7 +145,7 @@ def scan_process_conflict() -> list[dict[str, Any]]:
             if label not in prev_labels and len(triggers) < _MAX_TRIGGERS:
                 triggers.append({
                     "type": "process_conflict",
-                    "detail": f"{label} ({proc}) is running — a human may be actively using it",
+                    "detail": f"{label} ({proc}) is running — a human may be actively using it"[:280],
                     "novelty": 0.6,
                     "relevance": 0.7,
                     "urgency": 0.3,

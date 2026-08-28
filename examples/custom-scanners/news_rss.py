@@ -35,10 +35,15 @@ Configuration (env):
                               (for dedupe bookkeeping) but filtered out.
                               Unset = every new item triggers.
 
-Dedupe is "seen link" persisted to disk, same pattern as the other
-examples in this directory — once an item has triggered it will not
-trigger again, even across restarts, even if it stays in the feed's
-recent-items window on the next fetch.
+Dedupe is "seen id" persisted to disk, same pattern as the other examples
+in this directory — once an item has triggered it will not trigger again,
+even across restarts, even if it stays in the feed's recent-items window
+on the next fetch. Identity prefers the feed's own <guid>/<id> when present
+and falls back to <link> only when it isn't — a bare link is unstable for
+feeds that append tracking/session query params, which would otherwise
+re-fire the same story every time its URL happened to change. First run
+(no seen-set on disk yet) baselines the current feed contents silently
+instead of announcing a feed's entire back-catalogue as breaking news.
 
 Stdlib only (urllib.request, xml.etree.ElementTree). Fail-silent per
 scanner contract — one broken feed URL does not sink the others.
@@ -46,6 +51,7 @@ scanner contract — one broken feed URL does not sink the others.
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -61,6 +67,7 @@ logger = logging.getLogger("zugamind.examples.news_rss")
 _TIMEOUT = 8.0
 _DEFAULT_CACHE_TTL = 600
 _MAX_TRIGGERS = 5
+_MAX_FEED_BYTES = 3 * 1024 * 1024  # a real RSS/Atom feed is KBs; caps memory/CPU cost of a hostile or runaway response
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
 _FETCH_CACHE_FILE = _CACHE_DIR / "news_rss_fetch.json"
@@ -77,9 +84,14 @@ def _load_json(path: Path, default: Any) -> Any:
 
 
 def _save_json(path: Path, payload: Any) -> None:
+    """Atomic write (tmp + replace) — a fetch cache or seen-set torn mid-write
+    by a killed process is worse than a stale one; the TTL/cadence gates
+    elsewhere mean a lost write just costs one extra fetch/re-check next cycle."""
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        tmp.replace(path)
     except Exception as e:
         logger.debug("news_rss cache save failed (%s): %s", path.name, e)
 
@@ -124,28 +136,51 @@ def _save_seen(path: Path, seen: dict[str, float], now: float) -> None:
     _save_json(path, kept)
 
 
-def _fetch(url: str) -> str | None:
+def _fetch(url: str) -> bytes | None:
+    """Raw bytes, deliberately not pre-decoded — _parse_feed hands them to
+    ElementTree as-is so expat can honor whatever encoding the feed's own XML
+    declaration claims. A blind .decode("utf-8") here would silently mangle
+    or drop text on a feed whose HTTP Content-Type charset lies (or is just
+    absent), which is common enough in the wild not to assume UTF-8 upfront.
+    """
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ZugaMind/example-scanner"})
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return resp.read().decode("utf-8", errors="ignore")
+            data = resp.read(_MAX_FEED_BYTES + 1)
+        if len(data) > _MAX_FEED_BYTES:
+            logger.debug("news_rss fetch %s exceeded %d bytes, skipping", url, _MAX_FEED_BYTES)
+            return None
+        return data
     except Exception as e:
         logger.debug("news_rss fetch %s failed: %s", url, e)
         return None
 
 
-def _parse_feed(xml_text: str, source: str) -> list[dict[str, str]]:
-    """Same tag-agnostic RSS/Atom walk as scanners/world/ai_labs.py."""
+def _parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, str]]:
+    """Same tag-agnostic RSS/Atom walk as scanners/world/ai_labs.py.
+
+    Takes raw bytes, not text — see _fetch's docstring on why decoding is
+    left to ElementTree/expat instead of being done upfront.
+    """
     items: list[dict[str, str]] = []
+    # RSS/Atom never legitimately declares a DOCTYPE. A hostile feed could use
+    # one to define nested internal entities (a "billion laughs" expansion
+    # bomb) that blow up CPU/memory during parsing — xml.etree.ElementTree
+    # does not guard against this itself. DOCTYPE, if present at all, must
+    # precede the root element, so sniffing a prefix is enough; this is a
+    # blunt reject-the-feed check, not a general XML sanitizer.
+    if b"<!DOCTYPE" in xml_bytes[:4096]:
+        logger.debug("news_rss feed %s has a DOCTYPE, skipping (unexpected for RSS/Atom)", source)
+        return items
     try:
-        root = ET.fromstring(xml_text)
+        root = ET.fromstring(xml_bytes)
     except Exception:
         return items
     for it in root.iter():
         tag = it.tag.lower().split("}")[-1]
         if tag not in ("item", "entry"):
             continue
-        title, link, summary = "", "", ""
+        title, link, summary, guid = "", "", "", ""
         for child in it:
             ctag = child.tag.lower().split("}")[-1]
             txt = (child.text or "").strip()
@@ -154,9 +189,17 @@ def _parse_feed(xml_text: str, source: str) -> list[dict[str, str]]:
             elif ctag == "link":
                 link = child.attrib.get("href") or txt
             elif ctag in ("description", "summary"):
-                summary = re.sub(r"<[^>]+>", "", txt)[:300]
+                summary = html.unescape(re.sub(r"<[^>]+>", "", txt))[:300]
+            elif ctag in ("guid", "id"):  # RSS <guid> / Atom <id> — the stable identity, when the feed has one
+                guid = txt
         if title and link:
-            items.append({"source": source, "title": title[:200], "link": link, "summary": summary})
+            items.append({
+                "source": source,
+                "title": html.unescape(title)[:200],
+                "link": link,
+                "summary": summary,
+                "guid": guid,
+            })
         if len(items) >= 10:
             break
     return items
@@ -171,46 +214,72 @@ def scan_news_rss() -> list[dict[str, Any]]:
     if not feed_urls:
         return []
 
-    ttl = int(os.environ.get("ZUGAMIND_NEWS_CACHE_TTL", str(_DEFAULT_CACHE_TTL)))
+    try:
+        ttl = int(os.environ.get("ZUGAMIND_NEWS_CACHE_TTL", str(_DEFAULT_CACHE_TTL)))
+    except (TypeError, ValueError):
+        ttl = _DEFAULT_CACHE_TTL  # malformed env var must not take the whole scanner down
     keywords = [k.strip().lower() for k in
                 os.environ.get("ZUGAMIND_NEWS_KEYWORDS", "").split(",") if k.strip()]
 
     fetch_cache = _load_json(_FETCH_CACHE_FILE, {"ts": 0, "items": []})
+    if not isinstance(fetch_cache, dict) or not isinstance(fetch_cache.get("items"), list):
+        fetch_cache = {"ts": 0, "items": []}  # unexpected on-disk shape -- never crash on it, just re-fetch
     fetched_now = False
     if time.time() - fetch_cache.get("ts", 0) > ttl:
         items: list[dict[str, str]] = []
         for url in feed_urls:
-            txt = _fetch(url)
-            if not txt:
+            raw = _fetch(url)
+            if not raw:
                 continue
-            items.extend(_parse_feed(txt, url))
+            items.extend(_parse_feed(raw, url))
         fetch_cache = {"ts": time.time(), "items": items}
         _save_json(_FETCH_CACHE_FILE, fetch_cache)
         fetched_now = True
 
+    cache_items = [it for it in fetch_cache.get("items", []) if isinstance(it, dict)]
+
+    cold_start = not _SEEN_FILE.exists()
     seen = _load_seen(_SEEN_FILE)
     now = time.time()
+
+    if cold_start and cache_items:
+        # First run ever (no seen-set on disk yet): baseline everything
+        # currently in the feeds as already-seen and fire nothing. Without
+        # this, pointing the scanner at feeds with months of back-catalogue
+        # would dump a burst of old "news" into the workspace on first scan.
+        # Same cold-start policy as scanners/world/ai_labs.py.
+        for it in cache_items:
+            link = it.get("link", "")
+            if link:
+                seen[it.get("guid") or link] = now
+        _save_seen(_SEEN_FILE, seen, now)
+        return []
+
     triggers: list[dict[str, Any]] = []
     newly_seen: set[str] = set()
 
-    for it in fetch_cache.get("items", []):
+    for it in cache_items:
         link = it.get("link", "")
         if not link:
             continue
-        is_new = link not in seen
-        seen[link] = now  # refresh-on-observe: still in the feed -> still seen
+        item_id = it.get("guid") or link
+        # Checked against both the preferred id and the bare link so an
+        # upgrade in place never re-fires something this scanner already
+        # stamped under its link before guid/id extraction existed.
+        is_new = item_id not in seen and link not in seen
+        seen[item_id] = now  # refresh-on-observe: still in the feed -> still seen
         if not is_new:
             continue
-        newly_seen.add(link)
+        newly_seen.add(item_id)
         text = f"{it.get('title', '')} {it.get('summary', '')}".lower()
         if keywords and not any(kw in text for kw in keywords):
             continue
-        detail = it["title"]
+        detail = it.get("title", "")
         if it.get("summary"):
             detail += " -- " + it["summary"][:160]
         triggers.append({
             "type": "news_rss",
-            "detail": detail[:380],
+            "detail": detail[:280],
             "source": it.get("source", ""),
             "title": it.get("title", ""),
             "link": link,
@@ -223,8 +292,11 @@ def scan_news_rss() -> list[dict[str, Any]]:
 
     # Persist when something is new OR a fresh fetch re-stamped the window —
     # refresh-on-observe only works if the refreshed stamps reach disk at
-    # least once per fetch.
-    if newly_seen or fetched_now:
+    # least once per fetch. Gated on `seen` being non-empty too, so a fetch
+    # cycle where every feed failed doesn't create an empty seen-set file
+    # that would wrongly look like an already-baselined (non-cold-start) state
+    # next call.
+    if newly_seen or (fetched_now and seen):
         _save_seen(_SEEN_FILE, seen, now)
 
     return triggers

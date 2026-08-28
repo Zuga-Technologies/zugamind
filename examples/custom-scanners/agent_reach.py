@@ -90,12 +90,12 @@ fire, or the scanner is asserting, not scoring.
 
 Dedupe: web_watch keys off a per-URL content hash plus the per-URL line-set
 that hash summarizes, both persisted to disk; search
-keys off "seen (query, result-url) pair" persisted to disk, same "seen set
-capped at 1000" pattern as the other examples in this directory. If more
-candidates surface in one cycle than the 5-trigger cap allows, only the
-emitted ones are marked seen/hash-advanced — the rest are left pending so
-they get a fair shot at surfacing on a later cycle instead of being
-silently and permanently dropped.
+keys off "seen (query, result-url) pair" persisted to disk, aged out by TTL
+rather than trimmed alphabetically by count, same pattern as the other
+examples in this directory. If more candidates surface in one cycle than
+the 5-trigger cap allows, only the emitted ones are marked seen/hash-
+advanced — the rest are left pending so they get a fair shot at surfacing
+on a later cycle instead of being silently and permanently dropped.
 
 Stdlib only (urllib.request, subprocess, hashlib) — not a hard requirement
 for *your own* private scanner (only core PRs are stdlib-constrained, see
@@ -112,7 +112,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import shutil
 import subprocess
 import time
@@ -127,9 +126,16 @@ _TIMEOUT = 20.0  # Jina Reader renders + mcporter subprocess both run slower tha
 _DEFAULT_CACHE_TTL = 3600
 _DEFAULT_SEARCH_TTL = 21600
 _MAX_TRIGGERS = 5
+# Seen-set eviction (matches the fix landed 2026-08-22 in x_activity.py /
+# news_rss.py / discord_activity.py): {key: last_committed_epoch} evicted by
+# AGE, not the old `sorted(keys)[-1000:]` alphabetical trim -- alphabetical
+# trim throws away arbitrary entries regardless of how recently they fired,
+# so a still-fresh result could be evicted while a months-old one survives
+# on lexical luck. _SEEN_MAX stays as a memory backstop only, oldest-first.
+# Legacy bare-list files on disk load fine (treated as "committed just now").
+_SEEN_TTL_SECONDS = 30 * 86400
 _SEEN_MAX = 1000
 _WATCH_LINES_MAX = 600  # per-URL line-key budget; ~40KB of page holds well under this
-_WATCH_LINKS_MAX = 400  # per-URL link budget; a news index carries tens, not hundreds
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
 _FETCH_CACHE_FILE = _CACHE_DIR / "agent_reach_fetch.json"
@@ -156,6 +162,36 @@ def _save_json(path: Path, payload: Any) -> None:
         tmp.replace(path)
     except Exception as e:
         logger.debug("agent_reach cache save failed (%s): %s", path.name, e)
+
+
+def _load_seen(path: Path) -> dict[str, float]:
+    """Search-channel seen set as {"query:url": last_committed_epoch}. A bare
+    list on disk (pre-TTL format) is legacy -- read as "committed just now"
+    so upgrading in place never re-fires everything at once."""
+    raw = _load_json(path, {})
+    now = time.time()
+    if isinstance(raw, list):
+        return {str(k): now for k in raw}
+    if isinstance(raw, dict):
+        out: dict[str, float] = {}
+        for k, v in raw.items():
+            try:
+                out[str(k)] = float(v)
+            except (TypeError, ValueError):
+                out[str(k)] = now
+        return out
+    return {}
+
+
+def _save_seen(path: Path, seen: dict[str, float], now: float) -> None:
+    """Evict by age (TTL), not by count -- _SEEN_MAX is only a backstop
+    against unbounded growth if the TTL window somehow never runs, and it
+    trims oldest-first rather than alphabetically."""
+    cutoff = now - _SEEN_TTL_SECONDS
+    kept = {k: v for k, v in seen.items() if v >= cutoff}
+    if len(kept) > _SEEN_MAX:
+        kept = dict(sorted(kept.items(), key=lambda kv: kv[1])[-_SEEN_MAX:])
+    _save_json(path, kept)
 
 
 def _csv_env(name: str) -> list[str]:
@@ -199,19 +235,6 @@ def _line_key(line: str) -> str:
     """Short digest of one line — the cache stores keys, not the page, so a
     watched page costs ~12 bytes/line on disk instead of its full body."""
     return hashlib.sha1(line.encode("utf-8")).hexdigest()[:12]
-
-
-_LINK_RE = re.compile(r"https?://[^\s)\]<>\"']+")
-
-
-def _page_links(body: str) -> list[str]:
-    """Every URL the page currently points at, in order, deduped."""
-    out, seen = [], set()
-    for url in _LINK_RE.findall(body):
-        if url not in seen:
-            seen.add(url)
-            out.append(url)
-    return out
 
 
 def _added_lines(body: str, previous_keys: list[str]) -> list[str]:
@@ -386,7 +409,7 @@ def scan_agent_reach() -> list[dict[str, Any]]:
 
     watch_hashes: dict[str, str] = dict(cache.get("watch_hashes", {}))
     watch_lines: dict[str, list[str]] = dict(cache.get("watch_lines", {}))
-    seen: set[str] = set(_load_json(_SEEN_FILE, []))
+    seen: dict[str, float] = _load_seen(_SEEN_FILE)
 
     # Each candidate carries what it takes to commit itself to disk *after*
     # the cap is applied, so overflow candidates are left uncommitted (and
@@ -476,7 +499,7 @@ def scan_agent_reach() -> list[dict[str, Any]]:
             if line_keys is not None:
                 watch_lines[key] = line_keys
         else:
-            seen.add(key)
+            seen[key] = now
 
     if run_watch:
         cache["ts"] = now
@@ -485,5 +508,5 @@ def scan_agent_reach() -> list[dict[str, Any]]:
     cache["watch_hashes"] = watch_hashes
     cache["watch_lines"] = watch_lines
     _save_json(_FETCH_CACHE_FILE, cache)
-    _save_json(_SEEN_FILE, sorted(seen)[-_SEEN_MAX:])
+    _save_seen(_SEEN_FILE, seen, now)
     return triggers

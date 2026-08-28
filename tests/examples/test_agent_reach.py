@@ -386,7 +386,9 @@ def test_search_skips_relative_redirect_urls(monkeypatch, tmp_path):
     out = agent_reach.scan_agent_reach()
     assert [t["url"] for t in out] == ["https://real.example/post"]
     seen = json.loads(agent_reach._SEEN_FILE.read_text())
-    assert seen == ["q:https://real.example/post"]
+    # seen-set is now {key: last_committed_epoch}; only the real URL's key
+    # may be present — the redirect junk must not pollute it.
+    assert list(seen) == ["q:https://real.example/post"]
 
 
 # ------------------------------------------------- web_watch: what CHANGED --

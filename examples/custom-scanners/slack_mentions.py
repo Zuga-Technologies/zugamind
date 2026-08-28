@@ -8,7 +8,9 @@ it to StreamRunner(extra_scanners={"scan_slack_mentions": scan_slack_mentions}).
 Watches ONE Slack channel via the conversations.history Web API for messages
 containing a configured mention string, and turns unseen ones into triggers.
 Dedupe is "seen message ts" persisted to disk — once a message has produced a
-trigger it will not fire again, even across restarts.
+trigger it will not fire again, even across restarts. The channel history
+fetch itself is also cached on disk for _CACHE_TTL seconds, so a StreamRunner
+interval shorter than that doesn't poll conversations.history every cycle.
 
 Configuration (env):
     SLACK_BOT_TOKEN          bot token with channels:history scope.
@@ -29,6 +31,7 @@ import json
 import logging
 import os
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -40,31 +43,72 @@ _CACHE_TTL = 60  # seconds — Slack history is cheap to poll relative to Jira/G
 _MAX_TRIGGERS = 5
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
+_FETCH_CACHE_FILE = _CACHE_DIR / "slack_mentions_fetch.json"
 _SEEN_FILE = _CACHE_DIR / "slack_mentions_seen.json"
 _API = "https://slack.com/api/conversations.history"
 
+# Seen-set eviction: {ts: last_seen_epoch} with refresh-on-observe + TTL
+# eviction (by age, not count) — same pattern adopted in discord_activity.py /
+# news_rss.py / x_activity.py on 2026-08-22, ported here to close the same
+# gap (this file still had the old `sorted(ids)[-500:]` count-based trim,
+# which evicts an id the moment 500 others sort after it even if Slack is
+# still showing it in the recent window, letting it re-fire later).
+# _SEEN_MAX is a memory backstop only, oldest-first. Legacy bare-list files
+# (a plain JSON array of ts strings) load fine.
+_SEEN_TTL_SECONDS = 30 * 86400
+_SEEN_MAX = 5000
 
-def _load_seen() -> set[str]:
+
+def _load_json(path: Path, default: Any) -> Any:
     try:
-        if _SEEN_FILE.exists():
-            return set(json.loads(_SEEN_FILE.read_text(encoding="utf-8")))
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
-        logger.debug("slack_mentions seen-cache load failed: %s", e)
-    return set()
+        logger.debug("slack_mentions cache load failed (%s): %s", path.name, e)
+    return default
 
 
-def _save_seen(seen: set[str]) -> None:
+def _save_json(path: Path, payload: Any) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        # Cap the persisted set so it can't grow unbounded across a long-lived deployment.
-        trimmed = sorted(seen)[-500:]
-        _SEEN_FILE.write_text(json.dumps(trimmed), encoding="utf-8")
+        # Same-dir temp file + os.replace: a crash mid-write can't leave a
+        # truncated/corrupt cache file on disk (os.replace is atomic on both
+        # POSIX and Windows).
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, path)
     except Exception as e:
-        logger.debug("slack_mentions seen-cache save failed: %s", e)
+        logger.debug("slack_mentions cache save failed (%s): %s", path.name, e)
+
+
+def _load_seen() -> dict[str, float]:
+    raw = _load_json(_SEEN_FILE, {})
+    now = time.time()
+    if isinstance(raw, list):  # legacy format: bare ts list
+        return {str(i): now for i in raw}
+    if isinstance(raw, dict):
+        out: dict[str, float] = {}
+        for k, v in raw.items():
+            try:
+                out[str(k)] = float(v)
+            except (TypeError, ValueError):
+                out[str(k)] = now
+        return out
+    return {}
+
+
+def _save_seen(seen: dict[str, float], now: float) -> None:
+    cutoff = now - _SEEN_TTL_SECONDS
+    kept = {k: v for k, v in seen.items() if v >= cutoff}
+    if len(kept) > _SEEN_MAX:
+        kept = dict(sorted(kept.items(), key=lambda kv: kv[1])[-_SEEN_MAX:])
+    _save_json(_SEEN_FILE, kept)
 
 
 def _fetch_recent(channel: str, token: str) -> list[dict[str, Any]]:
-    url = f"{_API}?channel={channel}&limit=20"
+    # limit=15: Slack caps conversations.history at 15 objects/request for
+    # non-Marketplace apps (rolled out to all installations 2026-03-03).
+    url = f"{_API}?channel={channel}&limit=15"
     req = urllib.request.Request(
         url,
         headers={
@@ -77,7 +121,8 @@ def _fetch_recent(channel: str, token: str) -> list[dict[str, Any]]:
     if not data.get("ok"):
         logger.debug("slack_mentions API error: %s", data.get("error"))
         return []
-    return data.get("messages", [])
+    messages = data.get("messages", [])
+    return messages if isinstance(messages, list) else []
 
 
 def scan_slack_mentions() -> list[dict[str, Any]]:
@@ -88,24 +133,47 @@ def scan_slack_mentions() -> list[dict[str, Any]]:
         return []
     mention = os.environ.get("ZUGAMIND_SLACK_MENTION", "@here").lower()
 
-    try:
-        messages = _fetch_recent(channel, token)
-    except Exception as e:
-        logger.debug("slack_mentions fetch failed: %s", e)
-        return []
+    # Fetch-cache gated by _CACHE_TTL — don't hit conversations.history every
+    # cycle just because StreamRunner's interval is shorter than that.
+    fetch_cache = _load_json(_FETCH_CACHE_FILE, {"ts": 0, "messages": []})
+    if time.time() - fetch_cache.get("ts", 0) > _CACHE_TTL:
+        try:
+            messages = _fetch_recent(channel, token)
+        except urllib.error.HTTPError as e:
+            # 429s land here too — serve the last good fetch instead of
+            # hammering a channel we're already being rate-limited on.
+            logger.debug("slack_mentions fetch failed: HTTP %s", e.code)
+            messages = fetch_cache.get("messages", [])
+        except Exception as e:
+            logger.debug("slack_mentions fetch failed: %s", e)
+            messages = fetch_cache.get("messages", [])
+        else:
+            fetch_cache = {"ts": time.time(), "messages": messages}
+            _save_json(_FETCH_CACHE_FILE, fetch_cache)
+    else:
+        messages = fetch_cache.get("messages", [])
 
     seen = _load_seen()
+    now = time.time()
     triggers: list[dict[str, Any]] = []
-    newly_seen: set[str] = set()
+    touched = False
 
     for msg in messages:
+        if not isinstance(msg, dict):
+            continue
         ts = msg.get("ts")
-        text = (msg.get("text") or "")
-        if not ts or ts in seen:
+        # Multi-line Slack messages embed raw newlines — collapse them so
+        # `detail` stays the single-line summary the scanner contract expects.
+        text = (msg.get("text") or "").replace("\r", " ").replace("\n", " ")
+        if not ts:
+            continue
+        is_new = ts not in seen
+        seen[ts] = now  # refresh-on-observe
+        touched = True
+        if not is_new:
             continue
         if mention not in text.lower():
             continue
-        newly_seen.add(ts)
         triggers.append({
             "type": "slack_mention",
             "detail": f"Mention in {channel}: {text[:200]}",
@@ -119,7 +187,7 @@ def scan_slack_mentions() -> list[dict[str, Any]]:
         if len(triggers) >= _MAX_TRIGGERS:
             break
 
-    if newly_seen:
-        _save_seen(seen | newly_seen)
+    if touched:
+        _save_seen(seen, now)
 
     return triggers

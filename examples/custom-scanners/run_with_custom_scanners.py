@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 # Point this at wherever you've cloned zugamind — adjust for your layout.
-ZUGAMIND_PKG = Path(__file__).resolve().parent.parent.parent
+ZUGAMIND_PKG = Path(__file__).resolve().parent.parent.parent / "zugamind"
 sys.path.insert(0, str(ZUGAMIND_PKG))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
