@@ -8,8 +8,8 @@ pre-run amendments). Predictions were committed before any measured run in
 [exp-001-predictions.md](exp-001-predictions.md) and are scored below
 unchanged — including the ones we got wrong.
 
-Raw per-run JSONL and per-run engine journals: `exp001-tier1/` in this repo.
-Sparse-corpus pilot (which caught the density shortfall): `exp001-pilot-clean/`.
+Raw per-run JSONL and per-run engine journals: `experiments/exp001-tier1/` in this repo.
+Sparse-corpus pilot (which caught the density shortfall): `experiments/exp001-pilot-clean/`.
 
 ## Headline results
 

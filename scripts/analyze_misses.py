@@ -4,7 +4,7 @@ import json
 import sys
 from pathlib import Path
 
-out = Path(sys.argv[1] if len(sys.argv) > 1 else "exp001-tier1")
+out = Path(sys.argv[1] if len(sys.argv) > 1 else "experiments/exp001-tier1")
 s = json.load(open(out / "summary.json", encoding="utf-8"))
 
 for x in s:

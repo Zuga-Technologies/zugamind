@@ -413,7 +413,7 @@ def main(argv=None) -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--harness-config", type=Path,
                         help="JSON file with ONE harness config dict for this run")
-    parser.add_argument("--out", type=Path, default=Path("exp001-out"))
+    parser.add_argument("--out", type=Path, default=Path("experiments/exp001-out"))
     parser.add_argument("--smoke", action="store_true",
                         help="run every condition once against the hermetic "
                              "oracle harness; no network, no spend")

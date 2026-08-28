@@ -11,13 +11,13 @@ and scored below unchanged — all four substantively failed, and the
 pre-registered falsifier clause fires. That is the headline.
 
 A first tier-1 attempt (2026-07-11) was invalidated by three operator
-errors and is preserved with a full post-mortem in `exp003-tier1-invalid/`.
+errors and is preserved with a full post-mortem in `experiments/exp003-tier1-invalid/`.
 This valid run also survived a second contamination catch mid-flight: a
 co-located deployment's quiet-hours config was silently deferring simulated
 wakes (same incident that forced EXP-002's published correction); the runner
 now isolates quiet hours and the entire valid dataset postdates that fix.
 
-Raw per-run JSONL and engine journals: `exp003-tier1/`.
+Raw per-run JSONL and engine journals: `experiments/exp003-tier1/`.
 
 ## Headline results
 
@@ -81,7 +81,7 @@ after three experiments is **cheap completeness**, not superior perception.
 ## Post-fix verification addendum (2026-07-13, same night)
 
 Condition A re-run ×5 on the #11 fix (c466008) with IDENTICAL seeds
-(20260711–15), raw runs in `exp003-tier1-postfix/`:
+(20260711–15), raw runs in `experiments/exp003-tier1-postfix/`:
 
 | | A pre-fix | A post-fix | D (control) |
 |---|---|---|---|

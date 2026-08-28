@@ -215,7 +215,7 @@ def main(argv=None) -> int:
     parser.add_argument("--seed", type=int, default=20260711)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--harness-config", type=Path)
-    parser.add_argument("--out", type=Path, default=Path("exp003-tier1"))
+    parser.add_argument("--out", type=Path, default=Path("experiments/exp003-tier1"))
     parser.add_argument("--smoke", action="store_true",
                         help="hermetic oracle run, both conditions, zero cost")
     args = parser.parse_args(argv)

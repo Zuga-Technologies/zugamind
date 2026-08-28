@@ -122,7 +122,7 @@ def _incident(cid: str, src_name: str, src_type: str, tick: int) -> dict:
     # workspace routing table. An earlier draft appended "_failure" here,
     # producing unroutable types that condition A's router silently dropped:
     # A could not perceive ANY planted incident and the whole first A/E run
-    # set was invalidated (exp004-out-invalid/). Types must arrive routable.
+    # set was invalidated (experiments/exp004-out-invalid/). Types must arrive routable.
     return {
         "is_canary": True,
         "canary_id": cid,

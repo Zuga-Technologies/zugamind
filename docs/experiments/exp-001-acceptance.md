@@ -4,7 +4,7 @@ Two acceptance passes of condition A (5 runs each, frozen corpus, same
 seeds as the measured Tier-1 runs), gate on the local tier
 (`ZUGAMIND_WAKE_TIER=local`, qwen2.5:7b-instruct judges the wake — the
 "$0 idle loop"), harness `claude -p` (sonnet pinned). Raw runs:
-`exp001-accept-A/`.
+`experiments/exp001-accept-A/`.
 
 | stage | recall (5 runs) | precision | false acts | wakes/run | TTD mean |
 |---|---|---|---|---|---|

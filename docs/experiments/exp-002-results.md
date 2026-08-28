@@ -37,7 +37,7 @@ re-bucketing (`--tick-hours`); the 4h default reproduces EXP-001 byte-for-byte
 run in [exp-002-predictions.md](exp-002-predictions.md) and are scored below
 unchanged — including the one we got wrong on both edges.
 
-Raw per-run JSONL, engine journals, and per-cadence summaries: `exp002-sweep/`.
+Raw per-run JSONL, engine journals, and per-cadence summaries: `experiments/exp002-sweep/`.
 
 ## Headline results
 

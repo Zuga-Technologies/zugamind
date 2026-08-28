@@ -306,7 +306,7 @@ def main(argv=None) -> int:
     parser.add_argument("--runs", type=int, default=3)
     parser.add_argument("--seed", type=int, default=20260712)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--out", type=Path, default=Path("exp004-out"))
+    parser.add_argument("--out", type=Path, default=Path("experiments/exp004-out"))
     parser.add_argument("--smoke", action="store_true",
                         help="every (condition, sources) cell once, "
                              "hermetic oracle; A stays dry-run (real gate)")

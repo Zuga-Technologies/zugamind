@@ -25,11 +25,11 @@ A first run set was invalidated by a corpus-builder bug (incident trigger
 types were unroutable, so condition A structurally could not perceive any
 planted incident) and is preserved with a post-mortem — including how the
 smoke's verification grep fooled itself by matching the oracle's own command
-string — in `exp004-out-invalid/`. The valid corpus was verified end-to-end
+string — in `experiments/exp004-out-invalid/`. The valid corpus was verified end-to-end
 before this run set (incident → router → CRITICAL bid → alarm lane → id in
 briefing content).
 
-Raw per-run JSONL, engine journals, calibration data: `exp004-out/`.
+Raw per-run JSONL, engine journals, calibration data: `experiments/exp004-out/`.
 
 ## Headline results
 
