@@ -178,6 +178,14 @@ def oracle_config(for_condition_full: bool) -> dict:
 
 def run_once(condition: str, run_idx: int, seed: int, out_dir: Path,
             dry_run: bool, harness_cfg: dict | None) -> dict:
+    # Seed the GLOBAL RNG per run, not just the local canary-placement one:
+    # the workspace's salience lottery (cognition/workspace/workspace.py,
+    # `random.choice` / `random.random`) is the engine's only global draw,
+    # and condition A runs it every tick. Left unseeded, the "hermetic,
+    # deterministic" --smoke replay gave A recall 1.0 one run and 0.9 the
+    # next with the identical --seed (audit 2026-08-28). Production keeps
+    # real randomness; making a measurement replayable is the harness's job.
+    random.seed(seed)
     events, planted = build_run_corpus(seed)
     run_dir = out_dir / f"{condition}-run{run_idx}"
     isolate_data_dir(run_dir)

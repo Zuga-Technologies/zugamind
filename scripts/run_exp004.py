@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import statistics
 import sys
 from datetime import datetime, timedelta, timezone
@@ -256,6 +257,14 @@ def oracle_config() -> dict:
 
 def run_once(condition: str, n_sources: int, run_idx: int, seed: int,
              out_dir: Path, dry_run: bool) -> dict:
+    # Seed the GLOBAL RNG per run, not just the local canary-placement one:
+    # the workspace's salience lottery (cognition/workspace/workspace.py,
+    # `random.choice` / `random.random`) is the engine's only global draw,
+    # and condition A runs it every tick. Left unseeded, the "hermetic,
+    # deterministic" --smoke replay gave A recall 1.0 one run and 0.9 the
+    # next with the identical --seed (audit 2026-08-28). Production keeps
+    # real randomness; making a measurement replayable is the harness's job.
+    random.seed(seed + run_idx)
     rows, planted = build(n_sources, seed + run_idx)
     h4_cid = max(planted)  # H4's canary is always the highest-numbered id
     events = events_by_tick(rows)

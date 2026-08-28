@@ -53,6 +53,8 @@ from act import command_actuator  # noqa: E402
 from continuity import journal  # noqa: E402
 from foundation import config  # noqa: E402
 from foundation import state as state_mod  # noqa: E402
+from cognition.workspace import workspace_modules  # noqa: E402
+from scanners import scheduler as scheduler_mod  # noqa: E402
 from stream.runner import StreamRunner  # noqa: E402
 
 CORPUS_FILE = Path(__file__).resolve().parent / "exp001_corpus.jsonl"
@@ -177,13 +179,26 @@ def canary_ids_in(text: str) -> set[str]:
 # --------------------------------------------------------------------------
 
 def isolate_data_dir(run_dir: Path) -> None:
-    """Point journal/state/habituation at a fresh dir (test-suite pattern)."""
+    """Point EVERY piece of persistent engine state at this run's own dir.
+
+    A run must not inherit anything from the run before it — otherwise
+    `--runs 5` in one process is one cold run followed by four warm ones,
+    not five independent measurements. Audit 2026-08-28 found two leaks
+    past the original four redirects: the source scheduler (an in-process
+    singleton plus its on-disk cadence ledger under ZUGAMIND_DATA_DIR) and
+    PriorityGoalsModule.STATE_FILE, a class attribute computed from
+    ENGINE_DIR at import time, which reassigning ENGINE_DIR never reaches.
+    On a 2-item corpus that leak alone moved condition A from 6 wakes to 4.
+    """
     engine = run_dir / "engine"
     engine.mkdir(parents=True, exist_ok=True)
     journal.JOURNAL_FILE = engine / "journal.jsonl"
     state_mod.STATE_FILE = engine / "state.json"
     state_mod.ENGINE_DIR = engine
     config.SEEN_TRIGGERS_FILE = engine / "seen_triggers.json"
+    workspace_modules.PriorityGoalsModule.STATE_FILE = engine / "priority_goals_state.json"
+    scheduler_mod._LEDGER_PATH = engine / "_source_ledger.json"
+    scheduler_mod._SCHEDULER = None  # next get_scheduler() builds a cold one
 
 
 # --------------------------------------------------------------------------
@@ -348,6 +363,14 @@ def oracle_config(name: str = "oracle", for_condition_a: bool = False) -> dict:
 def run_once_for_condition(condition: str, run_idx: int, seed: int, out_dir: Path,
                            dry_run: bool, tick_hours: float,
                            harness_cfg: dict | None) -> dict:
+    # Seed the GLOBAL RNG per run, not just the local canary-placement one:
+    # the workspace's salience lottery (cognition/workspace/workspace.py,
+    # `random.choice` / `random.random`) is the engine's only global draw,
+    # and condition A runs it every tick. Left unseeded, the "hermetic,
+    # deterministic" --smoke replay gave A recall 1.0 one run and 0.9 the
+    # next with the identical --seed (audit 2026-08-28). Production keeps
+    # real randomness; making a measurement replayable is the harness's job.
+    random.seed(seed)
     background, canaries, n_native_ticks = load_corpus(CORPUS_FILE)
     # Canaries are placed on the NATIVE grid regardless of run cadence, so
     # one seed produces one simulated timeline that every cadence replays —

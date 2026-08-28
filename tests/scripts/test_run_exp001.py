@@ -179,3 +179,25 @@ def test_condition_a_dry_run_end_to_end(tiny_corpus, tmp_path):
     # select and dispatch it (dry-run: composition only, no subprocess).
     assert m["recall"] == 1.0
     assert m["total_invocations"] < 8  # the floor filters routine winners
+
+
+def test_condition_a_replays_identically_for_the_same_seed(tiny_corpus, tmp_path):
+    """The README sells --smoke as a hermetic, deterministic replay. The
+    workspace's salience lottery draws from Python's GLOBAL RNG, which the
+    runner used to leave unseeded — so two runs with the same --seed could
+    differ (audit 2026-08-28: A recall 1.0, then 0.9). The runner must seed
+    the global RNG itself; scrambling it between runs must not matter."""
+    import random
+
+    def go(tag):
+        m = exp.run_once_for_condition("A", run_idx=0, seed=11, out_dir=tmp_path / tag,
+                                       dry_run=True, tick_hours=4.0,
+                                       harness_cfg=exp.oracle_config(for_condition_a=True))
+        return {k: v for k, v in m.items() if k != "raw"}
+
+    first = go("one")
+    random.seed(999_999)          # deliberately perturb global state
+    for _ in range(50):
+        random.random()
+    second = go("two")
+    assert first == second
