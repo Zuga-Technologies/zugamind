@@ -124,3 +124,14 @@ def test_load_budget_adopts_legacy_daily_ledger_from_same_month(tmp_path, monkey
     assert "date" not in b
     assert b["spent"] == 3.0
     assert b["paid_spent"] == 0.0  # legacy field backfilled
+
+
+def test_record_spend_uses_the_real_cost_when_given(tmp_path, monkeypatch):
+    """The provider's usage block beats the flat per-tier estimate (2026-08-28)."""
+    monkeypatch.setattr(budget, "BUDGET_FILE", tmp_path / "budget.json")
+    monkeypatch.setattr(budget, "ENGINE_DIR", tmp_path)
+    b = budget.load_budget()
+    b = budget.record_spend(b, "haiku", cost=0.0015)
+    assert b["spent"] == 0.0015 and b["paid_spent"] == 0.0015 and b["calls"]["haiku"] == 1
+    b = budget.record_spend(b, "haiku")  # no usage known: flat estimate
+    assert b["spent"] == 0.0015 + budget._COSTS["haiku"]

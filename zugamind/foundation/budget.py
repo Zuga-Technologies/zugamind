@@ -76,14 +76,21 @@ def can_spend(budget: dict, tier: str) -> bool:
     return budget.get("remaining", 0.0) >= cost
 
 
-def record_spend(budget: dict, tier: str) -> dict:
+def record_spend(budget: dict, tier: str, cost: "float | None" = None) -> dict:
     """Record a spend event: deduct cost, bump the call counter, persist.
+
+    `cost` is the real USD amount from the provider's usage block when the
+    caller has it (cognition.models.claude fills it from the response); the
+    flat per-tier estimate — the number can_spend() gated on BEFORE the call,
+    when nothing was known — is used otherwise. Before 2026-08-28 every call
+    was charged the estimate, so a cache hit cost the same as a cache miss
+    and a one-word answer the same as a max_tokens one.
 
     Local ($0) calls only bump the call counter (no disk write required —
     callers may still choose to persist at a cycle boundary). Paid-tier
     spends are written to disk immediately for crash-durability.
     """
-    cost = _COSTS.get(tier, 0.0)
+    cost = float(cost) if cost is not None else _COSTS.get(tier, 0.0)
     budget["spent"] = budget.get("spent", 0.0) + cost
     budget["remaining"] = round(monthly_cap() - budget["spent"], 4)
     budget["calls"][tier] = budget["calls"].get(tier, 0) + 1

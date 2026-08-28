@@ -322,6 +322,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "caller": caller,
         }
 
+    usage_meta: dict = {}  # filled by the Claude client: real usage, stop reason, USD cost
     try:
         prompt = _build_prompt(intent_d)
         max_tokens = int(intent_d.get("max_tokens", 500))
@@ -332,7 +333,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         else:
             query_claude_api = _resolve_claude_caller()
             response_text = query_claude_api(
-                prompt, model_id, max_tokens=max_tokens, system=system
+                prompt, model_id, max_tokens=max_tokens, system=system, usage_out=usage_meta
             )
     except Exception as exc:
         logger.warning("action_gate: api_error kind=%s: %s", kind, exc)
@@ -348,7 +349,10 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "caller": caller,
         }
 
-    if response_text is None:
+    if response_text is None or not str(response_text).strip():
+        # An EMPTY answer is a failed call, not a decision with an empty
+        # payload (a malformed-but-200 Ollama body used to come back as ""
+        # and pass this check as ok=True — audit 2026-08-28).
         return {
             "ok": False,
             "response": None,
@@ -377,7 +381,11 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     persist_exc: Exception | None = None
     for attempt in range(2):
         try:
-            new_budget = record_spend(budget, tier)
+            real_cost = usage_meta.get("cost_usd") if isinstance(usage_meta, dict) else None
+            if isinstance(real_cost, (int, float)) and not isinstance(real_cost, bool):
+                new_budget = record_spend(budget, tier, cost=float(real_cost))
+            else:
+                new_budget = record_spend(budget, tier)  # flat per-tier estimate
             persist_exc = None
             break
         except Exception as exc:  # noqa: BLE001 — retried once, then surfaced below
@@ -428,6 +436,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
 
     result = {
         "ok": True,
+        "usage": usage_meta.get("usage") if isinstance(usage_meta, dict) else None,
         "response": response_text,
         "cost": cost,
         "model": model_id,

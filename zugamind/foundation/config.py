@@ -51,6 +51,13 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 # have loaded locally. Used for the fast/free Sentinel tier.
 LOCAL_MODEL = os.environ.get("ZUGAMIND_LOCAL_MODEL", "qwen2.5:14b-instruct")
 
+# Largest context window `ollama_query` will ask for (tokens). The window is
+# sized per call from the prompt; without one Ollama used the model default
+# (2048-4096) and silently dropped the FRONT of longer prompts — the system
+# message (measured 2026-08-28). Past this cap it still truncates, loudly.
+# Bigger windows cost RAM and load time on the local box.
+OLLAMA_MAX_CTX = int(os.environ.get("ZUGAMIND_OLLAMA_MAX_CTX", "16384"))
+
 # --- Timeouts (seconds) -------------------------------------------------------
 
 SENTINEL_TIMEOUT = int(os.environ.get("ZUGAMIND_SENTINEL_TIMEOUT", "90"))

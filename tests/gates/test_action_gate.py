@@ -175,7 +175,7 @@ class ActionGateTest(unittest.TestCase):
         api_calls = {"n": 0}
 
         def fake_claude():
-            def _api(prompt, model, max_tokens=500, system=""):
+            def _api(prompt, model, max_tokens=500, system="", **kw):  # usage_out since 2026-08-28
                 api_calls["n"] += 1
                 return f"resp-{api_calls['n']}"
             return _api
@@ -199,7 +199,7 @@ class ActionGateTest(unittest.TestCase):
         captured = {}
 
         def fake_claude():
-            def _api(prompt, model, max_tokens=500, system=""):
+            def _api(prompt, model, max_tokens=500, system="", **kw):  # usage_out since 2026-08-28
                 captured["model"] = model
                 return "ok-response"
             return _api

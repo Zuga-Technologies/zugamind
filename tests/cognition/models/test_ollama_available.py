@@ -15,11 +15,20 @@ from cognition.models.ollama import ollama_available
 
 
 class _FakeResponse:
+    """Mirrors the slice of http.client.HTTPResponse the client uses — it IS
+    a context manager (the client closes it with `with`, 2026-08-28)."""
+
     def __init__(self, payload: dict):
         self._buf = BytesIO(json.dumps(payload).encode())
 
     def read(self):
         return self._buf.read()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 def _tags(*names):

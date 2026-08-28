@@ -133,6 +133,11 @@ shipped scanners poll the HackerNews API and public RSS feeds). `--dry-run`
 means "no harness subprocess, no model spend" — perception itself is live.
 Everything lands in `zugamind/data/engine/journal.jsonl`.
 
+The free local tier needs its model installed first: `ollama pull
+qwen2.5:14b-instruct`, or point `ZUGAMIND_LOCAL_MODEL` at a tag you already
+have (`ollama list`). A missing model is a loud `ERROR` in the log and every
+local judgment fails closed — it never crashes, so check the log once.
+
 **Prove the wake path against your own install:**
 
 ```bash
