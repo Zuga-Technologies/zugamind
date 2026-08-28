@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 
 from foundation.config import ENGINE_DIR, STATE_FILE
+from foundation.fs import atomic_write_text
 
 logger = logging.getLogger("zugamind.state")
 
@@ -36,7 +37,7 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     """Persist cognitive state."""
     ENGINE_DIR.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2))
+    atomic_write_text(STATE_FILE, json.dumps(state, indent=2))
 
 
 def transition_state(current: dict, new_state: str, reason: str) -> dict:

@@ -179,6 +179,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.text_format import truncate_title
+from foundation.fs import atomic_write_text
 from scanners.seen_items import read_seen, write_seen
 
 logger = logging.getLogger("zugamind.scanners.ai_labs")
@@ -252,7 +253,7 @@ def _read_cache(ignore_ttl: bool = False) -> dict[str, Any] | None:
 def _write_cache(payload: dict[str, Any]) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _cache_file().write_text(json.dumps(payload))
+        atomic_write_text(_cache_file(), json.dumps(payload))
     except Exception:
         pass
 

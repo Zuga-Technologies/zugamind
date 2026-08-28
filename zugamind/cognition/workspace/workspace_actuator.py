@@ -26,6 +26,8 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+
+from foundation.fs import atomic_write_text
 from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger("zugamind.workspace_actuator")
@@ -85,7 +87,7 @@ class WorkspaceActuator:
             "total_checks": self._total_checks,
             "last_updated": datetime.now().isoformat(),
         }
-        ACTUATOR_STATE_FILE.write_text(json.dumps(state, indent=2))
+        atomic_write_text(ACTUATOR_STATE_FILE, json.dumps(state, indent=2))
 
     def on_cycle_complete(self, workspace_stats: Dict[str, Any],
                           attention_schema, cycle_number: int) -> Dict[str, Any]:

@@ -16,6 +16,7 @@ import logging
 from datetime import date
 
 from foundation.config import BUDGET_FILE, ENGINE_DIR, HAIKU_COST, SONNET_COST, OPUS_COST, monthly_cap
+from foundation.fs import atomic_write_text
 
 logger = logging.getLogger("zugamind.budget")
 
@@ -58,7 +59,7 @@ def load_budget() -> dict:
 def save_budget(budget: dict) -> None:
     """Persist budget state."""
     ENGINE_DIR.mkdir(parents=True, exist_ok=True)
-    BUDGET_FILE.write_text(json.dumps(budget, indent=2))
+    atomic_write_text(BUDGET_FILE, json.dumps(budget, indent=2))
 
 
 def can_spend(budget: dict, tier: str) -> bool:

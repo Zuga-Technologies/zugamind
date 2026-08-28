@@ -12,8 +12,10 @@ This is the ONLINE analogue for a live deployment, which has no held-out
 corpus to calibrate against: opt in per-harness with
 `"wake_min_salience": "calibrate"` in the harness config (instead of a
 static number), and this module learns the floor from the live ambient wake
-stream itself — same formula (max + margin), applied cycle by cycle instead
-of in one offline pass.
+stream itself — same idea, applied cycle by cycle instead of in one offline
+pass. The formula is NOT the offline `max + margin` any more: see "Rolling
+quantile, not frozen max" below for why it became a 90th-percentile + margin
+over a rolling window (2026-08-06).
 
 Warmup safety: before `CALIBRATION_WINDOW` ambient samples have been
 observed, `resolve_floor()` returns `WARMUP_FLOOR` — the same 0.35 the
@@ -67,19 +69,25 @@ There is never a window where a floor fitted on one basis judges the other.
 The basis switch is journaled once, as `floor_basis_switched`.
 
 State persisted to `<data_dir>/floor_calibration.json`, keyed by harness
-name. The floor-change is journaled exactly once, when the window fills —
-not every cycle. Stdlib-only, never raises (mirrors the rest of act/).
+name, written atomically (foundation.fs) and sanitized on load — a torn or
+poisoned file used to wedge a harness at its last floor forever (audit
+2026-08-28). The first calibration is journaled once (`floor_calibrated`);
+after that the floor moves every sample, and each move of at least
+`DRIFT_JOURNAL_DELTA` from the last journaled value is journaled as
+`floor_drifted` with an `at_ceiling` flag — FLOOR_CEILING is the
+"nothing wakes" state and an operator must be able to see it arrive.
+Stdlib-only, never raises (mirrors the rest of act/).
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
 from typing import Any, Dict, Optional
 
 from continuity import journal
 from foundation.config import DATA_DIR
+from foundation.fs import atomic_write_text
 
 logger = logging.getLogger("zugamind.act.floor_calibration")
 
@@ -97,6 +105,9 @@ WARMUP_FLOOR = 0.35
 # calibration day. Applied at compute AND resolve so pre-existing bad state
 # files heal without manual surgery.
 FLOOR_CEILING = 0.9
+# A calibrated floor is recomputed on every sample; journal its movement only
+# once it has moved this far from the last journaled value.
+DRIFT_JOURNAL_DELTA = 0.05
 
 
 def _quantile_floor(samples: list) -> float:
@@ -110,11 +121,46 @@ def _quantile_floor(samples: list) -> float:
     return round(min(max(raw, WARMUP_FLOOR), FLOOR_CEILING), 4)
 
 
+def _is_number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _sanitize(state: Any) -> Dict[str, Any]:
+    """Coerce a loaded state file into the shape the math assumes.
+
+    A non-numeric sample used to raise inside `_quantile_floor` BEFORE
+    `_save_state` ran, so the poisoned file was never rewritten and that
+    harness stayed wedged at its last floor forever, one warning per cycle
+    (audit 2026-08-28). Bad samples are dropped, bad floors reset to None (so
+    they are recomputed from the surviving samples), bad entries dropped."""
+    if not isinstance(state, dict):
+        return {}
+    clean: Dict[str, Any] = {}
+    for name, entry in state.items():
+        if not isinstance(entry, dict):
+            logger.warning("floor_calibration: dropping malformed entry for %r", name)
+            continue
+        e = dict(entry)
+        for key in ("samples", "raw_samples"):
+            vals = e.get(key)
+            if vals is None and key == "raw_samples":
+                continue
+            good = [float(v) for v in vals if _is_number(v)] if isinstance(vals, list) else []
+            if not isinstance(vals, list) or len(good) != len(vals):
+                logger.warning("floor_calibration: dropped bad %s for %r", key, name)
+            e[key] = good[-ROLLING_WINDOW:]
+        for key in ("floor", "raw_floor"):
+            v = e.get(key)
+            e[key] = float(v) if _is_number(v) else None
+        clean[name] = e
+    return clean
+
+
 def _load_state() -> Dict[str, Any]:
     if not STATE_FILE.exists():
         return {}
     try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return _sanitize(json.loads(STATE_FILE.read_text(encoding="utf-8")))
     except Exception as e:  # noqa: BLE001 — a corrupt state file must not crash the caller
         logger.warning("floor_calibration state load failed (non-fatal): %s", e)
         return {}
@@ -122,10 +168,31 @@ def _load_state() -> Dict[str, Any]:
 
 def _save_state(state: Dict[str, Any]) -> None:
     try:
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        atomic_write_text(STATE_FILE, json.dumps(state, indent=2))
     except Exception as e:  # noqa: BLE001 — persistence is best-effort
         logger.warning("floor_calibration state save failed (non-fatal): %s", e)
+
+
+def _journal_drift(name: str, entry: Dict[str, Any], basis: str) -> None:
+    """Journal a calibrated floor's movement once it has moved
+    DRIFT_JOURNAL_DELTA from the last value journaled. The floor is recomputed
+    on every sample; without this an operator could only see it drift (0.4 ->
+    0.9 over a day) by diffing the state file. A floor arriving at
+    FLOOR_CEILING is flagged: that is the "nothing wakes" state."""
+    key_floor, key_last = ("floor", "journaled_floor") if basis == "modulated" else ("raw_floor", "raw_journaled_floor")
+    new, last = entry.get(key_floor), entry.get(key_last)
+    if not _is_number(new):
+        return
+    if not _is_number(last):
+        entry[key_last] = new  # pre-existing state from before drift journaling: start tracking silently
+        return
+    if abs(new - last) < DRIFT_JOURNAL_DELTA:
+        return
+    entry[key_last] = new
+    journal.append_event("floor_drifted", {
+        "harness": name, "basis": basis, "from": last, "to": new,
+        "at_ceiling": new >= FLOOR_CEILING,
+    })
 
 
 def maybe_record_ambient_sample(hc: Dict[str, Any], winner_dict: Optional[Dict[str, Any]]) -> None:
@@ -160,11 +227,15 @@ def maybe_record_ambient_sample(hc: Dict[str, Any], winner_dict: Optional[Dict[s
             first_calibration = entry.get("floor") is None
             entry["floor"] = _quantile_floor(entry["samples"])
             if first_calibration:
-                entry["calibrated_at"] = datetime.now().isoformat()
+                entry["calibrated_at"] = journal.now_iso()
+                entry["journaled_floor"] = entry["floor"]
                 journal.append_event("floor_calibrated", {
                     "harness": name, "floor": entry["floor"],
                     "samples": len(entry["samples"]),
+                    "at_ceiling": entry["floor"] >= FLOOR_CEILING,
                 })
+            else:
+                _journal_drift(name, entry, "modulated")
 
         # Parallel RAW series — see the RAW vs MODULATED section in the module
         # docstring. Deliberately SKIPPED rather than defaulted to `salience`
@@ -181,32 +252,34 @@ def maybe_record_ambient_sample(hc: Dict[str, Any], winner_dict: Optional[Dict[s
                 first_raw = entry.get("raw_floor") is None
                 entry["raw_floor"] = _quantile_floor(entry["raw_samples"])
                 if first_raw:
-                    entry["raw_calibrated_at"] = datetime.now().isoformat()
+                    entry["raw_calibrated_at"] = journal.now_iso()
+                    entry["raw_journaled_floor"] = entry["raw_floor"]
                     journal.append_event("floor_basis_switched", {
                         "harness": name,
                         "basis": "raw",
                         "raw_floor": entry["raw_floor"],
                         "previous_modulated_floor": entry.get("floor"),
                         "samples": len(entry["raw_samples"]),
+                        "at_ceiling": entry["raw_floor"] >= FLOOR_CEILING,
                         "why": ("the gate now compares what the module asked for, "
                                 "not the attention-boosted number"),
                     })
+                else:
+                    _journal_drift(name, entry, "raw")
         _save_state(state)
     except Exception as e:  # noqa: BLE001 — calibration must never break a wake cycle
         logger.warning("floor_calibration record failed (non-fatal): %s", e)
 
 
 def resolve_floor(harness_name: str) -> float:
-    """Return this harness's calibrated floor, or WARMUP_FLOOR if it hasn't
-    finished calibrating yet. Never raises."""
-    try:
-        state = _load_state()
-        entry = state.get(harness_name)
-        if entry and entry.get("floor") is not None:
-            return min(float(entry["floor"]), FLOOR_CEILING)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("floor_calibration resolve failed (non-fatal): %s", e)
-    return WARMUP_FLOOR
+    """The floor only, basis-blind — a convenience over `resolve_gate()`.
+
+    Delegates so it can never again return the MODULATED floor after the
+    basis has switched to raw (it did, audit 2026-08-28 — no production
+    caller had tripped on it yet). Gate code must use `resolve_gate()`: a
+    floor is meaningless without knowing which number it judges. Never
+    raises."""
+    return resolve_gate(harness_name)[0]
 
 
 def resolve_gate(harness_name: str) -> tuple:

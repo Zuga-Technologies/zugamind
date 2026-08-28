@@ -241,8 +241,9 @@ Three pieces close the loop from "decided" to "your harness is working on it":
   to a temp file, substitutes `{briefing_file}` into your configured argv,
   runs it as a subprocess. Rate-limited per rolling hour AND day (counted
   from the durable journal — an unreadable journal refuses the wake rather
-  than resetting the count), never raises, honors quiet hours
-  (`ZUGAMIND_QUIET_HOURS`).
+  than resetting the count; dry runs are journaled but don't consume the
+  quota), kills the whole process tree on timeout, never raises, honors
+  quiet hours (`ZUGAMIND_QUIET_HOURS`).
 - **`stream/runner.py`** — the always-on loop. Perception and journaling
   never stop; quiet-hours winners are deferred (journaled, not lost) and
   surface in the next real briefing. `touch PAUSE` at the package root

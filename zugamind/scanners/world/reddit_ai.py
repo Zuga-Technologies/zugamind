@@ -33,6 +33,8 @@ import urllib.error
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from foundation.fs import atomic_write_text
+
 from scanners.seen_items import read_seen, write_seen
 
 logger = logging.getLogger("zugamind.scanners.reddit_ai")
@@ -119,7 +121,7 @@ def scan_reddit_ai() -> list[dict]:
         posts = _fetch_all()
         if posts:
             try:
-                cache.write_text(json.dumps(posts), encoding="utf-8")
+                atomic_write_text(cache, json.dumps(posts))
             except OSError as e:  # persistence best-effort — never break the cycle
                 logger.debug("reddit_ai cache save failed (non-fatal): %s", e)
 

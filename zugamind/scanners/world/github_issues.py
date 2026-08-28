@@ -27,6 +27,8 @@ import os
 import time
 import urllib.request
 from pathlib import Path
+
+from foundation.fs import atomic_write_text
 from typing import Any
 
 logger = logging.getLogger("zugamind.scanners.github_issues")
@@ -58,7 +60,7 @@ def _load_cache() -> dict[str, Any]:
 def _save_cache(cache: dict[str, Any]) -> None:
     try:
         _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        _CACHE_FILE.write_text(json.dumps(cache), encoding="utf-8")
+        atomic_write_text(_CACHE_FILE, json.dumps(cache))
     except Exception as e:
         logger.debug("github_issues cache save failed: %s", e)
 

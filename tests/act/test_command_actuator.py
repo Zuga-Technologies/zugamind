@@ -170,11 +170,12 @@ def test_rate_limit_refuses_after_max_per_hour(tmp_path, monkeypatch):
     _patch_journal(tmp_path, monkeypatch)
     config = _config(name="rate-test", max_per_hour=2)
 
-    r1 = command_actuator.invoke_harness(config, "b", dry_run=True)
-    r2 = command_actuator.invoke_harness(config, "b", dry_run=True)
+    # Real (tiny) runs: dry runs stopped consuming quota on 2026-08-28.
+    r1 = command_actuator.invoke_harness(config, "b", dry_run=False)
+    r2 = command_actuator.invoke_harness(config, "b", dry_run=False)
     assert r1["ok"] and r2["ok"]
 
-    r3 = command_actuator.invoke_harness(config, "b", dry_run=True)
+    r3 = command_actuator.invoke_harness(config, "b", dry_run=False)
     assert r3["ok"] is False
     assert r3["error"] == "rate_limited"
     assert r3["failure_reason"] == "rate_limit: rate_limited (hour cap: 2/2)"
@@ -216,11 +217,11 @@ def test_per_day_cap_refuses_after_max_per_day(tmp_path, monkeypatch):
     # A generous per-hour cap isolates the per-day cap as the thing that trips.
     config = _config(name="day-cap-test", max_per_hour=100, max_per_day=2)
 
-    r1 = command_actuator.invoke_harness(config, "b", dry_run=True)
-    r2 = command_actuator.invoke_harness(config, "b", dry_run=True)
+    r1 = command_actuator.invoke_harness(config, "b", dry_run=False)
+    r2 = command_actuator.invoke_harness(config, "b", dry_run=False)
     assert r1["ok"] and r2["ok"]
 
-    r3 = command_actuator.invoke_harness(config, "b", dry_run=True)
+    r3 = command_actuator.invoke_harness(config, "b", dry_run=False)
     assert r3["ok"] is False
     assert r3["error"] == "rate_limited"
     assert r3["window"] == "day"

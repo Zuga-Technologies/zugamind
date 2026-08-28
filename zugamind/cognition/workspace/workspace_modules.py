@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from foundation.config import ENGINE_DIR
+from foundation.fs import atomic_write_text
 
 from .workspace import ThoughtType, SalienceBid, WorkspaceContent, WorkspaceModule
 
@@ -452,7 +453,7 @@ class PriorityGoalsModule(WorkspaceModule):
         try:
             self.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
             raw = {k: (v.isoformat() if v else None) for k, v in self._goal_last_touched.items()}
-            self.STATE_FILE.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+            atomic_write_text(self.STATE_FILE, json.dumps(raw, indent=2))
         except Exception as e:  # noqa: BLE001 — persistence is best-effort
             logger.warning("priority_goals state save failed (non-fatal): %s", e)
 

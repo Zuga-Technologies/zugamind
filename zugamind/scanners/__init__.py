@@ -17,6 +17,7 @@ Re-exports the public scan_* surface so callers can do:
     from scanners import scan_hackernews
 """
 
+from foundation.fs import atomic_write_text as _atomic_write_text
 from .world.hackernews import scan_hackernews
 from .world.reddit_ai import scan_reddit_ai
 from .world.ai_labs import scan_ai_labs
@@ -96,7 +97,7 @@ def habituation_filter(triggers: list, now: "float | None" = None) -> list:
             if isinstance(ts, (int, float)) and (now - ts) < horizon}
     try:
         _config.SEEN_TRIGGERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _config.SEEN_TRIGGERS_FILE.write_text(_json.dumps(seen))
+        _atomic_write_text(_config.SEEN_TRIGGERS_FILE, _json.dumps(seen))
     except Exception:
         pass  # fail-silent: habituation state is best-effort
     return fresh

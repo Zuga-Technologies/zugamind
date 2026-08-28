@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import scanners.world.reddit_ai as reddit_ai
+from foundation import fs
 from scanners import seen_items
 
 
@@ -132,7 +133,7 @@ def test_crash_before_replace_keeps_old_file_and_cleans_temp(tmp_path, monkeypat
 
     def boom(src, dst):
         raise OSError("simulated crash between write and replace")
-    monkeypatch.setattr(seen_items.os, "replace", boom)
+    monkeypatch.setattr(fs.os, "replace", boom)
 
     seen_items.write_seen(path, {"new": 2.0}, max_keys=10)  # swallowed, logged
     assert json.loads(path.read_text()) == {"old": 1.0}
@@ -145,12 +146,12 @@ def test_two_writers_never_share_a_temp_name(tmp_path, monkeypatch):
     temp mid-write; unique temps mean both land and the last replace wins."""
     path = tmp_path / "seen.json"
     names = []
-    real_replace = seen_items.os.replace
+    real_replace = fs.os.replace
 
     def spy(src, dst):
         names.append(Path(src).name)
         real_replace(src, dst)
-    monkeypatch.setattr(seen_items.os, "replace", spy)
+    monkeypatch.setattr(fs.os, "replace", spy)
 
     seen_items.atomic_write_text(path, "a")
     seen_items.atomic_write_text(path, "b")

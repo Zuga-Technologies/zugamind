@@ -29,6 +29,21 @@ Harness configs are loaded from a JSON file: a list of objects shaped like
 `command` is an argv list; the literal substring "{briefing_file}" in any
 argv element is replaced with the path to a temp file containing the
 briefing text. See `examples/harness-configs/` for worked examples.
+A malformed entry — a non-integer cap or timeout, an `enabled` that is not
+a boolean (`"false"` the string used to ENABLE a harness, because
+bool("false") is True), a `wake_min_salience` that is neither a number
+nor "calibrate" (a typo used to mean NO floor: wake on everything), or a
+duplicate name — is skipped with a warning, never loaded half-right
+(audit 2026-08-28). Skipping fails closed: a harness you cannot describe
+correctly does not wake at all until you fix the line.
+
+Dry runs journal exactly what WOULD run but do not consume the rate-limit
+quota — a `--dry-run` preview against a shared journal must not starve the
+real daemon of its wakes. On timeout the WHOLE process tree is killed:
+the .cmd shims Node CLIs install run through `cmd.exe /c`, and killing
+cmd.exe alone left the real harness running — and holding the stdout
+pipe, so the wake blocked until the orphan finished (measured 2026-08-28:
+a 2s timeout returned after 6.1s with the child still alive).
 
 The same file may also carry a top-level "quiet_hours" block —
 `{"harnesses": [...], "quiet_hours": {"start": "23:00", "end": "07:00"}}` —
@@ -38,7 +53,7 @@ env override that wins over the file. During quiet hours the STREAM RUNNER
 "quiet_hours_deferred" instead — perception and journaling never stop, only
 the wake call does. See `stream/runner.py`.
 
-Stdlib-only (json + os + shutil + subprocess + sys + tempfile).
+Stdlib-only (json + os + shutil + signal + subprocess + sys + tempfile).
 """
 
 from __future__ import annotations
@@ -47,6 +62,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -72,6 +88,10 @@ _DEFAULT_MAX_PER_DAY = 20
 _STDOUT_STDERR_CAP = 2000
 _RATE_WINDOW_HOUR_SEC = 3600
 _RATE_WINDOW_DAY_SEC = 24 * 3600
+# After a timeout kills the process tree, how long to wait for the pipes to
+# drain before giving up on the harness's output. A survivor that escaped
+# the tree kill would otherwise hold the pipe open and block the mind.
+_TREE_KILL_GRACE_SEC = 10
 
 
 def _resolve_windows_shim(argv: List[Any]) -> List[Any]:
@@ -92,6 +112,37 @@ def _resolve_windows_shim(argv: List[Any]) -> List[Any]:
     if resolved and resolved.lower().endswith((".cmd", ".bat")):
         return ["cmd.exe", "/c", *argv]
     return argv
+
+
+def _as_bool(value: Any, default: bool = True) -> bool:
+    """A real boolean, or the obvious spellings of one. Anything else raises —
+    bool("false") is True, and that once silently ENABLED a harness."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("true", "1", "yes", "on"):
+            return True
+        if v in ("false", "0", "no", "off"):
+            return False
+    raise ValueError(f"not a boolean: {value!r}")
+
+
+def _cap(config: Dict[str, Any], key: str, default: int) -> int:
+    """An integer config value, or the module default with a warning. Used on
+    the hand-built dicts invoke_harness accepts directly; the loader rejects
+    bad values outright. Never raises."""
+    raw = config.get(key, default)
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        logger.warning("harness %r: %s=%r is not an integer; using default %d",
+                       config.get("name"), key, raw, default)
+        return default
 
 
 def _config_path() -> Path:
@@ -122,6 +173,7 @@ def load_harness_configs(path: Optional[Path] = None) -> List[Dict[str, Any]]:
         return []
 
     configs: List[Dict[str, Any]] = []
+    seen_names: set = set()
     for entry in raw:
         if not isinstance(entry, dict) or "name" not in entry or "command" not in entry:
             logger.warning("skipping malformed harness config entry: %r", entry)
@@ -130,26 +182,44 @@ def load_harness_configs(path: Optional[Path] = None) -> List[Dict[str, Any]]:
         if not isinstance(command, list):
             logger.warning("skipping harness %r — command is not a list", entry.get("name"))
             continue
-        cfg = {
-            "name": str(entry["name"]),
-            "command": list(command),
-            "timeout_sec": int(entry.get("timeout_sec", _DEFAULT_TIMEOUT_SEC)),
-            "max_per_hour": int(entry.get("max_per_hour", _DEFAULT_MAX_PER_HOUR)),
-            "max_per_day": int(entry.get("max_per_day", _DEFAULT_MAX_PER_DAY)),
-            "enabled": bool(entry.get("enabled", True)),
-        }
-        # Optional wake filters (consumed by stream.runner). Rehearsal lesson:
-        # this normalizer once dropped unknown keys, silently disabling the
-        # filter that the config visibly declared — keep it explicit.
-        wake_modules = entry.get("wake_modules")
-        if isinstance(wake_modules, list) and wake_modules:
-            cfg["wake_modules"] = [str(m) for m in wake_modules]
-        floor = entry.get("wake_min_salience")
-        if isinstance(floor, (int, float)):
-            cfg["wake_min_salience"] = float(floor)
-        elif floor == "calibrate":
-            # Opt-in self-calibrating floor (issue #12) — see act/floor_calibration.py.
-            cfg["wake_min_salience"] = "calibrate"
+        name = str(entry["name"])
+        if name in seen_names:
+            # Two entries with one name would share one rate-limit counter and
+            # both fire on every wake; the file is wrong, not ambiguous.
+            logger.warning("skipping duplicate harness name %r (first entry wins)", name)
+            continue
+        try:
+            cfg = {
+                "name": name,
+                "command": list(command),
+                "timeout_sec": int(entry.get("timeout_sec", _DEFAULT_TIMEOUT_SEC)),
+                "max_per_hour": int(entry.get("max_per_hour", _DEFAULT_MAX_PER_HOUR)),
+                "max_per_day": int(entry.get("max_per_day", _DEFAULT_MAX_PER_DAY)),
+                "enabled": _as_bool(entry.get("enabled"), True),
+            }
+            # Optional wake filters (consumed by stream.runner). Rehearsal lesson:
+            # this normalizer once dropped unknown keys, silently disabling the
+            # filter that the config visibly declared — keep it explicit.
+            wake_modules = entry.get("wake_modules")
+            if isinstance(wake_modules, list) and wake_modules:
+                cfg["wake_modules"] = [str(m) for m in wake_modules]
+            floor = entry.get("wake_min_salience")
+            if floor is None:
+                pass
+            elif isinstance(floor, (int, float)) and not isinstance(floor, bool):
+                cfg["wake_min_salience"] = float(floor)
+            elif floor == "calibrate":
+                # Opt-in self-calibrating floor (issue #12) — see act/floor_calibration.py.
+                cfg["wake_min_salience"] = "calibrate"
+            else:
+                # A typo here ("calibrated", "0.6" the string, ...) used to be
+                # dropped silently, which meant NO floor — the harness woke on
+                # every winner, the opposite of what the file visibly declared.
+                raise ValueError(f"wake_min_salience={floor!r} is neither a number nor \"calibrate\"")
+        except (TypeError, ValueError) as e:
+            logger.warning("skipping harness %r — %s", name, e)
+            continue
+        seen_names.add(name)
         configs.append(cfg)
     return configs
 
@@ -202,8 +272,20 @@ def load_quiet_hours(path: Optional[Path] = None) -> Optional[Dict[str, str]]:
     return {"start": str(quiet["start"]), "end": str(quiet["end"])}
 
 
-def _recent_invocation_count(name: str, window_sec: int, now: Optional[float] = None) -> Optional[int]:
-    """Count "harness_invocation" journal events for `name` in the last `window_sec`.
+def _consumes_quota(event: Dict[str, Any], name: str) -> bool:
+    """Which journal events count against a harness's rate limit: real
+    invocations only. Dry runs are journaled (they are the audit trail of what
+    WOULD have run) but a `--dry-run` preview against a shared journal must
+    not starve the real daemon; `empty_command` never ran anything."""
+    return (event.get("kind") == "harness_invocation"
+            and event.get("harness") == name
+            and not event.get("dry_run")
+            and event.get("error") != "empty_command")
+
+
+def _recent_invocation_counts(name: str, now: Optional[float] = None) -> Optional[tuple]:
+    """(last hour, last 24h) quota-consuming invocations of `name`, from ONE
+    journal read.
 
     Returns None when the journal file exists but cannot be read. The rate
     limiter is one of the few hard safety controls on the wake path, so an
@@ -212,16 +294,16 @@ def _recent_invocation_count(name: str, window_sec: int, now: Optional[float] = 
     A missing journal (fresh install) legitimately counts as 0.
     """
     t = now if now is not None else time.time()
-    cutoff_iso = datetime.fromtimestamp(t - window_sec, tz=timezone.utc).isoformat()
+    day_cutoff = datetime.fromtimestamp(t - _RATE_WINDOW_DAY_SEC, tz=timezone.utc).isoformat()
+    hour_cutoff = datetime.fromtimestamp(t - _RATE_WINDOW_HOUR_SEC, tz=timezone.utc).isoformat()
     try:
-        events = journal.read_events(since_iso=cutoff_iso, limit=2000, on_error="raise")
+        events = journal.read_events(since_iso=day_cutoff, limit=5000, on_error="raise")
     except Exception as e:  # noqa: BLE001 — unknowable count means refuse, not zero
         logger.error("rate-limit count unavailable for %r (journal unreadable): %s", name, e)
         return None
-    return sum(
-        1 for e in events
-        if e.get("kind") == "harness_invocation" and e.get("harness") == name
-    )
+    day = [e for e in events if _consumes_quota(e, name)]
+    hour = [e for e in day if e.get("ts", "") > hour_cutoff]
+    return len(hour), len(day)
 
 
 def _briefing_dir() -> Optional[str]:
@@ -240,6 +322,52 @@ def _briefing_dir() -> Optional[str]:
         return root
     except OSError:
         return None
+
+
+def _kill_tree(proc: "subprocess.Popen") -> None:
+    """Kill `proc` AND everything it spawned. On Windows the .cmd shims Node
+    CLIs install run through `cmd.exe /c`, so the harness is a grandchild
+    and `proc.kill()` alone leaves it running (and holding our stdout pipe);
+    `taskkill /T` walks the tree. On POSIX the child was started in its own
+    session, so the process group is the tree."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                           capture_output=True, timeout=30)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception as e:  # noqa: BLE001 — fall back to the direct child
+        logger.warning("tree kill failed for pid %s (%s); killing the direct child only", proc.pid, e)
+    try:
+        proc.kill()
+    except Exception:  # noqa: BLE001 — already gone
+        pass
+
+
+def _run_harness(argv: List[Any], timeout_sec: int) -> tuple:
+    """Run `argv` to completion or timeout. Returns (returncode, stdout,
+    stderr, timed_out). Output is decoded as UTF-8 with replacement: every
+    supported harness emits UTF-8, and the locale codec (cp1252 on a Windows
+    box without PYTHONUTF8) turned em-dashes and emoji into mojibake or a
+    decode exception that lost the whole wake's output. On timeout the whole
+    tree is killed first, then the pipes are drained for up to
+    _TREE_KILL_GRACE_SEC so partial output is salvaged without letting a
+    survivor block the mind."""
+    kwargs: Dict[str, Any] = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, encoding="utf-8", errors="replace")
+    if sys.platform != "win32":
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(argv, **kwargs)
+    try:
+        out, err = proc.communicate(timeout=timeout_sec)
+        return proc.returncode, out or "", err or "", False
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        try:
+            out, err = proc.communicate(timeout=_TREE_KILL_GRACE_SEC)
+        except subprocess.TimeoutExpired:
+            out, err = "", ""  # a survivor still holds the pipe; the wake must not block on it
+        return None, out or "", err or "", True
 
 
 def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False) -> Dict[str, Any]:
@@ -267,9 +395,10 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
     if not config.get("enabled", True):
         return {"ok": False, "error": "harness_disabled", "harness": name}
 
-    max_per_hour = int(config.get("max_per_hour", _DEFAULT_MAX_PER_HOUR))
-    hour_count = _recent_invocation_count(name, _RATE_WINDOW_HOUR_SEC)
-    if hour_count is None:
+    max_per_hour = _cap(config, "max_per_hour", _DEFAULT_MAX_PER_HOUR)
+    max_per_day = _cap(config, "max_per_day", _DEFAULT_MAX_PER_DAY)
+    counts = _recent_invocation_counts(name)
+    if counts is None:
         # Journal unreadable -> the caps can't be checked. Refusing is the
         # only answer consistent with the rest of this codebase's fail-closed
         # posture; treating it as zero would erase both rate limits exactly
@@ -279,6 +408,7 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
             "ok": False, "error": "rate_limit_indeterminate", "harness": name,
             "failure_reason": map_local_slug("rate_limit_indeterminate"),
         }
+    hour_count, day_count = counts
     if hour_count >= max_per_hour:
         journal.append_event("harness_rate_limited", {
             "harness": name, "window": "hour",
@@ -290,15 +420,6 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
             "failure_reason": map_local_slug(
                 f"rate_limited (hour cap: {hour_count}/{max_per_hour})"
             ),
-        }
-
-    max_per_day = int(config.get("max_per_day", _DEFAULT_MAX_PER_DAY))
-    day_count = _recent_invocation_count(name, _RATE_WINDOW_DAY_SEC)
-    if day_count is None:
-        journal.append_event("harness_rate_limit_indeterminate", {"harness": name})
-        return {
-            "ok": False, "error": "rate_limit_indeterminate", "harness": name,
-            "failure_reason": map_local_slug("rate_limit_indeterminate"),
         }
     if day_count >= max_per_day:
         journal.append_event("harness_rate_limited", {
@@ -340,36 +461,30 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
         if dry_run:
             result = {"ok": True, "harness": name, "dry_run": True, "would_run": argv}
         else:
-            timeout_sec = int(config.get("timeout_sec", _DEFAULT_TIMEOUT_SEC))
+            timeout_sec = _cap(config, "timeout_sec", _DEFAULT_TIMEOUT_SEC)
             try:
-                proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout_sec)
-                result = {
-                    "ok": proc.returncode == 0,
-                    "harness": name,
-                    "dry_run": False,
-                    "returncode": proc.returncode,
-                    "stdout": (proc.stdout or "")[:_STDOUT_STDERR_CAP],
-                    "stderr": (proc.stderr or "")[:_STDOUT_STDERR_CAP],
-                }
-            except subprocess.TimeoutExpired as e:
-                # Salvage whatever the harness already produced. TimeoutExpired
-                # carries the partial output captured before the kill; dropping
-                # it made a timed-out wake indistinguishable from a wake that
-                # ran and said nothing (2026-08-16: first live wake timed out
-                # and journaled an empty result, so what it had done was lost).
-                partial_out = e.stdout or b""
-                partial_err = e.stderr or b""
-                if isinstance(partial_out, bytes):
-                    partial_out = partial_out.decode("utf-8", "replace")
-                if isinstance(partial_err, bytes):
-                    partial_err = partial_err.decode("utf-8", "replace")
-                result = {
-                    "ok": False, "error": "timeout", "harness": name,
-                    "dry_run": False, "timeout_sec": timeout_sec,
-                    "failure_reason": map_local_slug("timeout"),
-                    "stdout": partial_out[:_STDOUT_STDERR_CAP],
-                    "stderr": partial_err[:_STDOUT_STDERR_CAP],
-                }
+                rc, out, err, timed_out = _run_harness(argv, timeout_sec)
+                if timed_out:
+                    # Whatever the harness produced before the kill is kept:
+                    # dropping it made a timed-out wake indistinguishable from
+                    # a wake that ran and said nothing (2026-08-16: first live
+                    # wake timed out and journaled an empty result).
+                    result = {
+                        "ok": False, "error": "timeout", "harness": name,
+                        "dry_run": False, "timeout_sec": timeout_sec, "killed_tree": True,
+                        "failure_reason": map_local_slug("timeout"),
+                        "stdout": out[:_STDOUT_STDERR_CAP],
+                        "stderr": err[:_STDOUT_STDERR_CAP],
+                    }
+                else:
+                    result = {
+                        "ok": rc == 0,
+                        "harness": name,
+                        "dry_run": False,
+                        "returncode": rc,
+                        "stdout": out[:_STDOUT_STDERR_CAP],
+                        "stderr": err[:_STDOUT_STDERR_CAP],
+                    }
             except Exception as e:  # noqa: BLE001 — never raise out of invoke_harness
                 error = f"invoke_error:{e}"
                 result = {
@@ -386,8 +501,9 @@ def invoke_harness(config: Dict[str, Any], briefing: str, dry_run: bool = False)
         if briefing_path:
             try:
                 os.unlink(briefing_path)
-            except OSError:
-                pass
+            except OSError as e:
+                # A briefing can carry workspace content; a leftover is worth a line.
+                logger.warning("briefing file not removed (%s): %s", briefing_path, e)
 
     journal.append_event("harness_invocation", result)
     return result
