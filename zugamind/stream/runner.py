@@ -420,7 +420,17 @@ class StreamRunner:
                     })
                 return []
 
-            budget = {"remaining": 10.0}  # the planner's own queue-depth gate, not the $ budget
+            # The planner's budget gate ("won't propose multi-step plans if
+            # budget is running low") reads budget["remaining"] in USD. This
+            # used to be a hardcoded {"remaining": 10.0}, so the gate could
+            # never fire regardless of real spend (audit 2026-08-28). Hand it
+            # the real ledger; fall back to the old stub if it cannot load.
+            try:
+                from foundation.budget import load_budget  # noqa: WPS433 — lazy, test-patchable
+                budget = load_budget()
+            except Exception as e:  # noqa: BLE001 — planning must not die on a ledger hiccup
+                logger.warning("planner budget unavailable (%s); planning unconstrained", e)
+                budget = {"remaining": 10.0}
             plan = self.planner.propose_plan(content, budget)
 
             since_iso = state.get("last_wake")

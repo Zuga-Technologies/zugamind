@@ -32,6 +32,41 @@ from .workspace import ThoughtType, SalienceBid, WorkspaceContent, WorkspaceModu
 logger = logging.getLogger("zugamind.workspace_modules")
 
 
+# Trigger fields are produced by scanners, some of them third-party. A wrong
+# type in ONE field (issue_title None, detail None, relevance "0.7") used to
+# raise inside generate_bid, and Workspace._gather_bids swallows that — so
+# the whole module had NO bid that cycle and the real event vanished
+# silently (audit 2026-08-28). Coerce at the edge instead.
+def _ttype(t: Any) -> str:
+    return str(t.get("type", "")) if isinstance(t, dict) else ""
+
+
+def _str(t: Any, key: str, default: str = "") -> str:
+    v = t.get(key) if isinstance(t, dict) else None
+    return v if isinstance(v, str) else (default if v is None else str(v))
+
+
+# Bid content becomes the wake briefing. Only WorldSignals capped it; a
+# 50,000-char `detail` on any other trigger became a 50,000-char briefing.
+_CONTENT_CLIP = 200
+
+
+def _clip(s: str, n: int = _CONTENT_CLIP) -> str:
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _num(t: Any, key: str, default: float = 0.0) -> float:
+    v = t.get(key) if isinstance(t, dict) else None
+    if isinstance(v, bool):
+        return default
+    if isinstance(v, (int, float)):
+        return float(v)
+    try:
+        return float(v) if v is not None else default
+    except (TypeError, ValueError):
+        return default
+
+
 # =============================================================================
 # MODULE: Infrastructure
 # =============================================================================
@@ -60,22 +95,22 @@ class InfrastructureModule(WorkspaceModule):
                 context={"triggers": [], "status": "healthy"},
             )
 
-        critical = [t for t in self._triggers if t["type"] in
+        critical = [t for t in self._triggers if _ttype(t) in
                     ("local_service_down", "local_systemic_failure", "production_down")]
-        degraded = [t for t in self._triggers if t["type"] in
+        degraded = [t for t in self._triggers if _ttype(t) in
                     ("production_degraded", "system_health")]
-        healthy = [t for t in self._triggers if t["type"] not in
-                   {c["type"] for c in critical + degraded}]
+        healthy = [t for t in self._triggers if _ttype(t) not in
+                   {_ttype(c) for c in critical + degraded}]
 
         if critical:
             n_critical = len(critical)
             salience = min(0.95, 0.7 + n_critical * 0.08)
-            detail_parts = [t.get("detail", t.get("service", "?")) for t in critical[:3]]
+            detail_parts = [_clip(_str(t, "detail") or _str(t, "service", "?")) for t in critical[:3]]
             content = f"CRITICAL: {n_critical} infrastructure issue(s) — {'; '.join(detail_parts)}"
             valence = -0.8
         elif degraded:
             salience = min(0.7, 0.4 + len(degraded) * 0.1)
-            detail_parts = [t.get("detail", "?") for t in degraded[:2]]
+            detail_parts = [_clip(_str(t, "detail", "?")) for t in degraded[:2]]
             content = f"Degraded: {'; '.join(detail_parts)}"
             valence = -0.3
         else:
@@ -108,12 +143,12 @@ class DaemonModule(WorkspaceModule):
         if not self._triggers:
             return None
 
-        failures = [t for t in self._triggers if t["type"] == "daemon_task_failed"]
-        completions = [t for t in self._triggers if t["type"] == "daemon_task_complete"]
+        failures = [t for t in self._triggers if _ttype(t) == "daemon_task_failed"]
+        completions = [t for t in self._triggers if _ttype(t) == "daemon_task_complete"]
 
         if failures:
             salience = min(0.9, 0.5 + len(failures) * 0.15)
-            content = f"Daemon: {len(failures)} task(s) failed — {failures[0].get('detail', '?')}"
+            content = f"Daemon: {len(failures)} task(s) failed — {_clip(_str(failures[0], 'detail', '?'))}"
             valence = -0.6
         elif completions:
             salience = 0.3
@@ -152,15 +187,15 @@ class CodeChangeModule(WorkspaceModule):
         if not self._triggers:
             return None
 
-        commits = [t for t in self._triggers if t["type"] == "git_commit"]
-        code_changes = [t for t in self._triggers if t["type"] == "code_change"]
+        commits = [t for t in self._triggers if _ttype(t) == "git_commit"]
+        code_changes = [t for t in self._triggers if _ttype(t) == "code_change"]
         # "recent_code_change" is a misnomer left over from reusing this
         # module's slot for live Claude Code SESSION activity (tool calls,
         # reads, edits) — not necessarily a file edit. Session activity in a
         # read-only review looks identical to a real edit unless labeled
         # separately (found 2026-07-17: Buga correctly flagged "Code: N
         # change(s)" as misleading when nothing was actually edited).
-        session_activity = [t for t in self._triggers if t["type"] == "recent_code_change"]
+        session_activity = [t for t in self._triggers if _ttype(t) == "recent_code_change"]
 
         # Only real file/commit events can claim "this looks like a fix" —
         # session activity is raw transcript text, and matching it on the
@@ -170,7 +205,7 @@ class CodeChangeModule(WorkspaceModule):
         # branch name (`fix/shadow-measures-candidate`) quoted inside a chat
         # message, one on the path `...\BugaBot\music.js` — "BugaBot" contains
         # "bug". Word boundaries, and never session_activity (2026-08-16).
-        has_issues = any(_ISSUE_WORD_RE.search(t.get("detail", ""))
+        has_issues = any(_ISSUE_WORD_RE.search(_str(t, "detail"))
                          for t in (commits + code_changes))
 
         if has_issues:
@@ -183,8 +218,8 @@ class CodeChangeModule(WorkspaceModule):
             salience = min(0.4, 0.2 + len(code_changes) * 0.03 + len(session_activity) * 0.03)
             valence = 0.0
 
-        projects = set(t.get("project", "?") for t in self._triggers if t.get("project"))
-        proj_str = ', '.join(projects) if projects else 'unknown'
+        projects = set(_str(t, "project") for t in self._triggers if _str(t, "project"))
+        proj_str = _clip(', '.join(sorted(projects))) if projects else 'unknown'
         if session_activity and not commits and not code_changes:
             content = (f"Session activity: {len(session_activity)} update(s) in "
                        f"{proj_str} (Claude Code working — not necessarily a file edit)")
@@ -223,7 +258,7 @@ class RepoIssuesModule(WorkspaceModule):
             return None
 
         urgent_words = ("bug", "crash", "error", "broken", "security", "fail")
-        urgent = any(w in t.get("issue_title", "").lower()
+        urgent = any(w in _str(t, "issue_title").lower()
                      for t in self._triggers for w in urgent_words)
 
         # Floor of 0.7: an untriaged human-filed issue must reliably beat the
@@ -231,11 +266,11 @@ class RepoIssuesModule(WorkspaceModule):
         # weighting 0.55 lost the draw ~30% of cycles, observed in rehearsal.
         salience = min(0.9, 0.7 + len(self._triggers) * 0.05 + (0.08 if urgent else 0.0))
         titles = "; ".join(
-            f"#{t.get('issue_number', '?')} {t.get('issue_title', '?')}"
+            f"#{_str(t, 'issue_number', '?')} {_clip(_str(t, 'issue_title', '?'))}"
             for t in self._triggers[:2]
         )
-        repos = sorted({t.get("repo", "?") for t in self._triggers})
-        content = f"{len(self._triggers)} new issue(s) on {', '.join(repos)}: {titles}"
+        repos = sorted({_str(t, "repo", "?") for t in self._triggers})
+        content = f"{len(self._triggers)} new issue(s) on {_clip(', '.join(repos))}: {titles}"
 
         return SalienceBid(
             source_module=self.name,
@@ -261,11 +296,11 @@ class KnowledgeModule(WorkspaceModule):
         if not self._triggers:
             return None
 
-        vault = [t for t in self._triggers if t["type"] == "vault_change"]
-        memory = [t for t in self._triggers if t["type"] == "shared_memory_update"]
+        vault = [t for t in self._triggers if _ttype(t) == "vault_change"]
+        memory = [t for t in self._triggers if _ttype(t) == "shared_memory_update"]
 
         salience = min(0.5, 0.2 + len(self._triggers) * 0.05)
-        files = [t.get("file", "?") for t in self._triggers[:3]]
+        files = [_clip(_str(t, "file", "?"), 80) for t in self._triggers[:3]]
         content = f"Knowledge: {len(self._triggers)} update(s) — {', '.join(files)}"
 
         return SalienceBid(
@@ -293,13 +328,13 @@ class ScheduleModule(WorkspaceModule):
         if not self._triggers:
             return None
 
-        significant = [t for t in self._triggers if t["type"] in
+        significant = [t for t in self._triggers if _ttype(t) in
                        ("analytics_significant", "category_significance")]
-        cron = [t for t in self._triggers if t["type"] == "cron_output"]
+        cron = [t for t in self._triggers if _ttype(t) == "cron_output"]
 
         if significant:
             salience = min(0.8, 0.5 + len(significant) * 0.1)
-            content = f"Analytics: {significant[0].get('detail', 'significance detected')}"
+            content = f"Analytics: {_clip(_str(significant[0], 'detail', 'significance detected'))}"
             valence = 0.3
         elif cron:
             salience = min(0.5, 0.3 + len(cron) * 0.05)
@@ -363,7 +398,12 @@ class MetacognitiveModule(WorkspaceModule):
 
         # Attention stuck — but if WE are the stuck module, yield to break the
         # loop, or metacognition would perpetually re-win on "I'm stuck".
-        if self._attention_stuck:
+        # The workspace stamps `attention_stuck` and `last_winner_module`
+        # into every cycle context itself (2026-08-28) — before that, nothing
+        # in the repo called set_metacognitive_state or passed
+        # last_winner_module, so this branch was unreachable and the module
+        # was a constant 0.1 bidder in production.
+        if self._attention_stuck or bool(context.get("attention_stuck")):
             last_winner = context.get("last_winner_module", "")
             if last_winner == self.name:
                 concerns.append("attention stuck on metacognition itself — yielding")
@@ -438,16 +478,40 @@ class PriorityGoalsModule(WorkspaceModule):
         }
         self._load_state()
 
+    @staticmethod
+    def _parse_touch(iso: Any) -> Optional[datetime]:
+        """A persisted timestamp as a NAIVE LOCAL datetime — the same kind
+        `generate_bid` subtracts it from. An offset-aware value in the file
+        (hand-edited, or written by a future version) used to raise
+        "can't subtract offset-naive and offset-aware" inside generate_bid,
+        which the engine swallows — and since the value was persisted, the
+        module lost its bid EVERY cycle until someone edited the JSON
+        (audit 2026-08-28)."""
+        if not isinstance(iso, str) or not iso:
+            return None
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        return dt
+
     def _load_state(self) -> None:
         try:
             if not self.STATE_FILE.exists():
                 return
             raw = json.loads(self.STATE_FILE.read_text(encoding="utf-8"))
-            for key, iso in raw.items():
-                if key in self._goal_last_touched and iso:
-                    self._goal_last_touched[key] = datetime.fromisoformat(iso)
         except Exception as e:  # noqa: BLE001 — a corrupt state file must not crash the caller
             logger.warning("priority_goals state load failed (non-fatal): %s", e)
+            return
+        if not isinstance(raw, dict):
+            logger.warning("priority_goals state is not an object; ignoring")
+            return
+        for key, iso in raw.items():
+            if key not in self._goal_last_touched:
+                continue
+            try:  # one bad key must not lose the others
+                self._goal_last_touched[key] = self._parse_touch(iso)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("priority_goals: ignoring bad timestamp for %r: %s", key, e)
 
     def _save_state(self) -> None:
         try:
@@ -561,16 +625,23 @@ class WorldSignalsModule(WorkspaceModule):
             return None  # a quiet world is healthy — no bid, not a low bid
 
         best = max(self._triggers,
-                   key=lambda t: t.get("relevance", 0.0) + t.get("urgency", 0.0))
+                   key=lambda t: _num(t, "relevance") + _num(t, "urgency"))
         salience = min(
             self._SALIENCE_CAP,
             self._BASE
-            + 0.4 * float(best.get("relevance", 0.0))
-            + 0.2 * float(best.get("urgency", 0.0)),
+            + 0.4 * _num(best, "relevance")
+            + 0.2 * _num(best, "urgency"),
         )
 
         others = len(self._triggers) - 1
-        content = str(best.get("detail", "external signal"))[:200]
+        content = _str(best, "detail", "external signal")[:200]
+        # The alarm lane reads bid.context["triggers"] for urgency >= 0.9.
+        # Without this key a critical external signal could NEVER take the
+        # lane, contrary to what this docstring promised (audit 2026-08-28).
+        # Carry the strongest trigger plus every critical one, capped, so the
+        # lane sees them without the bid dragging the whole batch along.
+        critical = [t for t in self._triggers if _num(t, "urgency") >= 0.9 and t is not best]
+        lane_triggers = [best] + critical[:4]
         if others:
             content += f" (+{others} more external signal{'s' if others > 1 else ''})"
 
@@ -583,7 +654,8 @@ class WorldSignalsModule(WorkspaceModule):
                 "trigger_count": len(self._triggers),
                 "top_type": best.get("type"),
                 "top_url": best.get("url") or best.get("link"),
-                "types": sorted({str(t.get("type", "?")) for t in self._triggers}),
+                "types": sorted({_ttype(t) or "?" for t in self._triggers}),
+                "triggers": lane_triggers,
             },
         )
 
@@ -607,8 +679,8 @@ ALL_MODULES = [
 # Map trigger types to modules for routing.
 TRIGGER_TYPE_TO_MODULE: Dict[str, str] = {}
 for _ModuleClass in ALL_MODULES:
-    for _ttype in _ModuleClass.TRIGGER_TYPES:
-        TRIGGER_TYPE_TO_MODULE[_ttype] = _ModuleClass.name
+    for _trigger_type in _ModuleClass.TRIGGER_TYPES:
+        TRIGGER_TYPE_TO_MODULE[_trigger_type] = _ModuleClass.name
 
 
 def create_all_modules() -> List[WorkspaceModule]:
@@ -630,9 +702,23 @@ def route_triggers_to_modules(
     module_map = {m.name: m for m in modules}
     grouped: Dict[str, List[Dict[str, Any]]] = {m.name: [] for m in modules}
 
+    # Route by the modules actually passed in, not the import-time map: a
+    # module registered later (module_helpers.self_register, a deployment's
+    # own list) used to be routed NOTHING because TRIGGER_TYPE_TO_MODULE was
+    # frozen when this file was imported (audit 2026-08-28). Two modules
+    # claiming one type is a configuration error — say so, first wins.
+    routing: Dict[str, str] = {}
+    for m in modules:
+        for ttype in getattr(m, "TRIGGER_TYPES", ()) or ():
+            if ttype in routing and routing[ttype] != m.name:
+                logger.warning("trigger type %r claimed by both %r and %r — routing to %r",
+                               ttype, routing[ttype], m.name, routing[ttype])
+                continue
+            routing[ttype] = m.name
+
     for trigger in triggers:
-        ttype = trigger.get("type", "")
-        module_name = TRIGGER_TYPE_TO_MODULE.get(ttype)
+        ttype = _ttype(trigger)
+        module_name = routing.get(ttype) or TRIGGER_TYPE_TO_MODULE.get(ttype)
         if module_name and module_name in grouped:
             grouped[module_name].append(trigger)
 

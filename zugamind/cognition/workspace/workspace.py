@@ -72,7 +72,10 @@ class SalienceBid:
 
     @property
     def is_valid(self) -> bool:
-        return bool(self.content.strip()) and 0.0 <= self.salience <= 1.0
+        return (isinstance(self.content, str) and bool(self.content.strip())
+                and isinstance(self.salience, (int, float)) and not isinstance(self.salience, bool)
+                and 0.0 <= self.salience <= 1.0
+                and isinstance(self.thought_type, ThoughtType))
 
 
 @dataclass
@@ -372,14 +375,31 @@ class AttentionSchema:
         }
 
     def restore_from_dict(self, data: Dict[str, Any]):
-        self.current_focus = data.get("current_focus", "")
-        self.current_focus_module = data.get("current_focus_module", "")
-        self.current_focus_target = data.get("current_focus_target")
-        self.recent_foci = data.get("recent_foci", [])
-        self.module_win_counts = data.get("module_win_counts", {})
-        self.attention_switches = data.get("attention_switches", 0)
-        self._total_cycles = data.get("total_cycles", 0)
-        self._adjustments = data.get("adjustments", {})
+        """Restore a self-model written by to_dict(). Every field is coerced
+        to the type the math assumes — a torn or hand-edited file must
+        degrade to "less history", never raise inside run_cycle."""
+        if not isinstance(data, dict):
+            data = {}
+
+        def _int(v: Any) -> int:
+            return v if isinstance(v, int) and not isinstance(v, bool) else 0
+
+        self.current_focus = data.get("current_focus") if isinstance(data.get("current_focus"), str) else ""
+        self.current_focus_module = (data.get("current_focus_module")
+                                     if isinstance(data.get("current_focus_module"), str) else "")
+        t = data.get("current_focus_target")
+        self.current_focus_target = t if isinstance(t, str) else None
+        foci = data.get("recent_foci")
+        self.recent_foci = [f for f in foci if isinstance(f, dict)][-10:] if isinstance(foci, list) else []
+        wins = data.get("module_win_counts")
+        self.module_win_counts = ({str(k): _int(v) for k, v in wins.items()}
+                                  if isinstance(wins, dict) else {})
+        self.attention_switches = _int(data.get("attention_switches"))
+        self._total_cycles = _int(data.get("total_cycles"))
+        adj = data.get("adjustments")
+        self._adjustments = ({str(k): float(v) for k, v in adj.items()
+                              if isinstance(v, (int, float)) and not isinstance(v, bool)}
+                             if isinstance(adj, dict) else {})
         if self.current_focus:
             self.focus_start_time = datetime.now()
 
@@ -464,6 +484,12 @@ class Workspace:
     def register_module(self, module: WorkspaceModule):
         """Register a module to participate in workspace competition."""
         self._modules.append(module)
+        # Seed the win table: `blind_spots` is computed from its keys, so a
+        # module that had NEVER won could never be a blind spot and never
+        # got the 1.4x rescue — the correction only ever helped past winners
+        # (audit 2026-08-28: 60 simulated cycles, a chronic 0.02 bidder was
+        # never once boosted).
+        self.attention_schema.module_win_counts.setdefault(module.name, 0)
         logger.info("[Workspace] Registered module: %s", module.name)
 
     def register_modulator(self, modulator: BidModulator):
@@ -487,8 +513,15 @@ class Workspace:
         Returns:
             WorkspaceContent with the winning bid, or None if no bids.
         """
-        context = context or {}
+        context = dict(context or {})
         self._cycle_count += 1
+        # The workspace's own self-model, offered to every module: modules
+        # such as metacognition branch on "is attention stuck" and "who won
+        # last" — and until 2026-08-28 nothing ever supplied either, so those
+        # branches were unreachable. A caller-supplied value still wins.
+        context.setdefault("last_winner_module",
+                           self._workspace_content.source_module if self._workspace_content else "")
+        context.setdefault("attention_stuck", self.attention_schema.is_stuck)
 
         bids = self._gather_bids(context)
         if not bids:
@@ -531,9 +564,14 @@ class Workspace:
         self._broadcast(content)
         self.attention_schema.update(content, bids)
 
+        # Nothing after _broadcast/update may raise: both have already
+        # committed side effects (modules heard the winner, the self-model
+        # recorded the win), and an exception here left the runner's cycle
+        # half-done — no journal event, no state save (audit 2026-08-28).
+        ttype = getattr(winner.thought_type, "value", str(winner.thought_type))
         logger.info(
             "[Workspace] Winner: %s (salience=%.2f, type=%s, bids=%d)",
-            winner.source_module, winner.salience, winner.thought_type.value, len(bids),
+            winner.source_module, winner.salience, ttype, len(bids),
         )
         return content
 
@@ -669,6 +707,11 @@ class Workspace:
         running self-model — the "every cycle is fully logged" surface."""
         return {
             "cycle_count": self._cycle_count,
+            # The alarm lane's refractory window counts SELECTION cycles
+            # (cycles that had bids), not run_cycle calls — expose it so an
+            # operator can see where a served alarm sits in its window.
+            "selection_cycle": self._selection_cycle,
+            "served_alarms": dict(self._served_alarms),
             "registered_modules": [m.name for m in self._modules],
             "module_count": len(self._modules),
             "attention_schema": self.attention_schema.get_context(),

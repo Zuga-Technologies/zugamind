@@ -34,8 +34,14 @@ def gate_enabled(env_var: str, default: str = "1") -> bool:
 
 
 def ro_conn(db_path: str | Path) -> sqlite3.Connection:
-    """Read-only SQLite connection (uri mode, 2s timeout)."""
-    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=2.0)
+    """Read-only SQLite connection (uri mode, 2s timeout).
+
+    The path is percent-encoded into a proper file: URI. Interpolating it
+    raw meant a `#` in the path silently opened a DIFFERENT (empty) database
+    — the fragment truncated the path — and a `?` collided with the
+    `?mode=ro` query (audit 2026-08-28)."""
+    uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+    return sqlite3.connect(uri, uri=True, timeout=2.0)
 
 
 def emit_event(kind: str, payload: dict, *, caller: str) -> None:
@@ -77,5 +83,10 @@ def self_register(module_cls: type, *, anchor_name: str = "PriorityGoalsModule")
             _wm.ALL_MODULES.insert(_wm.ALL_MODULES.index(anchor) + 1, module_cls)
         else:
             _wm.ALL_MODULES.append(module_cls)
+        # Also extend the import-time routing map (route_triggers_to_modules
+        # now routes by the live module list, but other consumers read this
+        # map directly). A type already claimed keeps its first owner.
+        for ttype in getattr(module_cls, "TRIGGER_TYPES", ()) or ():
+            _wm.TRIGGER_TYPE_TO_MODULE.setdefault(ttype, module_cls.name)
     except Exception as exc:
         logger.debug("%s self-register skipped: %s", module_cls.__name__, exc)

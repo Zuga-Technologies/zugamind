@@ -26,6 +26,8 @@ logger = logging.getLogger("zugamind.workspace_planner")
 # Where the planner looks for already-pending tasks (queue-depth gate).
 # Point this at your own task queue's export/snapshot file, or ignore the
 # gate entirely by passing max_pending=float("inf") to WorkspacePlanner.
+# NOTHING in this repo writes this file: until a deployment points it at a
+# real queue snapshot, _count_pending_tasks() is 0 and the cap never trips.
 TASKS_FILE = Path(__file__).resolve().parent.parent.parent / "tasks.json"
 
 
@@ -235,11 +237,22 @@ class WorkspacePlanner:
             return 0
 
     def format_plan_for_prompt(self, plan: List[Dict[str, Any]]) -> str:
-        """Format a plan as text for inclusion in an LLM prompt."""
+        """Format a plan as text for inclusion in an LLM prompt.
+
+        Tolerates hand-built steps missing `step_index` / `action` /
+        `description` (it used to KeyError on any plan it had not produced
+        itself); the step's position in the list stands in for a missing
+        index."""
         if not plan:
             return "No plan proposed (constraints prevent planning)."
         lines = [f"Proposed plan ({len(plan)} step(s)):"]
-        for step in plan:
+        for i, step in enumerate(plan):
+            if not isinstance(step, dict):
+                lines.append(f"  {i + 1}. [?] {str(step)[:200]}")
+                continue
+            idx = step.get("step_index", i)
+            idx = idx if isinstance(idx, int) and not isinstance(idx, bool) else i
             dep = f" (after step {step['depends_on']})" if "depends_on" in step else ""
-            lines.append(f"  {step['step_index'] + 1}. [{step['action']}] {step['description']}{dep}")
+            lines.append(f"  {idx + 1}. [{step.get('action', '?')}] "
+                         f"{str(step.get('description', ''))[:200]}{dep}")
         return "\n".join(lines)

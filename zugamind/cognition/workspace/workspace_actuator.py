@@ -70,14 +70,26 @@ class WorkspaceActuator:
         self._load_state()
 
     def _load_state(self):
-        if ACTUATOR_STATE_FILE.exists():
-            try:
-                data = json.loads(ACTUATOR_STATE_FILE.read_text())
-                self._cycles_since_check = data.get("cycles_since_check", 0)
-                self._last_check_cycle = data.get("last_check_cycle", 0)
-                self._total_checks = data.get("total_checks", 0)
-            except (json.JSONDecodeError, OSError):
-                pass
+        """Coerce every field: a non-object body used to raise out of the
+        constructor, and a string counter loaded fine and then crashed the
+        next on_cycle_complete on `+= 1` (audit 2026-08-28)."""
+        if not ACTUATOR_STATE_FILE.exists():
+            return
+        try:
+            data = json.loads(ACTUATOR_STATE_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
+            logger.warning("[Actuator] state load failed (non-fatal): %s", e)
+            return
+        if not isinstance(data, dict):
+            logger.warning("[Actuator] state is not an object; ignoring")
+            return
+
+        def _int(v):
+            return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else 0
+
+        self._cycles_since_check = _int(data.get("cycles_since_check"))
+        self._last_check_cycle = _int(data.get("last_check_cycle"))
+        self._total_checks = _int(data.get("total_checks"))
 
     def _save_state(self):
         ENGINE_DIR.mkdir(parents=True, exist_ok=True)
@@ -190,7 +202,7 @@ class WorkspaceActuator:
             ),
         }
         try:
-            with open(CPPS_FILE, "a") as f:
+            with open(CPPS_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(cpp) + "\n")
         except Exception as e:
             logger.debug("[Actuator] Failed to write CPPs: %s", e)
