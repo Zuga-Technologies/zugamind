@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _SCANNER_DIR = Path(__file__).resolve().parent.parent.parent / "examples" / "custom-scanners"
@@ -507,3 +508,113 @@ def test_novelty_scales_with_how_much_was_added(monkeypatch, tmp_path):
     clock["t"] += 200
     big = agent_reach.scan_agent_reach()[0]["novelty"]
     assert small < big <= 0.85
+
+
+# ------------------------------------------ search scoring (2026-08-22 / 08-28) --
+
+def test_keyword_relevance_excludes_terms_the_query_already_contains(monkeypatch):
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "agent,open source,mcp,llm")
+    text = "I built an open source memory layer for AI agents"
+    # Scored bare, the text hits "agent" + "open source" -> 0.7.
+    assert agent_reach._keyword_relevance(text) == 0.7
+    # The query supplied both of those words; excluding them leaves no evidence.
+    assert agent_reach._keyword_relevance(text, exclude="open source AI agent cognition") == 0.2
+    # A keyword the query did NOT contain still counts.
+    assert agent_reach._keyword_relevance(text + " with an MCP server", exclude="open source AI agent") == 0.5
+    # Excluding every keyword is "no hits", not the unconfigured neutral 0.5.
+    assert agent_reach._keyword_relevance(text, exclude="agent open source mcp llm") == 0.2
+
+
+def test_search_relevance_ignores_the_querys_own_terms(monkeypatch, tmp_path):
+    # The 2026-08-28 wake, replayed: the daemon's real keyword list and real
+    # standing query against the dev.to title + a snippet mentioning LLM/MCP.
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.delenv("ZUGAMIND_REACH_WATCH_URLS", raising=False)
+    monkeypatch.setenv("ZUGAMIND_REACH_QUERIES", "open source AI agent cognition attention")
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "agent,claude,anthropic,mcp,llm,openai,open source")
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TTL", "100")
+    _fake_clock(monkeypatch)
+    monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: True)
+    monkeypatch.setattr(
+        agent_reach, "_fetch_exa_results",
+        lambda q: [{
+            "url": "http://x/stash",
+            "title": "I built an open-source cognitive memory layer for AI agents in Go",
+            "text": "LLMs are trained to be both a reasoner and a knowledge base. MCP server included.",
+        }],
+    )
+    (t,) = agent_reach.scan_agent_reach()
+    # Bare scoring counted agent + llm + mcp = 3 hits -> the 0.9 ceiling and a
+    # 0.65 bid. "agent" is the query's own word; only llm + mcp are evidence.
+    assert t["relevance"] == 0.7
+    # Undated -> low urgency. 0.25 + 0.4*0.7 + 0.2*0.1 = 0.55: under the
+    # 0.570 floor the original 0.65 cleared.
+    assert t["urgency"] == agent_reach._SEARCH_URGENCY_UNDATED
+
+
+def test_search_urgency_is_publish_age_or_low_when_undated():
+    now = 1_800_000_000.0
+    hour = 3600.0
+    assert agent_reach._search_urgency(None, now) == 0.1
+    assert agent_reach._search_urgency(now - 2 * hour, now) == 0.25
+    assert agent_reach._search_urgency(now - 48 * hour, now) == 0.125
+    assert agent_reach._search_urgency(now - 120 * 24 * hour, now) == 0.0
+    # A stamp from the future (clock skew) is "fresh", never negative age.
+    assert agent_reach._search_urgency(now + hour, now) == 0.25
+
+    april = datetime(2026, 4, 25, 2, 35, 55, tzinfo=timezone.utc).timestamp()
+    assert agent_reach._parse_published("2026-04-25T02:35:55Z") == april
+    assert agent_reach._parse_published("2026-04-25T02:35:55") == april   # naive -> UTC
+    assert agent_reach._parse_published("2026-04-25T02:35:55+00:00") == april
+    assert agent_reach._parse_published(None) is None
+    assert agent_reach._parse_published("") is None
+    assert agent_reach._parse_published("not a date") is None
+    assert agent_reach._parse_published(1776998155) is None
+
+
+def test_search_trigger_urgency_comes_from_backend_publish_date(monkeypatch, tmp_path):
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.delenv("ZUGAMIND_REACH_WATCH_URLS", raising=False)
+    monkeypatch.setenv("ZUGAMIND_REACH_QUERIES", "q")
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TTL", "100")
+    now = datetime(2026, 8, 28, 11, 24, tzinfo=timezone.utc).timestamp()
+    _fake_clock(monkeypatch, start=now)
+    monkeypatch.setattr(agent_reach, "_mcporter_available", lambda: True)
+    monkeypatch.setattr(agent_reach, "_fetch_exa_results", lambda q: [
+        {"url": "http://x/today", "title": "t", "text": "", "publishedDate": "2026-08-28T09:00:00Z"},
+        {"url": "http://x/april", "title": "t", "text": "", "publishedDate": "2026-04-25T02:35:55Z"},
+        {"url": "http://x/undated", "title": "t", "text": ""},
+    ])
+    out = {t["url"]: t["urgency"] for t in agent_reach.scan_agent_reach()}
+    assert out == {"http://x/today": 0.25, "http://x/april": 0.0, "http://x/undated": 0.1}
+
+
+def test_tavily_requests_a_publish_window(monkeypatch):
+    captured = {}
+
+    class _Resp:
+        def read(self):
+            return json.dumps({"results": []}).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_urlopen(req, timeout):
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _Resp()
+
+    monkeypatch.setenv("TAVILY_API_KEY", "k")
+    monkeypatch.setattr(agent_reach.urllib.request, "urlopen", fake_urlopen)
+
+    monkeypatch.delenv("ZUGAMIND_REACH_SEARCH_TIME_RANGE", raising=False)
+    agent_reach._fetch_tavily_results("q")
+    assert captured["body"]["time_range"] == "week"  # default: a standing query asks what is NEW
+
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TIME_RANGE", "month")
+    agent_reach._fetch_tavily_results("q")
+    assert captured["body"]["time_range"] == "month"
+
+    monkeypatch.setenv("ZUGAMIND_REACH_SEARCH_TIME_RANGE", "")
+    agent_reach._fetch_tavily_results("q")
+    assert "time_range" not in captured["body"]

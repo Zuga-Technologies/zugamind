@@ -63,6 +63,30 @@ Configuration (env):
                                 insensitive. If set, relevance scores higher
                                 for hits and lower for misses; if unset,
                                 every trigger gets a neutral 0.5 relevance.
+                                Search results are scored on the keywords
+                                the query did NOT already contain — see
+                                _keyword_relevance.
+    ZUGAMIND_REACH_SEARCH_TIME_RANGE
+                                Tavily backend only: the publish/update
+                                window results are restricted to —
+                                day | week | month | year. Default "week".
+                                Set to "" for no window. A standing query
+                                is asking "what is NEW", and Tavily returns
+                                no publish dates, so a result's age cannot
+                                be corrected after the fact — the request
+                                window IS the freshness evidence. Exa does
+                                report `publishedDate`, and that is scored
+                                as urgency (see _search_urgency).
+
+Search scoring, and why it is not the constants it used to be: a search
+result's relevance was the keyword count over title+snippet, and its
+urgency a flat 0.2. Both were constants for the channel — every top-5 hit
+for "open source AI agent ..." contains "open source" and "agent" by
+construction, and a flat urgency prices a post from four months ago as
+today's. Each bought a real session (2026-08-22, an evergreen repo newly
+in the top-5; 2026-08-28, a dev.to post from 2026-04-25 whose repo had
+been dormant since June). A trigger's numbers have to be able to vary per
+fire, or the scanner is asserting, not scoring.
 
 Dedupe: web_watch keys off a per-URL content hash plus the per-URL line-set
 that hash summarizes, both persisted to disk; search
@@ -93,6 +117,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -137,12 +162,26 @@ def _csv_env(name: str) -> list[str]:
     return [v.strip() for v in os.environ.get(name, "").split(",") if v.strip()]
 
 
-def _keyword_relevance(text: str) -> float:
+def _keyword_relevance(text: str, exclude: str = "") -> float:
     """Deterministic relevance from the optional keyword list (no LLM,
-    no network) — same shape as every other scanner in this directory."""
+    no network) — same shape as every other scanner in this directory.
+
+    `exclude`: text whose own words must not count as evidence. The search
+    channel passes the query: a result for "open source AI agent cognition
+    attention" contains "open source" and "agent" BY CONSTRUCTION, so
+    counting them pinned every top-5 hit at the 0.9 ceiling (0.25 + 0.4*0.9
+    + 0.2*0.2 = 0.65 against a 0.570 floor) and bought two real sessions
+    (2026-08-22, 2026-08-28). A keyword the query already contains is not
+    something the result revealed; only the keywords it was NOT asked for
+    can vary from one hit to the next. With every keyword excluded the
+    answer is "no hits" (0.2), not the unconfigured neutral 0.5 — the list
+    was set, and nothing outside the query matched."""
     keywords = _csv_env("ZUGAMIND_REACH_KEYWORDS")
     if not keywords:
         return 0.5
+    if exclude:
+        ex = exclude.lower()
+        keywords = [k for k in keywords if k.lower() not in ex]
     hits = sum(1 for k in keywords if k.lower() in text.lower())
     return min(0.9, 0.3 + 0.2 * hits) if hits else 0.2
 
@@ -208,6 +247,52 @@ def _fetch_jina(url: str) -> str | None:
 
 # ------------------------------------------------------------------- search --
 
+_SEARCH_FRESH_HOURS = 24        # published inside this window scores full urgency
+_SEARCH_STALE_HOURS = 72        # published beyond this scores zero — an old page, not news
+_SEARCH_URGENCY_FRESH = 0.25
+_SEARCH_URGENCY_UNDATED = 0.1   # no publish date at all: the backend could not vouch for freshness
+_DEFAULT_SEARCH_TIME_RANGE = "week"
+
+
+def _search_time_range() -> str:
+    """Publish/update window asked of the Tavily backend ("" = no window)."""
+    return os.environ.get("ZUGAMIND_REACH_SEARCH_TIME_RANGE", _DEFAULT_SEARCH_TIME_RANGE).strip()
+
+
+def _parse_published(value: Any) -> float | None:
+    """ISO-8601 publish stamp (Exa's `publishedDate`) -> epoch seconds, or
+    None when the backend sent nothing parseable. A naive stamp is read as
+    UTC."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _search_urgency(published: float | None, now: float) -> float:
+    """Urgency is publish age, not a constant. Same ramp as the package's
+    ai_labs scanner (full inside 24h, linear to zero at 72h) — but an
+    UNDATED result fails LOW, not open. ai_labs fails open because a
+    curated feed that stops exposing dates must not go silent; a search
+    engine's top-5 for a standing query is an evergreen answer set by
+    nature, so "no date" there means "could be any age", and the flat 0.2
+    this replaces let a 2026-04-25 post bid as if it were today's."""
+    if published is None:
+        return _SEARCH_URGENCY_UNDATED
+    age_h = max(0.0, (now - published) / 3600.0)
+    if age_h <= _SEARCH_FRESH_HOURS:
+        return _SEARCH_URGENCY_FRESH
+    if age_h >= _SEARCH_STALE_HOURS:
+        return 0.0
+    span = _SEARCH_STALE_HOURS - _SEARCH_FRESH_HOURS
+    return round(_SEARCH_URGENCY_FRESH * (1.0 - (age_h - _SEARCH_FRESH_HOURS) / span), 4)
+
+
 def _mcporter_available() -> bool:
     return shutil.which("mcporter") is not None
 
@@ -239,10 +324,20 @@ def _fetch_tavily_results(query: str) -> list[dict[str, Any]]:
     if not api_key:
         return []
     try:
-        payload = json.dumps({
+        body: dict[str, Any] = {
             "api_key": api_key, "query": query,
             "max_results": 5, "search_depth": "basic",
-        }).encode("utf-8")
+        }
+        # Freshness is asked for at request time because Tavily's results
+        # carry no publish date to score afterwards (verified live
+        # 2026-08-28: fields are title/url/content/score/raw_content/id).
+        # Without the window the standing query's top-5 was an evergreen
+        # set; with "week" the same query returned five different, dated-
+        # this-week pages.
+        window = _search_time_range()
+        if window:
+            body["time_range"] = window
+        payload = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             "https://api.tavily.com/search", data=payload,
             headers={"Content-Type": "application/json"}, method="POST",
@@ -362,8 +457,12 @@ def scan_agent_reach() -> list[dict[str, Any]]:
                     "type": "reach_search_result",
                     "detail": f"[{query}] {title} -- {url}"[:280],
                     "novelty": 0.6,
-                    "relevance": _keyword_relevance(f"{title} {r.get('text', '')}"),
-                    "urgency": 0.2,
+                    # Scored on the keywords the query did NOT already
+                    # contain — the ones a result could actually reveal.
+                    "relevance": _keyword_relevance(f"{title} {r.get('text', '')}", exclude=query),
+                    # Publish age when the backend reports one (Exa's
+                    # `publishedDate`), low when it does not (Tavily).
+                    "urgency": _search_urgency(_parse_published(r.get("publishedDate")), now),
                     "url": url,
                     "query": query,
                 }))
