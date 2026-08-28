@@ -55,6 +55,12 @@ not in feed order: a feed's top slot is often a pinned or featured item,
 and with a hard per-sweep cap a pinned block would otherwise crowd today's
 story out. Items past the cap are left unstamped and fire on a later sweep.
 
+Polling is conditional (2026-08-28): past the cache TTL each feed is
+re-fetched with If-None-Match / If-Modified-Since from its last 200 (kept
+per URL under "feeds" in the fetch cache), so an unchanged feed answers
+304 with no body and its parsed items are reused. Most outlets honor
+this; the ones that don't just answer 200 as before.
+
 Stdlib only (urllib.request, xml.etree.ElementTree). Fail-silent per
 scanner contract — one broken feed URL does not sink the others.
 """
@@ -68,6 +74,7 @@ import logging
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -151,24 +158,50 @@ def _save_seen(path: Path, seen: dict[str, float], now: float) -> None:
     _save_json(path, kept)
 
 
-def _fetch(url: str) -> bytes | None:
-    """Raw bytes, deliberately not pre-decoded — _parse_feed hands them to
+def _fetch(url: str, validators: dict[str, str] | None = None,
+           ) -> tuple[str, bytes | None, dict[str, str]]:
+    """Conditional GET. Returns (status, body, validators):
+
+        ("ok", bytes, {"etag": ..., "last_modified": ...})  fresh body
+        ("not_modified", None, {})                           304: reuse cached items
+        ("failed", None, {})                                 any error / oversize
+
+    `validators` are the ETag / Last-Modified the server sent with this URL's
+    last 200; they go back as If-None-Match / If-Modified-Since, and a feed
+    that has not changed answers 304 with no body — the polite way to poll a
+    feed every few minutes. A server that ignores them answers 200 as before.
+
+    Raw bytes, deliberately not pre-decoded — _parse_feed hands them to
     ElementTree as-is so expat can honor whatever encoding the feed's own XML
     declaration claims. A blind .decode("utf-8") here would silently mangle
     or drop text on a feed whose HTTP Content-Type charset lies (or is just
     absent), which is common enough in the wild not to assume UTF-8 upfront.
     """
+    headers = {"User-Agent": "ZugaMind/example-scanner"}
+    if validators:
+        if validators.get("etag"):
+            headers["If-None-Match"] = validators["etag"]
+        if validators.get("last_modified"):
+            headers["If-Modified-Since"] = validators["last_modified"]
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "ZugaMind/example-scanner"})
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
             data = resp.read(_MAX_FEED_BYTES + 1)
+            new_validators = {k: v for k, v in (("etag", resp.headers.get("ETag")),
+                                                ("last_modified", resp.headers.get("Last-Modified")))
+                              if v}
         if len(data) > _MAX_FEED_BYTES:
             logger.debug("news_rss fetch %s exceeded %d bytes, skipping", url, _MAX_FEED_BYTES)
-            return None
-        return data
+            return ("failed", None, {})
+        return ("ok", data, new_validators)
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return ("not_modified", None, {})
+        logger.debug("news_rss fetch %s failed: %s", url, e)
+        return ("failed", None, {})
     except Exception as e:
         logger.debug("news_rss fetch %s failed: %s", url, e)
-        return None
+        return ("failed", None, {})
 
 
 def _parse_date(value: str) -> float | None:
@@ -282,13 +315,26 @@ def scan_news_rss() -> list[dict[str, Any]]:
         fetch_cache = {"ts": 0, "items": []}  # unexpected on-disk shape -- never crash on it, just re-fetch
     fetched_now = False
     if time.time() - fetch_cache.get("ts", 0) > ttl:
-        items: list[dict[str, str]] = []
+        # Per-URL validators + parsed items from the last successful fetch live
+        # under "feeds": a feed that answers 304 costs no body and keeps its
+        # items. A legacy cache (no "feeds") just means one unconditional
+        # fetch this cycle. Validators are only sent when there are cached
+        # items to fall back on — a 304 with nothing to reuse would be a hole.
+        prev = fetch_cache.get("feeds") if isinstance(fetch_cache.get("feeds"), dict) else {}
+        feeds: dict[str, dict[str, Any]] = {}
+        items: list[dict[str, Any]] = []
         for url in feed_urls:
-            raw = _fetch(url)
-            if not raw:
+            old = prev.get(url) if isinstance(prev.get(url), dict) else None
+            reusable = old if old and isinstance(old.get("items"), list) else None
+            status, raw, new_validators = _fetch(url, reusable.get("validators") if reusable else None)
+            if status == "not_modified" and reusable:
+                feeds[url] = reusable
+            elif status == "ok" and raw:
+                feeds[url] = {"validators": new_validators, "items": _parse_feed(raw, url)}
+            else:
                 continue
-            items.extend(_parse_feed(raw, url))
-        fetch_cache = {"ts": time.time(), "items": items}
+            items.extend(feeds[url]["items"])
+        fetch_cache = {"ts": time.time(), "items": items, "feeds": feeds}
         _save_json(_FETCH_CACHE_FILE, fetch_cache)
         fetched_now = True
 

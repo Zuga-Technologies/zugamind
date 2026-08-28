@@ -12,7 +12,10 @@ eight separate times over twelve days and bought a harness wake:
 1. DEDUPE IS PER-ITEM AND PERSISTENT (`ai_labs_seen.json`), the same "seen
    link" shape the sibling example scanners use. The 30-minute `_CACHE_TTL`
    is a FETCH cache, not a dedupe — it only limits how often we hit the
-   network. Engine-level habituation (`HABITUATION_HOURS`, default 6) is a
+   network — and past the TTL each feed is re-fetched CONDITIONALLY
+   (If-None-Match / If-Modified-Since from its last 200, kept per URL
+   under `feeds` in the cache file), so an unchanged feed answers 304
+   with no body and its parsed items are reused. Engine-level habituation (`HABITUATION_HOURS`, default 6) is a
    rate limiter, not a dedupe either: without a seen-set, a post that stays
    at the top of a feed re-fires every 6 hours forever. On a cold start the
    seen-set is baselined SILENTLY (whole feed marked seen, zero triggers) so
@@ -168,6 +171,7 @@ import logging
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -229,13 +233,16 @@ _FEEDS = [
 _NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 
-def _read_cache() -> dict[str, Any] | None:
+def _read_cache(ignore_ttl: bool = False) -> dict[str, Any] | None:
+    """The fetch cache, or None past `_CACHE_TTL`. `ignore_ttl=True` returns
+    a stale cache too — the refetch path needs its per-URL validators and
+    items so an unchanged feed can answer 304 and be reused."""
     try:
         path = _cache_file()
         if not path.exists():
             return None
         d = json.loads(path.read_text())
-        if time.time() - d.get("ts", 0) > _CACHE_TTL:
+        if not ignore_ttl and time.time() - d.get("ts", 0) > _CACHE_TTL:
             return None
         return d
     except Exception:
@@ -477,14 +484,35 @@ def _urgency_for(published: float | None, now: float) -> float:
     return round(0.25 * (1.0 - (age_h - _FRESH_HOURS) / span), 4)
 
 
-def _fetch(url: str) -> str | None:
+def _fetch(url: str, validators: dict[str, str] | None = None,
+           ) -> tuple[str, str | None, dict[str, str]]:
+    """Conditional GET — ("ok", text, validators) / ("not_modified", None, {})
+    / ("failed", None, {}). `validators` are the ETag / Last-Modified from
+    this URL's last 200; sent back as If-None-Match / If-Modified-Since so an
+    unchanged feed answers 304 with no body. Servers that ignore them answer
+    200 as before."""
+    headers = {"User-Agent": "ZugaMind/scanner"}
+    if validators:
+        if validators.get("etag"):
+            headers["If-None-Match"] = validators["etag"]
+        if validators.get("last_modified"):
+            headers["If-Modified-Since"] = validators["last_modified"]
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "ZugaMind/scanner"})
+        req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return resp.read().decode("utf-8", errors="ignore")
+            text = resp.read().decode("utf-8", errors="ignore")
+            new_validators = {k: v for k, v in (("etag", resp.headers.get("ETag")),
+                                                ("last_modified", resp.headers.get("Last-Modified")))
+                              if v}
+        return ("ok", text, new_validators)
+    except urllib.error.HTTPError as e:
+        if e.code == 304:
+            return ("not_modified", None, {})
+        logger.debug("ai_labs fetch %s failed: %s", url, e)
+        return ("failed", None, {})
     except Exception as e:
         logger.debug("ai_labs fetch %s failed: %s", url, e)
-        return None
+        return ("failed", None, {})
 
 
 def _parse_feed(xml_text: str, lab: str) -> list[dict[str, str]]:
@@ -585,18 +613,32 @@ def scan_ai_labs() -> list[dict[str, Any]]:
     if cached and "items" in cached:
         items = cached["items"]
     else:
+        # Past the TTL: refetch each feed CONDITIONALLY. "feeds" in the stale
+        # cache holds each URL's validators + parsed items from its last 200;
+        # a 304 reuses them. Validators are only sent when there are items to
+        # fall back on. A legacy cache (no "feeds") = one unconditional fetch.
+        stale = _read_cache(ignore_ttl=True) or {}
+        prev = stale.get("feeds") if isinstance(stale.get("feeds"), dict) else {}
+        feeds: dict[str, dict[str, Any]] = {}
         items = []
         for lab, url, fmt in _FEEDS:
-            txt = _fetch(url)
-            if not txt:
-                continue
-            if fmt == "anthropic_html":
-                items.extend(_parse_anthropic_html(txt, lab))
-            elif fmt == "hf_json":
-                items.extend(_parse_hf_json(txt))
+            old = prev.get(url) if isinstance(prev.get(url), dict) else None
+            reusable = old if old and isinstance(old.get("items"), list) else None
+            status, txt, new_validators = _fetch(url, reusable.get("validators") if reusable else None)
+            if status == "not_modified" and reusable:
+                feeds[url] = reusable
+            elif status == "ok" and txt:
+                if fmt == "anthropic_html":
+                    parsed = _parse_anthropic_html(txt, lab)
+                elif fmt == "hf_json":
+                    parsed = _parse_hf_json(txt)
+                else:
+                    parsed = _parse_feed(txt, lab)
+                feeds[url] = {"validators": new_validators, "items": parsed}
             else:
-                items.extend(_parse_feed(txt, lab))
-        _write_cache({"ts": time.time(), "items": items})
+                continue
+            items.extend(feeds[url]["items"])
+        _write_cache({"ts": time.time(), "items": items, "feeds": feeds})
 
     if not items:
         return []  # every feed down: stay cold rather than baseline an empty sweep

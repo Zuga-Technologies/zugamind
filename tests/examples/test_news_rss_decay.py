@@ -87,7 +87,7 @@ def scanner(tmp_path, monkeypatch):
     monkeypatch.setenv("ZUGAMIND_NEWS_CACHE_TTL", "-1")  # re-fetch every call
     monkeypatch.delenv("ZUGAMIND_NEWS_KEYWORDS", raising=False)
     state = {"items": []}
-    monkeypatch.setattr(news_rss, "_fetch", lambda url: _feed(state["items"]))
+    monkeypatch.setattr(news_rss, "_fetch", lambda url, validators=None: ("ok", _feed(state["items"]), {}))
 
     def run(items):
         state["items"] = items
