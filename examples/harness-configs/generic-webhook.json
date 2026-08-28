@@ -1,10 +1,11 @@
 [
   {
     "name": "generic-webhook",
-    "_comment": "Fallback for any harness/automation reachable over HTTP instead of a local CLI — POSTs the raw briefing text as the request body. Replace the URL with your own endpoint before enabling.",
-    "command": ["curl", "-s", "-X", "POST", "-d", "@{briefing_file}", "https://example.invalid/wake"],
+    "_comment": "Fallback for any harness/automation reachable over HTTP instead of a local CLI — POSTs the briefing verbatim as the request body. Corrected 2026-08-28 against curl's own docs: -d strips carriage returns and newlines from @file data (the 'raw briefing' arrived as one mangled line) — --data-binary posts it byte-for-byte; and bare -s exits 0 even on HTTP 500 while the engine judges a wake purely by exit code, so a dead endpoint was journaled as a SUCCESSFUL wake — --fail-with-body exits 22 on any >=400 response (response body still captured; -S keeps curl's own error text on stderr). Explicit Content-Type replaces curl's misleading application/x-www-form-urlencoded default. --connect-timeout/--max-time fail fast inside the engine's 60s kill window; --retry 2 covers transient errors and HTTP 5xx only (4xx is not retried — a malformed request won't fix itself). Replace the URL before enabling — example.invalid is RFC-2606-reserved and guaranteed never to resolve, so copying this file can never accidentally POST anywhere real. Especially for THIS config, set wake_modules/wake_min_salience before enabling (see examples/harness-configs/README.md): every unfiltered wake sends the full briefing to an external URL, which makes it the highest-exposure config in this folder.",
+    "command": ["curl", "-sS", "--fail-with-body", "--connect-timeout", "10", "--max-time", "45", "--retry", "2", "-H", "Content-Type: text/plain; charset=utf-8", "--data-binary", "@{briefing_file}", "https://example.invalid/wake"],
     "timeout_sec": 60,
     "max_per_hour": 4,
+    "max_per_day": 20,
     "enabled": false
   }
 ]

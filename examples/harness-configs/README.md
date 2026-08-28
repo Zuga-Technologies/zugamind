@@ -14,6 +14,14 @@ the real harness binary, and the woken agent read the briefing and echoed
 the canary token back. Run the same proof against your own setup:
 `python scripts/verify_harness.py`.
 
+**2026-08-28 audit:** every config was re-checked against current vendor
+docs and the engine contract (paired research + code review per file).
+The `command` arrays for claude-code, codex, hermes, and generic-webhook
+changed as a result — each file's `_comment` says exactly what and why.
+Those changes are **doc-verified, not re-run end-to-end**: the 2026-07-08
+canary run has not been repeated since. If you copy one, run
+`verify_harness.py` against your own setup — that's what it's for.
+
 | File | Harness | Status |
 |---|---|---|
 | `claude-code.json` | [Claude Code](https://claude.com/claude-code) 2.1.204 (`claude -p ...`) | **Verified end-to-end** (Windows) |

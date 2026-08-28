@@ -1,11 +1,13 @@
 [
   {
     "name": "claude-code",
-    "_comment": "VERIFIED 2026-07-08 against Claude Code 2.1.204 (Windows) via scripts/verify_harness.py — the woken agent read the briefing and echoed the canary token. -p runs a single non-interactive prompt and exits. We do NOT pass --dangerously-skip-permissions here: a wake-triggered invocation should still go through your normal permission prompts / project settings unless you've deliberately configured otherwise. The prompt just points the harness at the briefing file rather than embedding briefing content directly, so the harness reads it with full file-reading tooling. Ships enabled:false like every config in this folder — copying a file is never enough to hand an agent a live wake path; flipping this to true is always an explicit act. Consider also setting wake_modules/wake_min_salience so it only wakes for the winners you care about (see examples/harness-configs/README.md). Briefings are written to zugamind/data/briefings/ (not the system temp dir) so the -p sandbox, which refuses reads outside the working directory, can read them — run the daemon from the repo root, or set ZUGAMIND_BRIEFING_DIR to a directory your harness may read.",
+    "_comment": "VERIFIED end-to-end 2026-07-08 against Claude Code 2.1.204 (Windows) via scripts/verify_harness.py — the woken agent read the briefing and echoed the canary token. Flags re-checked 2026-08-28 against current docs + the local CLI (2.1.250 era); not re-run end-to-end since. -p runs a single non-interactive prompt and exits. Permission posture: -p starts in Manual mode with NO prompt to fall back to, so any tool call needing approval silently fails — --allowedTools \"Read\" pre-approves file reads tool-wide, which also lets the briefing be read wherever it lands (reads outside the working directory otherwise need an approval a headless run can't grant; that's permission scoping, not the Bash-sandbox feature). Alternatives by taste: --add-dir <briefing dir>, --permission-mode dontAsk with an exact allowlist, or --restricted (v2.1.248+) on shared machines. We still do NOT pass --dangerously-skip-permissions: a wake-triggered invocation should go through your normal permission rules unless you've deliberately configured otherwise. Briefings are written to zugamind/data/briefings/ (not the system temp dir); override with ZUGAMIND_BRIEFING_DIR. Set wake_modules/wake_min_salience before running unattended (see examples/harness-configs/README.md) — without a filter this harness wakes for every gated winner. Ships enabled:false like every config in this folder; flipping it to true is always an explicit act.",
     "command": [
       "claude",
       "-p",
-      "Read the briefing at {briefing_file} and act on it"
+      "Read the briefing at {briefing_file} and act on it",
+      "--allowedTools",
+      "Read"
     ],
     "timeout_sec": 300,
     "max_per_hour": 4,
