@@ -36,6 +36,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from scanners.seen_items import atomic_write_text
+
 logger = logging.getLogger("zugamind.scanners.github_repo_events")
 
 _REPO_API = "https://api.github.com/repos/{repo}"
@@ -160,10 +162,7 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     try:
-        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _CACHE_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(cache), "utf-8")
-        tmp.replace(_CACHE_FILE)
+        atomic_write_text(_CACHE_FILE, json.dumps(cache))
     except Exception as e:
         logger.debug("repo_events cache save failed (non-fatal): %s", e)
 

@@ -29,6 +29,8 @@ from typing import Any
 import urllib.request
 import json as _json
 
+from scanners.seen_items import atomic_write_text
+
 logger = logging.getLogger("zugamind.scanners.hackernews")
 
 _TOP_URL = "https://hacker-news.firebaseio.com/v0/topstories.json"
@@ -94,10 +96,7 @@ def _load_cache() -> dict:
 
 def _save_cache(cache: dict) -> None:
     try:
-        _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _CACHE_PATH.with_suffix(".json.tmp")
-        tmp.write_text(_json.dumps(cache), "utf-8")
-        tmp.replace(_CACHE_PATH)
+        atomic_write_text(_CACHE_PATH, _json.dumps(cache))
     except Exception as e:  # persistence best-effort — never break the cycle
         logger.debug("hn cache save failed (non-fatal): %s", e)
 

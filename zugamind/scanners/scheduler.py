@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from scanners.seen_items import atomic_write_text
+
 logger = logging.getLogger("zugamind.scanners.scheduler")
 
 # Rolling window (in polls) over which yield_rate is computed.
@@ -105,10 +107,7 @@ def _load_ledger() -> _Ledger:
 
 def _save_ledger(ledger: _Ledger) -> None:
     try:
-        _LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _LEDGER_PATH.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(ledger.to_json(), indent=2), "utf-8")
-        tmp.replace(_LEDGER_PATH)
+        atomic_write_text(_LEDGER_PATH, json.dumps(ledger.to_json(), indent=2))
     except Exception as e:  # persistence is best-effort; never break the cycle
         logger.debug("source ledger save failed (non-fatal): %s", e)
 

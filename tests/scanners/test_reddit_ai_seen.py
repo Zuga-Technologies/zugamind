@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -114,3 +115,44 @@ def test_write_creates_missing_parent_directory(tmp_path):
     path = tmp_path / "deep" / "nested" / "seen.json"
     seen_items.write_seen(path, {"k": time.time()}, max_keys=10)
     assert path.exists()
+
+
+def test_write_is_atomic_and_leaves_no_temp_litter(tmp_path):
+    path = tmp_path / "seen.json"
+    seen_items.write_seen(path, {"k": time.time()}, max_keys=10)
+    assert json.loads(path.read_text()) .keys() == {"k"}
+    assert [p.name for p in tmp_path.iterdir()] == ["seen.json"]
+
+
+def test_crash_before_replace_keeps_old_file_and_cleans_temp(tmp_path, monkeypatch):
+    """A kill mid-write must leave the PREVIOUS seen-set intact — a torn file
+    reads as a cold start, and a cold start re-baselines the whole feed."""
+    path = tmp_path / "seen.json"
+    seen_items.write_seen(path, {"old": 1.0}, max_keys=10)
+
+    def boom(src, dst):
+        raise OSError("simulated crash between write and replace")
+    monkeypatch.setattr(seen_items.os, "replace", boom)
+
+    seen_items.write_seen(path, {"new": 2.0}, max_keys=10)  # swallowed, logged
+    assert json.loads(path.read_text()) == {"old": 1.0}
+    assert [p.name for p in tmp_path.iterdir()] == ["seen.json"]
+
+
+def test_two_writers_never_share_a_temp_name(tmp_path, monkeypatch):
+    """Two processes do write the same scanner file on a deployment (daemon +
+    hand-run sweep). A fixed `<name>.tmp` lets writer B truncate writer A's
+    temp mid-write; unique temps mean both land and the last replace wins."""
+    path = tmp_path / "seen.json"
+    names = []
+    real_replace = seen_items.os.replace
+
+    def spy(src, dst):
+        names.append(Path(src).name)
+        real_replace(src, dst)
+    monkeypatch.setattr(seen_items.os, "replace", spy)
+
+    seen_items.atomic_write_text(path, "a")
+    seen_items.atomic_write_text(path, "b")
+    assert path.read_text() == "b"
+    assert len(set(names)) == 2, names
