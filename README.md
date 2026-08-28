@@ -283,7 +283,9 @@ Equal detection at 43% fewer model invocations — in cron's best case (a
 lazy 4-hour tick; the cadence sweep is [EXP-002](docs/experiments/)). The
 experiment also caught three real pipeline bugs, fixed same-day (#8, #9).
 Design, predictions-as-committed, results, and raw JSONL:
-[docs/experiments/](docs/experiments/). Replay it:
+[docs/experiments/](docs/experiments/) — the post-fix row above is
+[exp-001-acceptance.md](docs/experiments/exp-001-acceptance.md); the
+pre-fix measured runs (0.94) are [exp-001-results.md](docs/experiments/exp-001-results.md). Replay it:
 `python scripts/run_exp001.py --smoke` (hermetic, no keys, $0).
 
 ## Safety design

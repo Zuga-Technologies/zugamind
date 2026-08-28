@@ -1,6 +1,13 @@
 # EXP-005 — Value of wakes: does waking the model produce real work?
 
-**Status:** DESIGNED, observational window opens at this commit. Predictions
+**Status (updated 2026-08-28): window closed 2026-07-20, UNSCORED.** The
+scoring pass this design promises ("publishes within 2 days, either way")
+was never run; no result exists and nothing below may be cited as
+evidence. The inputs (git and issue history for 2026-07-13 → 07-20) still
+exist, so it can still be scored late — with the lateness disclosed — or
+it stays a pre-registration with no result.
+
+**Original status:** DESIGNED, observational window opens at this commit. Predictions
 pre-registered in [exp-005-predictions.md](exp-005-predictions.md) before any
 scoring.
 

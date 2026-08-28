@@ -9,8 +9,13 @@ seeds as the measured Tier-1 runs), gate on the local tier
 | stage | recall (5 runs) | precision | false acts | wakes/run | TTD mean |
 |---|---|---|---|---|---|
 | baseline (pre-fix Tier-1) | 0.94 | 1.00 | 0 | 24.0 | 0.34 |
-| alarm lane + briefing enumeration only | 0.92 | 1.00 | 0 | 24.0 | 0.13 |
+| alarm lane + briefing enumeration only † | 0.92 | 1.00 | 0 | 24.0 | 0.13 |
 | + critical digest | **0.98** | 1.00 | 0 | 23.8 | **0.10** |
+
+† Intermediate stage. Its raw runs were not preserved in `experiments/`
+(only the baseline `exp001-tier1/` and the final `exp001-accept-A/` are);
+these five numbers come from the commit history and are not independently
+reproducible from this repo.
 
 Reference: cron (conditions B/C) scored 0.98 recall at 42 invocations/run.
 

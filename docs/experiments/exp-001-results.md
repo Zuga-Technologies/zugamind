@@ -1,7 +1,7 @@
 # EXP-001 — Results (Tier 1, N=5, claude-sonnet-5)
 
-**Run:** 2026-07-11, BugaPC. 15 measured runs (5 per condition), ~630 model
-calls, harness config `scripts/exp001_claude_config.json` (model pinned to
+**Run:** 2026-07-11, BugaPC. 15 measured runs (5 per condition), 630 simulated ticks
+(540 model calls: A 120, B 210, C 210), harness config `scripts/exp001_claude_config.json` (model pinned to
 claude-sonnet-5; all prompts in the repo). Corpus: 224 real background events
 + 10 canaries (see design doc calibration notes 3-4 for the two documented
 pre-run amendments). Predictions were committed before any measured run in
@@ -10,6 +10,10 @@ unchanged — including the ones we got wrong.
 
 Raw per-run JSONL and per-run engine journals: `experiments/exp001-tier1/` in this repo.
 Sparse-corpus pilot (which caught the density shortfall): `experiments/exp001-pilot-clean/`.
+Pre-flight of the amended 224-event corpus (same 1-run-per-condition pilot, re-run
+38 minutes before the measured runs; not a measurement): `experiments/exp001-pilot-dense/`.
+
+**Run-isolation note (added 2026-08-28).** Runs within a series were launched in one process, and until harness commit 3ff048c two pieces of engine state carried from run k into run k+1 (the priority-goals staleness file and the source-scheduler ledger), so run 0 of each condition-A series started cold and later runs warm. The per-run numbers are unchanged; in this series run 0 sits inside the range of runs 1–4 (A: 24, 24, 22, 24, 26). This is disclosed as a confound, not corrected. The harness now isolates all per-run state.
 
 ## Headline results
 
@@ -27,7 +31,7 @@ construction at tick granularity; predicted in P5).
 | # | prediction | verdict |
 |---|---|---|
 | P1 | A recall ≥ 0.9; B/C ≤ 0.8 | **HALF-FAILED** — A 0.94 ✓, but cron did not degrade (0.98). At ≤11 items/tick, in-context triage is easy. |
-| P2 | precision ≥ 0.95 everywhere; won't separate conditions | **HELD** — 1.00 across 630 calls, zero false ACTs. |
+| P2 | precision ≥ 0.95 everywhere; won't separate conditions | **HELD** — 1.00 across 540 calls, zero false ACTs. |
 | P3 | A tokens ≤ 0.1 × B | **FAILED as written** — measured on prompt characters, A sent ~1.9× more (4KB briefings vs small dumps). See post-hoc note below. |
 | P4 | B degrades at >15 items in context | **UNTESTABLE** — max items in any tick was 11. The corpus (even at design spec) never produces the load H3 needs. |
 | P5 | A TTD ≤ 1 tick; cron 0 by construction | **HELD** — A mean 0.34. |

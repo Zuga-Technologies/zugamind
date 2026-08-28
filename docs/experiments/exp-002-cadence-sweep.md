@@ -123,6 +123,7 @@ fail.
 
 Design published 2026-07-11 (same session as the EXP-001 N=5×3 final
 readout and the J-space paper mechanism-map work). Harness reuses
-`scripts/run_exp001.py` with a new `--tick-interval` parameter — no new
+`scripts/run_exp001.py` with a new `--tick-hours` parameter (this draft called it
+`--tick-interval`; `--tick-hours` is the flag that shipped) — no new
 pipeline code needed beyond that, since A/B/C selection and scoring are
 already cadence-agnostic. Pre-registration next, before any run.

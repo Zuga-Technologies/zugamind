@@ -10,6 +10,8 @@ headline is a loss: our steelmanned rival ties the workspace on every
 detection metric and does it on roughly a third of the wakes.** Per the
 pre-registration, that publishes.
 
+**Run-isolation note (added 2026-08-28).** Runs within a series were launched in one process, and until harness commit 3ff048c two pieces of engine state carried from run k into run k+1 (the priority-goals staleness file and the source-scheduler ledger), so run 0 of each condition-A series started cold and later runs warm. The per-run numbers are unchanged; across the A series run 0 is lower at 2 sources (11 vs 21/14) and higher at 4/8/12 — no consistent direction. This is disclosed as a confound, not corrected. The harness now isolates all per-run state.
+
 **Pre-registration integrity disclosure:** the design and predictions
 documents were authored 2026-07-12, before any EXP-004 harness code — but
 their COMMIT was accidentally omitted from that evening's path-limited
@@ -58,7 +60,7 @@ the tested range. Claims beyond S=12 would be extrapolation; none are made.
 | # | prediction | verdict |
 |---|---|---|
 | P1 | detection parity (gap < 10pp) — a pass for gates expected, not a surprise | **HELD** — exact tie, 1.0 everywhere, both conditions, all scales. |
-| P2 | A uses ≥30% FEWER invocations than E at ≥4 sources, gap widening | **FAILED, inverted, decisively** — E uses ~70–80% fewer than A at every scale. The asymmetry we missed: E's thresholds were calibrated per source; A ran on its factory-default wake floor (0.35), tuned to nothing, so it woke for ambient chatter E's tuned gates ignored. Addendum EXP-004t (pre-registered cdbb155, before any harness code) closes the symmetry with ONE calibrated global floor for A. |
+| P2 | A uses ≥30% FEWER invocations than E at ≥4 sources, gap widening | **FAILED, inverted, decisively** — E uses 67–83% fewer than A (83 / 79 / 72 / 67% at 2 / 4 / 8 / 12 sources). The asymmetry we missed: E's thresholds were calibrated per source; A ran on its factory-default wake floor (0.35), tuned to nothing, so it woke for ambient chatter E's tuned gates ignored. Addendum EXP-004t (pre-registered cdbb155, before any harness code) closes the symmetry with ONE calibrated global floor for A. |
 | P3 | at ≤2 sources E matches A within 10% (simplicity wins small) | **FAILED in E's favor** — E didn't match A, it beat A ~5.8× even at 2 sources. |
 | P4 | untuned mid-window newcomer: A catches with zero config; E misses or floods | **HALF-FAILED** — A caught it with zero config as predicted, but E also caught it cleanly: its urgency override (granted by the steelman spec as alarm-lane parity) never even strained. With ground truth that always screams at 0.95 urgency, the override alone guarantees E's recall — see threats. |
 
@@ -101,7 +103,7 @@ harness existed). Same corpora, same seeds, N=3 per cell:
 
 | sources | E wakes (mean, S params) | At wakes (mean, 1 param) | ratio |
 |---|---|---|---|
-| 2 | 2.7 (2–3 knobs) | 4.0 | 1.48× |
+| 2 | 2.7 (2–3 knobs) | 4.0 | 1.50× |
 | 4 | 5.0 (5 knobs) | 5.7 | 1.13× |
 | 8 | 8.7 (9 knobs) | 10.0 | 1.15× |
 | 12 | 13.0 (13 knobs) | **13.3** | **1.03×** |
@@ -112,12 +114,13 @@ the floor by design (this addendum is only safe BECAUSE of EXP-003's fix;
 the experiments compound).
 
 All four pre-registered predictions held: P1 (no detection cost), P2
-(within 1.5× of E everywhere — 1.48× at S=2 sits just inside the band and
-is reported as the near-miss it is), P3 (At never *beats* E — tuned
+(within 1.5× of E everywhere — 1.50× at S=2 sits exactly on the boundary,
+true means 4.00 / 2.67; an earlier draft printed 1.48× by dividing the
+rounded 4.0 / 2.7 — and is reported as the near-miss it is), P3 (At never *beats* E — tuned
 per-source gates remain the theoretical cost floor on this corpus), P4
 (1 parameter vs S parameters, by construction).
 
-Note the direction of the ratio: parity IMPROVES with scale (1.48× → 1.03×).
+Note the direction of the ratio: parity IMPROVES with scale (1.50× → 1.03×).
 One self-calibrated knob buys near-exact cost parity with S hand-tuned
 thresholds precisely where maintaining S thresholds hurts most.
 

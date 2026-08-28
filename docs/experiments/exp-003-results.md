@@ -10,6 +10,8 @@ before any measured run in [exp-003-predictions.md](exp-003-predictions.md)
 and scored below unchanged — all four substantively failed, and the
 pre-registered falsifier clause fires. That is the headline.
 
+**Run-isolation note (added 2026-08-28).** Runs within a series were launched in one process, and until harness commit 3ff048c two pieces of engine state carried from run k into run k+1 (the priority-goals staleness file and the source-scheduler ledger), so run 0 of each condition-A series started cold and later runs warm. The per-run numbers are unchanged; run 0 sits inside the range in both A series (9 of 8–15 pre-fix; 11 of 9–13 post-fix). This is disclosed as a confound, not corrected. The harness now isolates all per-run state.
+
 A first tier-1 attempt (2026-07-11) was invalidated by three operator
 errors and is preserved with a full post-mortem in `experiments/exp003-tier1-invalid/`.
 This valid run also survived a second contamination catch mid-flight: a

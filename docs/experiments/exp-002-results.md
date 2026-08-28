@@ -16,7 +16,13 @@
 > artifacts), and the original post-hoc note 2 ("unexplained wake-count dip,
 > flagged as a threat until understood") is RESOLVED — it was this
 > contamination, exactly as the flag suspected. Raw contaminated runs remain
-> in git history (2bbd6f7) for the record.
+> in git history (2bbd6f7) for the record. Console logs:
+> `experiments/exp002-sweep-run.log` is the ORIGINAL sweep launch and
+> still prints the contaminated fast/very-fast A numbers;
+> `experiments/exp002-rerun-A.log` is the re-measurement. The data
+> folder holds only the corrected runs.
+
+**Run-isolation note (added 2026-08-28).** Runs within a series were launched in one process, and until harness commit 3ff048c two pieces of engine state carried from run k into run k+1 (the priority-goals staleness file and the source-scheduler ledger), so run 0 of each condition-A series started cold and later runs warm. The per-run numbers are unchanged; run 0 is the lowest of its three at fast and very-fast (23 vs 26/25) and inside the range at slow and baseline. This is disclosed as a confound, not corrected. The harness now isolates all per-run state.
 
 **Run:** 2026-07-12, BugaPC. 36 measured runs (3 conditions × 4 cadences × N=3),
 zero failed cells. Instrument: the hermetic oracle harness (deterministic
