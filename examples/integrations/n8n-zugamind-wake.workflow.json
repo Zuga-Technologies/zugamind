@@ -1,0 +1,40 @@
+{
+  "name": "ZugaMind Wake",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zugamind-wake",
+        "options": {}
+      },
+      "name": "ZugaMind Wake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "zugamind-wake"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The envelope posted by examples/integrations/wake_webhook_json.py.\n// n8n puts the POST body under json.body on most webhook configs; handle both.\nconst b = $input.first().json.body ?? $input.first().json;\nreturn [{ json: {\n  ts: b.ts ?? null,\n  module: b.winner?.module ?? null,\n  salience: b.winner?.salience ?? null,\n  thought_type: b.winner?.thought_type ?? null,\n  trigger_count: b.winner?.trigger_count ?? null,\n  briefing: b.briefing ?? \"\"\n}}];"
+      },
+      "name": "Extract Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    }
+  ],
+  "connections": {
+    "ZugaMind Wake": {
+      "main": [
+        [
+          {
+            "node": "Extract Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {}
+}
