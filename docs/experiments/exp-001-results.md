@@ -87,10 +87,18 @@ concrete pipeline fixes above.
 
 - Corpus skew: ~95% of background events are HN stories (disclosed in
   calibration note 4).
-- Corpus-as-run correction: 5 additional real events captured the same
-  morning were present in the corpus file during all measured runs but
-  missed the freeze commit — the corpus as-run is 229 background events,
-  not 224. Committed as-run with this note; canary rows unaffected.
+- Corpus-as-run correction (re-verified 2026-08-28 against the raw logs —
+  the first version of this note was wrong): the 15 Tier-1 runs above ran
+  on the 224-event freeze (`1cc1811`). The capture task was still running
+  and appended 5 more real events AFTER these runs (14:49 UTC) and BEFORE
+  the acceptance runs (20:34 UTC); that 229-event file was committed
+  as-run in `894f552`. Evidence: tick 0 carries no canary by construction,
+  so its trigger count is pure background — it is 3 in all five Tier-1 A
+  runs (224 freeze: 3 rows at tick 0) and 4 in every acceptance and EXP-002
+  run (229: 4 rows). So Tier-1 = 224 background events, the acceptance
+  runs and EXP-002 = 229. Canary rows byte-identical throughout; the
+  0.94 → 0.98 acceptance comparison spans a +5-event (~2%) noise-load
+  difference, disclosed in exp-001-acceptance.md.
 - Single model (claude-sonnet-5) and single harness (claude CLI); Tier 2
   addresses the model axis.
 - N=5 with 10 canaries: recall differences of one canary (0.02) are within

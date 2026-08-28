@@ -34,7 +34,9 @@ exactly that. Recall figures below therefore mean "the pipeline delivered the
 incident to a briefing a perfect reader would catch" — the model-reading step
 was measured separately in EXP-001 at the 4h cadence (0.98 with sonnet).
 
-Corpus: EXP-001's frozen as-run corpus (229 background events + 10 canaries),
+Corpus: EXP-001's frozen as-run corpus (229 background events + 10 canaries —
+five more than the Tier-1 measured runs, which ran on the 224 freeze; see
+the corpus-as-run note in exp-001-results.md),
 re-verified before the sweep — a live capture task was found still appending
 to the file and was disabled; the corpus was restored to the committed as-run
 state (239 rows) before any run. Harness: `run_exp001.py` with timeline

@@ -270,8 +270,10 @@ is the design lineage, not a load-bearing claim.
 
 We pre-registered predictions, ran the comparison against cron baselines
 with a real model, and published every raw run — including the two
-predictions we got wrong. On a frozen corpus of 229 real events + 10
-planted incidents (5 runs per condition, claude-sonnet-5):
+predictions we got wrong. On a frozen corpus of 224 real events + 10
+planted incidents (5 runs per condition, claude-sonnet-5; the post-fix row
+ran on 229 — five real events were appended between the sessions, canaries
+identical, disclosed in exp-001-acceptance.md):
 
 | | recall | precision | false acts | invocations/run |
 |---|---|---|---|---|

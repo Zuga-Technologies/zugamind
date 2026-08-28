@@ -1,7 +1,10 @@
 # EXP-001 — Post-fix acceptance runs (issues #8, #9)
 
-Two acceptance passes of condition A (5 runs each, frozen corpus, same
-seeds as the measured Tier-1 runs), gate on the local tier
+Two acceptance passes of condition A (5 runs each, same seeds as the
+measured Tier-1 runs; corpus: 229 background events — 5 more than Tier-1's
+224, appended by the still-running capture task between the two sessions,
+canary rows byte-identical; see the corpus-as-run note in
+exp-001-results.md), gate on the local tier
 (`ZUGAMIND_WAKE_TIER=local`, qwen2.5:7b-instruct judges the wake — the
 "$0 idle loop"), harness `claude -p` (sonnet pinned). Raw runs:
 `experiments/exp001-accept-A/`.
@@ -17,7 +20,11 @@ seeds as the measured Tier-1 runs), gate on the local tier
 these five numbers come from the commit history and are not independently
 reproducible from this repo.
 
-Reference: cron (conditions B/C) scored 0.98 recall at 42 invocations/run.
+Reference: cron (conditions B/C) scored 0.98 recall at 42 invocations/run
+(Tier-1, on the 224-event corpus — cron was not re-run on the 229-event
+one; a +5-event noise load cannot lower cron's invocation count, which is
+one wake per tick by construction, and its recall is a separate question
+this table does not answer).
 
 ## What the intermediate stage taught
 
