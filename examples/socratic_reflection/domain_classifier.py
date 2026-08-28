@@ -53,8 +53,9 @@ _EXTERNAL_TOKENS = (
     # AI/ML vocabulary
     "chatgpt", "llm", "gpt", "agentic", "copilot",
     "transformer", "hallucination", "prompt", "rag",
-    "embedding", "inference", "fine-tun", "finetun", "vector_db",
-    "machinelearning", "machine learning",
+    "embedding", "inference",
+    "fine-tune", "fine-tuned", "fine-tuning", "finetune", "finetuned", "finetuning",
+    "vector_db", "machinelearning", "machine learning",
     "neural", "diffusion", "reinforcement", "llama", "qwen",
     "deepseek", "perplexity", "cohere", "mlx", "vllm", "ollama",
     "benchmark", "sota", "emergent",
@@ -121,12 +122,18 @@ def _trigger_text(trigger: dict[str, Any]) -> str:
 
 
 def _keyword_score(text: str) -> dict[str, int]:
+    # Word-boundary match, not naive substring: a plain `tok in text` check
+    # lets short tokens fire inside unrelated words ("rag" inside "storage"
+    # or "average", "agi" inside "magic" or "agile", "cognition" inside
+    # "recognition" as in "revenue recognition") and silently mislabels
+    # ordinary operational text. \b still lets deliberate multi-word/
+    # underscored tokens (e.g. "machine learning", "vector_db") match as-is.
     scores = {d: 0 for d in _TOKEN_TABLE}
     if not text:
         return scores
     for domain, tokens in _TOKEN_TABLE.items():
         for tok in tokens:
-            if tok in text:
+            if re.search(rf"\b{re.escape(tok)}\b", text):
                 scores[domain] += 1
     return scores
 
@@ -155,8 +162,9 @@ def _llm_fallback(text: str) -> str | None:
         return None
     if not resp:
         return None
+    resp_text = resp if isinstance(resp, str) else str(resp)
     for d in ("SELF", "OPERATIONAL", "EXTERNAL"):
-        if re.search(rf"\b{d}\b", resp.upper()):
+        if re.search(rf"\b{d}\b", resp_text.upper()):
             return d
     return None
 
@@ -168,6 +176,9 @@ def classify_domain(trigger: dict[str, Any], *, use_llm: bool = True) -> dict[st
     only when keywords return zero or a tie. Set `use_llm=False` for
     deterministic unit tests.
     """
+    if not isinstance(trigger, dict):
+        return {"domain": "OPERATIONAL", "confidence": 0.0, "method": "default"}
+
     lens_domain = _lens_route(trigger)
     if lens_domain is not None:
         return {"domain": lens_domain, "confidence": 0.9, "method": "lens"}

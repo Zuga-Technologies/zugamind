@@ -41,6 +41,21 @@ def test_classify_domain_default_when_no_signal():
     assert result == {"domain": "OPERATIONAL", "confidence": 0.0, "method": "default"}
 
 
+def test_classify_domain_never_raises_on_non_dict():
+    # The docstring promises classify_domain never raises. A non-dict trigger
+    # (None, str, list, int) must degrade to the documented default, not crash.
+    for bad in (None, "a string", ["a", "list"], 42):
+        result = classify_domain(bad, use_llm=False)
+        assert result["domain"] == "OPERATIONAL" and result["method"] == "default"
+
+
+def test_classify_domain_keyword_is_word_bounded():
+    # "storage" must NOT match the EXTERNAL keyword "rag" inside it — naive
+    # substring matching classified pure-ops triggers as EXTERNAL at conf 1.0.
+    result = classify_domain({"text": "storage bill increased this month"}, use_llm=False)
+    assert result["domain"] != "EXTERNAL"
+
+
 # --- question_generator -------------------------------------------------------
 
 def test_generate_question_parses_valid_response():
@@ -113,6 +128,37 @@ def test_answer_question_code_search_no_matches(monkeypatch):
     r = answer_question("what is workspace_winner?", "code_search")
     assert r["success"] is True
     assert r["meta"]["matches"] == 0
+
+
+def test_answer_question_code_search_pattern_after_double_dash(monkeypatch):
+    # Security regression: the search pattern is derived from model output.
+    # A pattern that begins with "-" must never be parsed as a git-grep/grep
+    # OPTION (git grep --open-files-in-pager=<cmd> runs a shell command). Two
+    # layers defend this: re.escape() strips the leading dash's meaning, AND a
+    # "--" option terminator precedes the pattern. We force a hostile keyword
+    # and assert the derived pattern lands only AFTER "--", never before.
+    captured = {}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        captured.setdefault("cmds", []).append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        "examples.socratic_reflection.answer_router._extract_keywords",
+        lambda *a, **k: ["--open-files-in-pager=touch pwned"],
+    )
+    monkeypatch.setattr("examples.socratic_reflection.answer_router.subprocess.run", fake_run)
+    answer_question("anything", "code_search")
+
+    assert captured["cmds"], "no subprocess command was run"
+    for cmd in captured["cmds"]:
+        assert "--" in cmd, f"no option terminator in {cmd}"
+        after = cmd[cmd.index("--") + 1:]
+        before = cmd[:cmd.index("--")]
+        # the pattern (escaped from the hostile keyword) carries "pager"; it
+        # must sit after "--" and nothing derived from it may sit before.
+        assert any("pager" in a for a in after), f"pattern not after '--' in {cmd}"
+        assert not any("pager" in b for b in before), f"pattern leaked before '--' in {cmd}"
 
 
 def test_answer_question_file_read_is_a_stub():

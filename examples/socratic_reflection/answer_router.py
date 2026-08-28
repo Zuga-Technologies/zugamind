@@ -66,10 +66,17 @@ def _answer_via_code_search(question: str) -> dict[str, Any]:
         return {"content": "no extractable keywords", "success": False, "meta": {"keywords": []}}
 
     pattern = "|".join(re.escape(kw) for kw in keywords)
+    # "--" ends option parsing so `pattern` can never be read as a flag (e.g.
+    # git grep's real `--open-files-in-pager=<cmd>` runs an arbitrary shell
+    # command on match — confirmed exploitable in isolation). `_extract_keywords`
+    # already can't produce a leading "-" today, but that's a property of a
+    # sibling module, not a guarantee this file makes itself — keep the
+    # separator so this call stays safe on its own.
     cmds = [
-        ["git", "grep", "-n", "-I", "-E", "--max-count=3", pattern],
-        ["grep", "-rn", "-I", "-E", "--exclude-dir=.git", "--exclude-dir=node_modules",
-         "--exclude-dir=.venv", "--exclude-dir=__pycache__", pattern, "."],
+        ["git", "grep", "-n", "-I", "-E", "--max-count=3", "--", pattern],
+        ["grep", "-rn", "-I", "-E", "--max-count=3", "--exclude-dir=.git",
+         "--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__",
+         "--", pattern, "."],
     ]
     out = ""
     err_msg = ""
@@ -80,7 +87,12 @@ def _answer_via_code_search(question: str) -> dict[str, Any]:
                 out = (proc.stdout or "").strip()
                 break
             err_msg = (proc.stderr or "")[:200]
-        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        except (subprocess.TimeoutExpired, OSError, UnicodeDecodeError) as exc:
+            # OSError covers a missing binary (FileNotFoundError) as well as
+            # one found but not runnable (PermissionError etc.) on either
+            # platform; UnicodeDecodeError covers a matched line that isn't
+            # valid text under the default codec — none of these should ever
+            # crash the reflection cycle, so fall through to the next cmd.
             err_msg = str(exc)
             continue
     else:

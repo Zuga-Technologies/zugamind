@@ -24,6 +24,7 @@ from typing import Any
 logger = logging.getLogger("zugamind.workspace.question_generator")
 
 _VALID_HINTS = ("code_search", "file_read", "none")
+_TEXT_CAP = 300  # bound the returned question the same way siblings bound their text fields
 
 _DOMAIN_GUIDANCE = {
     "SELF": (
@@ -46,19 +47,26 @@ _LEGACY_KEYS = ("kind", "type", "source", "detail", "file", "text", "path")
 
 def _trigger_brief(trigger: dict[str, Any]) -> str:
     """One-line summary the model can chew on without drowning in payload."""
-    parts: list[str] = []
-    for k in _LENS_KEYS + _LEGACY_KEYS:
-        v = trigger.get(k)
-        if isinstance(v, str) and v:
-            parts.append(f"{k}={v[:120]}")
-        elif isinstance(v, (int, float, bool)) and k in _LENS_KEYS:
-            parts.append(f"{k}={v}")
-    return " | ".join(parts) if parts else json.dumps(trigger)[:300]
+    try:
+        parts: list[str] = []
+        for k in _LENS_KEYS + _LEGACY_KEYS:
+            v = trigger.get(k)
+            if isinstance(v, str) and v:
+                parts.append(f"{k}={v[:120]}")
+            elif isinstance(v, (int, float, bool)) and k in _LENS_KEYS:
+                parts.append(f"{k}={v}")
+        return " | ".join(parts) if parts else json.dumps(trigger, default=str)[:300]
+    except Exception as exc:
+        # trigger wasn't a dict, or held something json.dumps chokes on
+        # (datetime, set, custom object) -- a malformed trigger must never
+        # block the reflection cycle.
+        logger.debug("trigger_brief failed: %s", exc)
+        return ""
 
 
 def _parse_response(raw: str) -> dict[str, Any] | None:
     """Best-effort JSON extraction — local models tend to wrap with prose."""
-    if not raw:
+    if not isinstance(raw, str) or not raw:
         return None
     m = re.search(r"\{[^{}]*\}", raw, re.DOTALL) or re.search(r"\{.*\}", raw, re.DOTALL)
     if not m:
@@ -73,7 +81,7 @@ def _parse_response(raw: str) -> dict[str, Any] | None:
         return None
     if hint not in _VALID_HINTS:
         hint = "none"
-    return {"text": text.strip(), "answer_source_hint": hint}
+    return {"text": text.strip()[:_TEXT_CAP], "answer_source_hint": hint}
 
 
 def generate_question(
@@ -93,7 +101,7 @@ def generate_question(
             logger.debug("ollama import failed: %s", exc)
             return None
 
-    dom = (domain or "SELF").upper()
+    dom = str(domain or "SELF").upper()
     guidance = _DOMAIN_GUIDANCE.get(dom, _DOMAIN_GUIDANCE["SELF"])
     brief = _trigger_brief(trigger)
 
