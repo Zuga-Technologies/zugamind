@@ -45,12 +45,23 @@ re-fire the same story every time its URL happened to change. First run
 (no seen-set on disk yet) baselines the current feed contents silently
 instead of announcing a feed's entire back-catalogue as breaking news.
 
+Urgency is publish age, not a constant (ported from scanners/world/
+ai_labs.py, 2026-08-28): full urgency inside _FRESH_HOURS, decaying to
+zero at _STALE_HOURS — a constant urgency makes a year-old item bid
+identically to this morning's. Unknown age (feed exposes no date, or the
+date does not parse) fails OPEN at the fresh value, so a parser regression
+cannot silently make the scanner deaf. New items are emitted NEWEST FIRST,
+not in feed order: a feed's top slot is often a pinned or featured item,
+and with a hard per-sweep cap a pinned block would otherwise crowd today's
+story out. Items past the cap are left unstamped and fire on a later sweep.
+
 Stdlib only (urllib.request, xml.etree.ElementTree). Fail-silent per
 scanner contract — one broken feed URL does not sink the others.
 """
 
 from __future__ import annotations
 
+import email.utils
 import html
 import json
 import logging
@@ -59,6 +70,7 @@ import re
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +79,9 @@ logger = logging.getLogger("zugamind.examples.news_rss")
 _TIMEOUT = 8.0
 _DEFAULT_CACHE_TTL = 600
 _MAX_TRIGGERS = 5
+_URGENCY_FRESH = 0.3  # what every item scored before urgency decayed with age
+_FRESH_HOURS = 24     # published inside this window scores full urgency
+_STALE_HOURS = 72     # published beyond this scores zero — backlog, not news
 _MAX_FEED_BYTES = 3 * 1024 * 1024  # a real RSS/Atom feed is KBs; caps memory/CPU cost of a hostile or runaway response
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
@@ -156,13 +171,50 @@ def _fetch(url: str) -> bytes | None:
         return None
 
 
-def _parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, str]]:
+def _parse_date(value: str) -> float | None:
+    """Epoch seconds from an RFC-822 (RSS <pubDate>) or ISO-8601 (Atom
+    <published>/<updated>) date. None when nothing parses."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:  # RFC 822 — "Tue, 14 Aug 2026 09:00:00 +0000"
+        dt = email.utils.parsedate_to_datetime(value)
+        if dt is not None:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+    except Exception:
+        pass
+    try:  # ISO 8601 — "2026-08-14T09:00:00Z"
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return None
+
+
+def _urgency_for(published: float | None, now: float) -> float:
+    """Urgency is publish age, not a constant. Unknown age fails OPEN at the
+    fresh value: a feed that stops exposing dates must not go silent."""
+    if published is None:
+        return _URGENCY_FRESH
+    age_h = max(0.0, (now - published) / 3600.0)
+    if age_h <= _FRESH_HOURS:
+        return _URGENCY_FRESH
+    if age_h >= _STALE_HOURS:
+        return 0.0
+    span = _STALE_HOURS - _FRESH_HOURS
+    return round(_URGENCY_FRESH * (1.0 - (age_h - _FRESH_HOURS) / span), 4)
+
+
+def _parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, Any]]:
     """Same tag-agnostic RSS/Atom walk as scanners/world/ai_labs.py.
 
     Takes raw bytes, not text — see _fetch's docstring on why decoding is
     left to ElementTree/expat instead of being done upfront.
     """
-    items: list[dict[str, str]] = []
+    items: list[dict[str, Any]] = []
     # RSS/Atom never legitimately declares a DOCTYPE. A hostile feed could use
     # one to define nested internal entities (a "billion laughs" expansion
     # bomb) that blow up CPU/memory during parsing — xml.etree.ElementTree
@@ -181,6 +233,7 @@ def _parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, str]]:
         if tag not in ("item", "entry"):
             continue
         title, link, summary, guid = "", "", "", ""
+        published: float | None = None
         for child in it:
             ctag = child.tag.lower().split("}")[-1]
             txt = (child.text or "").strip()
@@ -192,6 +245,8 @@ def _parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, str]]:
                 summary = html.unescape(re.sub(r"<[^>]+>", "", txt))[:300]
             elif ctag in ("guid", "id"):  # RSS <guid> / Atom <id> — the stable identity, when the feed has one
                 guid = txt
+            elif ctag in ("pubdate", "published", "updated", "date") and published is None:
+                published = _parse_date(txt)
         if title and link:
             items.append({
                 "source": source,
@@ -199,6 +254,7 @@ def _parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, str]]:
                 "link": link,
                 "summary": summary,
                 "guid": guid,
+                "published": published,
             })
         if len(items) >= 10:
             break
@@ -257,7 +313,13 @@ def scan_news_rss() -> list[dict[str, Any]]:
 
     triggers: list[dict[str, Any]] = []
     newly_seen: set[str] = set()
+    candidates: list[tuple[str, str, dict[str, Any]]] = []
 
+    # Pass 1 walks the WHOLE feed: every still-present item gets its stamp
+    # refreshed (the old single loop broke out at the trigger cap, leaving
+    # later items un-refreshed — which is how a still-live item can age past
+    # the TTL and re-fire), filter-rejected items are stamped so they never
+    # fire, and genuinely new items are collected for pass 2.
     for it in cache_items:
         link = it.get("link", "")
         if not link:
@@ -266,14 +328,26 @@ def scan_news_rss() -> list[dict[str, Any]]:
         # Checked against both the preferred id and the bare link so an
         # upgrade in place never re-fires something this scanner already
         # stamped under its link before guid/id extraction existed.
-        is_new = item_id not in seen and link not in seen
-        seen[item_id] = now  # refresh-on-observe: still in the feed -> still seen
-        if not is_new:
+        if item_id in seen or link in seen:
+            seen[item_id] = now  # refresh-on-observe: still in the feed -> still seen
             continue
-        newly_seen.add(item_id)
         text = f"{it.get('title', '')} {it.get('summary', '')}".lower()
         if keywords and not any(kw in text for kw in keywords):
+            seen[item_id] = now  # seen and rejected: bookkeeping only, never fires
+            newly_seen.add(item_id)
             continue
+        candidates.append((item_id, link, it))
+
+    # Pass 2 emits NEWEST FIRST, not in feed order — a feed's top slot is often
+    # a pinned/featured item, and _MAX_TRIGGERS is a hard per-sweep cap, so in
+    # feed order a pinned block could crowd this morning's story out. Undated
+    # items sort last. Only emitted items are stamped: the rest stay unseen
+    # and fire on a later sweep instead of being silently swallowed.
+    candidates.sort(key=lambda c: c[2].get("published") or 0.0, reverse=True)
+    for item_id, link, it in candidates[:_MAX_TRIGGERS]:
+        seen[item_id] = now
+        newly_seen.add(item_id)
+        published = it.get("published")
         detail = it.get("title", "")
         if it.get("summary"):
             detail += " -- " + it["summary"][:160]
@@ -283,12 +357,11 @@ def scan_news_rss() -> list[dict[str, Any]]:
             "source": it.get("source", ""),
             "title": it.get("title", ""),
             "link": link,
+            "published": published,
             "novelty": 0.8,
             "relevance": 0.6,
-            "urgency": 0.3,
+            "urgency": _urgency_for(published, now),
         })
-        if len(triggers) >= _MAX_TRIGGERS:
-            break
 
     # Persist when something is new OR a fresh fetch re-stamped the window —
     # refresh-on-observe only works if the refreshed stamps reach disk at

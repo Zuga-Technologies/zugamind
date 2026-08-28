@@ -73,7 +73,10 @@ Your function:
   industry trades, a competitor's blog) and turns unseen items into triggers.
   Same parsing approach as the shipped `scan_ai_labs` world-scanner, pointed
   at feeds you choose. Config: `ZUGAMIND_NEWS_FEEDS` (comma-separated URLs),
-  optional `ZUGAMIND_NEWS_KEYWORDS` filter, `ZUGAMIND_NEWS_CACHE_TTL`. Note on
+  optional `ZUGAMIND_NEWS_KEYWORDS` filter, `ZUGAMIND_NEWS_CACHE_TTL`. Urgency
+  decays with publish age (full inside 24h, zero past 72h, unknown age fails
+  open) and new items emit newest-first, so a pinned top-slot item can't
+  crowd today's story out of the per-sweep cap. Note on
   "real time": RSS is poll-based, not push — most outlets publish within
   minutes, but this is near-real-time, not instant.
 - **`x_activity.py`** — polls X's recent-search API for posts matching a query
