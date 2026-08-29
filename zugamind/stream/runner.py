@@ -368,6 +368,18 @@ class StreamRunner:
         })
         return str(e)[:300]
 
+    def _reflect(self) -> None:
+        """Idle-cycle thinking: one Socratic question, plus the longitudinal
+        drift check. Local-model only -- this can never spend a paid token --
+        and wholly best-effort: an idle cycle that cannot reflect is still a
+        valid idle cycle, so nothing here is allowed to raise."""
+        try:
+            from cognition.reflection.engine import drift_integrity, reflect_once
+            reflect_once()
+            drift_integrity()
+        except Exception as e:  # noqa: BLE001 — idle work is never load-bearing
+            logger.debug("reflection pass failed (non-fatal): %s", e)
+
     @staticmethod
     def _save_state_safe(state: Dict[str, Any]) -> bool:
         """save_state raised PermissionError out of run_once when a hand-run
@@ -390,6 +402,13 @@ class StreamRunner:
         if winner_dict is None:
             self._idle_cycles += 1
             if self._idle_cycles % REFLECT_EVERY_N_IDLE == 0:
+                # REFLECTING used to be a mood label: this branch set a string
+                # in state.json and nothing thought about anything. The
+                # Socratic pipeline that fills it existed the whole time,
+                # parked in examples/ because wiring it would have changed
+                # idle-cycle behaviour mid the EXP-005 observation window
+                # (issue #4). That window closed 2026-07-20.
+                self._reflect()
                 return transition_state(state, "REFLECTING",
                                          f"{self._idle_cycles}th consecutive idle cycle")
             return transition_state(state, "RESTING", "no workspace winner this cycle")

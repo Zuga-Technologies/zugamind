@@ -1,4 +1,4 @@
-"""Tests for the Socratic reflection reference example (examples/socratic_reflection/).
+"""Tests for the Socratic reflection reference example (zugamind/cognition/reflection/).
 
 Moved here with the code itself per issue #4 — this pipeline had zero test
 coverage before the move; these are new, not relocated.
@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import subprocess
 
-from examples.socratic_reflection.answer_router import answer_question, _extract_keywords
-from examples.socratic_reflection.domain_classifier import classify_domain
-from examples.socratic_reflection.question_generator import generate_question
+from cognition.reflection.answer_router import answer_question, _extract_keywords
+from cognition.reflection.domain_classifier import classify_domain
+from cognition.reflection.question_generator import generate_question
 
 
 # --- domain_classifier -------------------------------------------------------
@@ -113,7 +113,7 @@ def test_answer_question_code_search_success(monkeypatch):
     def fake_run(cmd, cwd, capture_output, text, timeout):
         return subprocess.CompletedProcess(cmd, 0, stdout="foo.py:12:def workspace_winner():\n", stderr="")
 
-    monkeypatch.setattr("examples.socratic_reflection.answer_router.subprocess.run", fake_run)
+    monkeypatch.setattr("cognition.reflection.answer_router.subprocess.run", fake_run)
     r = answer_question("what is workspace_winner?", "code_search")
     assert r["success"] is True
     assert "workspace_winner" in r["content"]
@@ -124,7 +124,7 @@ def test_answer_question_code_search_no_matches(monkeypatch):
     def fake_run(cmd, cwd, capture_output, text, timeout):
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
 
-    monkeypatch.setattr("examples.socratic_reflection.answer_router.subprocess.run", fake_run)
+    monkeypatch.setattr("cognition.reflection.answer_router.subprocess.run", fake_run)
     r = answer_question("what is workspace_winner?", "code_search")
     assert r["success"] is True
     assert r["meta"]["matches"] == 0
@@ -144,10 +144,10 @@ def test_answer_question_code_search_pattern_after_double_dash(monkeypatch):
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
 
     monkeypatch.setattr(
-        "examples.socratic_reflection.answer_router._extract_keywords",
+        "cognition.reflection.answer_router._extract_keywords",
         lambda *a, **k: ["--open-files-in-pager=touch pwned"],
     )
-    monkeypatch.setattr("examples.socratic_reflection.answer_router.subprocess.run", fake_run)
+    monkeypatch.setattr("cognition.reflection.answer_router.subprocess.run", fake_run)
     answer_question("anything", "code_search")
 
     assert captured["cmds"], "no subprocess command was run"

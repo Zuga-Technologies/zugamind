@@ -88,9 +88,17 @@ def generate_question(
     trigger: dict[str, Any],
     domain: str,
     *,
+    grounding: str = "",
     ollama_query_fn=None,
 ) -> dict[str, Any] | None:
     """Return {text, answer_source_hint} or None.
+
+    `grounding`: a VERIFIED LIVE STATE block (gates.operational_truth.
+    format_block) describing what is actually running right now. The trigger
+    is a MEMORY -- it was true when it was journaled -- so without this the
+    model can build a confident question on top of a service that went away
+    an hour ago. Empty string when the deployer configured no services, in
+    which case no block is added at all: no grounding beats false grounding.
 
     `ollama_query_fn` is injectable for tests; defaults to the live local model.
     """
@@ -105,12 +113,15 @@ def generate_question(
     guidance = _DOMAIN_GUIDANCE.get(dom, _DOMAIN_GUIDANCE["SELF"])
     brief = _trigger_brief(trigger)
 
+    grounding_block = f"{grounding.strip()}\n\n" if (grounding or "").strip() else ""
+
     prompt = (
         "You are the workspace's Socratic layer. Read the trigger below and "
         "produce ONE grounded question that, if answered, would change what "
         "the agent does next.\n\n"
         f"Domain: {dom}\n"
         f"{guidance}\n\n"
+        f"{grounding_block}"
         f"Trigger: {brief}\n\n"
         "Rules:\n"
         " - The question must be answerable by a concrete source: code "
@@ -134,7 +145,7 @@ def generate_question(
     # before any I/O is spent.
     if q["answer_source_hint"] == "code_search":
         try:
-            from examples.socratic_reflection.answer_router import _extract_keywords
+            from cognition.reflection.answer_router import _extract_keywords
             if not _extract_keywords(q["text"], k=1):
                 logger.info(
                     "[question_gen] dropped unanswerable code_search question "

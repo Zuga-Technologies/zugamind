@@ -39,9 +39,9 @@ on for a live deployment being scored.
 
 ```python
 # in StreamRunner._transition_state, on the REFLECTING transition:
-from examples.socratic_reflection.domain_classifier import classify_domain
-from examples.socratic_reflection.question_generator import generate_question
-from examples.socratic_reflection.answer_router import answer_question
+from cognition.reflection.domain_classifier import classify_domain
+from cognition.reflection.question_generator import generate_question
+from cognition.reflection.answer_router import answer_question
 
 domain = classify_domain(trigger)["domain"]
 question = generate_question(trigger, domain)
@@ -55,5 +55,5 @@ behind its own idle-cycle cadence rather than every `REFLECTING` cycle.
 ## Running the example's tests
 
 ```
-pytest tests/examples/test_socratic_reflection.py -q
+pytest tests/cognition/test_socratic_reflection.py -q
 ```

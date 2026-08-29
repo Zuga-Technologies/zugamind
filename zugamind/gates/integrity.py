@@ -222,18 +222,32 @@ def compute_consciousness_integrity(drift_values: list[float]) -> dict:
         }
 
     try:
-        df = _dickey_fuller(drift_values)
-        if df is None:
-            # Degenerate series (zero variance / too few usable points). Can't
-            # judge stationarity — tag it so this STABLE is greppable and never
-            # mistaken for a healthy mean-reverting STABLE.
+        # A series with no variance at all is the one case where none of the
+        # three tests has anything to say: it is not stationary-around-a-mean,
+        # not trending, not shifting -- it is a constant. Everything else gets
+        # judged, even when ADF specifically cannot speak.
+        spread = max(drift_values) - min(drift_values)
+        if spread <= 1e-12:
             return {
                 "severity": "STABLE",
                 "analysis": "insufficient",
-                "detail": "drift series degenerate — stationarity undetermined",
+                "detail": "drift series is constant — nothing to test",
                 "samples": len(drift_values),
             }
-        adf_stat, p_value, is_stationary = df
+
+        df = _dickey_fuller(drift_values)
+        if df is None:
+            # ADF is undetermined (a deterministic ramp is a perfect fit, so
+            # its residual variance is zero and the t-stat is undefined). That
+            # is NOT a reason to stop: a clean monotone ramp is the loudest
+            # drift shape there is, and Mann-Kendall reads it exactly. Returning
+            # STABLE here threw away the answer from the test best suited to
+            # give it (caught by test_a_rising_floor_is_reported_as_drift).
+            adf_stat, p_value, is_stationary = None, None, False
+            adf_note = "adf_undetermined"
+        else:
+            adf_stat, p_value, is_stationary = df
+            adf_note = None
 
         # Trend detection via simple linear regression on recent window
         recent = drift_values[-20:]  # last 20 readings
@@ -287,6 +301,10 @@ def compute_consciousness_integrity(drift_values: list[float]) -> dict:
         elif is_stationary:
             severity = "STABLE"
             recommendation = "Drift is stationary (mean-reverting). No action needed."
+        elif adf_note == "adf_undetermined":
+            severity = "DRIFTING"
+            recommendation = ("Stationarity undetermined and no significant trend "
+                              "or shift found. Continue monitoring.")
         elif trend_direction == "decreasing":
             severity = "DRIFTING"
             recommendation = ("Drift is non-stationary but trending DOWN. "
@@ -296,10 +314,10 @@ def compute_consciousness_integrity(drift_values: list[float]) -> dict:
             recommendation = ("Drift is non-stationary with no significant trend. "
                               "May stabilize. Continue monitoring.")
 
-        return {
+        report = {
             "severity": severity,
-            "adf_statistic": round(adf_stat, 4),
-            "adf_p_value": round(p_value, 4),
+            "adf_statistic": None if adf_stat is None else round(adf_stat, 4),
+            "adf_p_value": None if p_value is None else round(p_value, 4),
             "is_stationary": is_stationary,
             # Reported for readability ("how fast"), no longer load-bearing.
             "trend_slope": round(slope, 6),
@@ -314,6 +332,9 @@ def compute_consciousness_integrity(drift_values: list[float]) -> dict:
             "recent_mean_drift": round(sum(recent) / len(recent), 4),
             "recommendation": recommendation,
         }
+        if adf_note:
+            report["analysis"] = adf_note
+        return report
 
     except Exception as e:
         # NOT "STABLE". This is a monitor whose entire job is raising a hand,
