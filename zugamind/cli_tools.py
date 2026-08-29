@@ -144,6 +144,53 @@ def cmd_budget(args: argparse.Namespace) -> int:
     # the moment it happens; without this, one failed write under-counts the
     # monthly cap for the rest of the month, because every later call reloads
     # budget.json fresh. --dry-run first: this moves a money number.
+    # --provider asks Anthropic what it ACTUALLY billed and holds it beside
+    # the local number. Different gap from --reconcile: that one repairs
+    # spends we know we made and failed to write down; this one catches a
+    # per-call cost ESTIMATE that is simply wrong, which drifts the ledger a
+    # little on every call and leaves no trace anywhere on disk. It needs an
+    # Admin credential, so it always reports what it found under which env
+    # var name first -- that line is the answer to "do I have the right key",
+    # and it never prints the key.
+    if getattr(args, "provider", False):
+        from foundation.cost_report import compare  # noqa: WPS433
+
+        summary = compare()
+        if getattr(args, "json", False):
+            print(json.dumps(summary, indent=2))
+            return 0 if summary.get("ok") else 1
+
+        cred = summary["credential"]
+        if cred["present"]:
+            print(f"credential: {cred['name']}  kind={cred['kind']}  "
+                  f"{cred['length']} chars")
+            print(f"            {cred['detail']}")
+        else:
+            print("credential: none found")
+            print(f"            {cred['detail']}")
+        window = summary["window"]
+        print(f"window:     {window['starting_at'][:10]} -> "
+              f"{window['ending_at'][:10]}   scope: {summary['scope']}")
+
+        if not summary.get("ok"):
+            print(f"result:     {summary['verdict']}")
+            if summary.get("error"):
+                print(f"            ({summary['error']})")
+            return 1
+
+        print(f"provider:   ${summary['provider_usd']:.4f}"
+              f"   ({summary['buckets']} daily bucket(s))")
+        print(f"ledger:     ${summary['ledger_usd']:.4f}")
+        if summary.get("drift_usd") is not None:
+            pct = summary.get("drift_pct")
+            tail = f"  ({pct:+.1f}%)" if pct is not None else ""
+            print(f"drift:      ${summary['drift_usd']:+.4f}{tail}")
+        for name, amount in sorted(summary.get("by_workspace", {}).items(),
+                                   key=lambda kv: -kv[1]):
+            print(f"    {name:<32} ${amount:.4f}")
+        print(f"verdict:    {summary['verdict']}")
+        return 0
+
     if getattr(args, "reconcile", False) or getattr(args, "dry_run", False):
         from foundation.budget_reconcile import reconcile  # noqa: WPS433
 
@@ -663,6 +710,10 @@ def register(sub: "argparse._SubParsersAction") -> None:
                         "(budget_persist_failed) back into the ledger")
     p.add_argument("--dry-run", action="store_true", dest="dry_run",
                    help="show what --reconcile would fold, and write nothing")
+    p.add_argument("--provider", action="store_true",
+                   help="cross-check the ledger against Anthropic's cost "
+                        "report (needs an Admin credential; reports which "
+                        "one it found without printing it)")
     p.set_defaults(func=cmd_budget)
 
     p = sub.add_parser("explain", help="why did that cycle wake (or not)")

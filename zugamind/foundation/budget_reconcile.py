@@ -12,15 +12,20 @@ the caller and the estimated cost. Its own comment says the intended repair
 -- "sum the budget_persist_failed events, fold into spent" -- and until now
 nothing did it. That is this module.
 
-Deliberately NOT the provider's usage API. Anthropic ships
-/v1/organizations/cost_report for exactly this, and it would be the more
-authoritative source -- but it needs an Admin API key this deployment does
-not have, a network round trip, and it cannot be verified without both. The
-journal is already on disk, already structured, already written at the only
-moment the information exists, and reconciling from it needs no credential
-and no network. If an Admin key ever exists here, a second reconciler
-against the cost report belongs beside this one as a cross-check, not
-instead of it.
+Deliberately NOT the provider's usage API, which is a separate concern and
+now a separate file. The journal is already on disk, already structured,
+already written at the only moment the information exists, so reconciling
+from it needs no credential and no network -- which is why this is the
+DEFAULT repair and runs anywhere.
+
+`foundation/cost_report.py` is the cross-check that sits beside this one,
+not instead of it. It asks Anthropic's /v1/organizations/cost_report what
+was actually billed. It is strictly more authoritative and strictly less
+available: it needs an Admin credential (an ordinary API key is refused) and
+a network round trip. The two catch DIFFERENT failures -- this file repairs
+spends we know we made and failed to write down; that one catches a per-call
+cost ESTIMATE that is simply wrong, which drifts the ledger a little on
+every single call and leaves no trace on disk for this file to find.
 
 Idempotent: every folded event is marked in a companion set, so running
 reconcile twice does not double-count. Stdlib only.
