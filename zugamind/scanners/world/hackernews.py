@@ -29,6 +29,7 @@ from typing import Any
 import urllib.request
 import json as _json
 
+from scanners import safe_http
 from scanners.seen_items import atomic_write_text
 
 logger = logging.getLogger("zugamind.scanners.hackernews")
@@ -43,20 +44,43 @@ _TIMEOUT = 6.0
 # importing foundation — scanners stay standalone.
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent.parent / "data")
 _CACHE_PATH = _DATA_DIR / "scanner_cache" / "hackernews.json"
-_TOP_TTL = float(os.environ.get("ZUGAMIND_HN_TOP_TTL", "300"))
+def _top_ttl() -> float:
+    """Read at CALL time, tolerantly. This was a bare float() at module level,
+    and hackernews is a STATIC import in scanners/__init__.py — so a typo'd
+    ZUGAMIND_HN_TOP_TTL raised ValueError during import and stopped the whole
+    runner from booting. The dynamically-imported scanners degrade to a
+    warning for the same mistake; this one took the process down."""
+    raw = (os.environ.get("ZUGAMIND_HN_TOP_TTL") or "").strip()
+    if not raw:
+        return 300.0
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("hackernews: ZUGAMIND_HN_TOP_TTL=%r is not a number — "
+                       "using 300", raw)
+        return 300.0
 _ITEM_TTL = float(os.environ.get("ZUGAMIND_HN_ITEM_TTL", "3600"))
 
 # Keep stories matching any of these patterns. Tuned for AI/ML/founder content.
+#
+# The whole alternation sits inside \b(...)\b, so every alternative must end
+# on a word character. Two did not, and matched NOTHING (audit 2026-08-29):
+#   "fine-tun"      -> the \b after it demands a boundary right after "tun",
+#                      so "fine-tuning" / "fine-tune" / "fine-tuned" all miss
+#   "open[- ]?source" -> missed "open-sourcing" / "open-sourced"
+# Both are now written with their own suffix alternation instead of relying
+# on the shared trailing boundary. A dead branch in a KEEP filter is silent:
+# it does not error, it just stops surfacing real stories.
 _KEEP_RE = re.compile(
     r"\b(AI|ML|LLM|GPT|Claude|Anthropic|OpenAI|DeepMind|HuggingFace|"
-    r"transformer|agent|agentic|RAG|fine-tun|inference|"
+    r"transformer|agent|agentic|RAG|fine[- ]?tun(?:e|ed|es|ing)|inference|"
     r"startup|funding|launch|YC|Y Combinator|Series [A-D]|seed round|"
     r"founder|acquisition|IPO|"
     r"Python|TypeScript|Rust|model|embedding|"
     r"alignment|safety|interpretability|hallucination|"
     r"benchmark|paper|arxiv|reasoning|"
     r"Stripe|Cloudflare|AWS|"
-    r"open[- ]?source|MIT|Apache|BSD)\b",
+    r"open[- ]?sourc(?:e|ed|es|ing)|MIT|Apache|BSD)\b",
     re.IGNORECASE,
 )
 _MAX_STORIES = 30
@@ -77,7 +101,9 @@ def _fetch_json(url: str) -> Any:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "ZugaMind/scanner"})
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return _json.loads(resp.read().decode("utf-8"))
+            # utf-8-sig + errors=replace: a proxy-injected BOM or one
+            # bad byte used to lose the ENTIRE response here, silently.
+            return _json.loads(safe_http.decode_body(resp.read()))
     except Exception as e:
         logger.debug("hn fetch failed for %s: %s", url, e)
         return None
@@ -104,7 +130,7 @@ def _save_cache(cache: dict) -> None:
 def _top_ids(cache: dict, now: float) -> list:
     """Top-story ids, from cache when fresh, else one live fetch."""
     top = cache.get("top") or {}
-    if isinstance(top, dict) and (now - float(top.get("ts", 0))) < _TOP_TTL:
+    if isinstance(top, dict) and (now - safe_http.num(top.get("ts"))) < _top_ttl():
         ids = top.get("ids")
         if isinstance(ids, list):
             return ids
@@ -165,7 +191,13 @@ def scan_hackernews() -> list[dict]:
         # 0.3 floor = the old flat prior; cap 0.65 keeps ambient news from
         # ever reaching the alarm lane on velocity alone.
         age_h = max((now - float(item.get("time") or now)) / 3600.0, 0.5)
-        urgency = round(min(0.65, 0.3 + (score / age_h) / 400.0), 3)
+        # clamp01 both ends. The old min()-only clamp let a negative or
+        # non-numeric score out of the 0..1 contract entirely —
+        # measured -2499.7 from a negative score, and NaN read as the
+        # maximum. urgency is auction currency: an out-of-range value
+        # does not look wrong, it outbids every honest sense.
+        urgency = round(safe_http.clamp01(
+            min(0.65, 0.3 + (safe_http.num(score) / age_h) / 400.0)), 3)
         trig = {
             "type": "hackernews_story",
             "detail": f"HN [{score}pts]: {title[:140]}",
@@ -180,7 +212,7 @@ def scan_hackernews() -> list[dict]:
             trig["detail"] = f"HN BRAND MENTION [{score}pts]: {title[:140]}"
             trig["brand_mention"] = True
             trig.update({"novelty": 0.9, "relevance": 0.9,
-                         "urgency": max(0.75, urgency)})
+                         "urgency": safe_http.clamp01(max(0.75, urgency))})
         out.append(trig)
     _prune_items(cache, now)
     _save_cache(cache)

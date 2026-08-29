@@ -169,5 +169,10 @@ def scan_reddit_ai() -> list[dict]:
         )
 
     if triggers:
-        write_seen(_seen_path(), seen, _SEEN_MAX)
+        # protect = every key still visible on the feed this sweep. The
+        # stored timestamp is FIRST-seen and never refreshed, so a
+        # stickied post holds the oldest stamp in the set and is the
+        # first thing evicted when the cap trips — then it re-fires.
+        write_seen(_seen_path(), seen, _SEEN_MAX,
+                   protect={_post_key(p) for p in posts})
     return triggers

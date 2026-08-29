@@ -54,7 +54,7 @@ def test_only_new_entrant_is_fetched(tmp_path, monkeypatch):
     hn.scan_hackernews()
     top_ids[:] = [999] + top_ids[:-1]
     calls["top"] = calls["item"] = 0
-    monkeypatch.setattr(hn.time, "time", lambda: 1000.0 + hn._TOP_TTL + 1)
+    monkeypatch.setattr(hn.time, "time", lambda: 1000.0 + hn._top_ttl() + 1)
     hn.scan_hackernews()
     assert calls["top"] == 1
     assert calls["item"] == 1

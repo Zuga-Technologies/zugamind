@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from scanners.seen_items import atomic_write_text
+from scanners import safe_http
 
 logger = logging.getLogger("zugamind.scanners.github_repo_events")
 
@@ -65,8 +66,10 @@ def _fetch_json(url: str) -> Any:
         token = os.environ.get("GITHUB_TOKEN", "").strip()
         if token:
             req.add_header("Authorization", f"Bearer {token}")
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8", errors="replace"))
+        # opener(), not urlopen() — a redirect off api.github.com would
+        # otherwise carry this Bearer token to the new host. See safe_http.
+        with safe_http.opener().open(req, timeout=_TIMEOUT) as resp:
+            return json.loads(safe_http.decode_body(resp.read()))
     except Exception as e:
         logger.debug("repo_events fetch failed for %s: %s", url, e)
         return None

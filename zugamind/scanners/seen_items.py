@@ -57,23 +57,60 @@ def read_seen(path: Path) -> dict[str, float] | None:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return None
-        return {str(k): float(v) for k, v in data.items()}
+        # Coerce per entry, not in one comprehension. A single unparseable
+        # value used to raise and discard the ENTIRE seen-set (500+ remembered
+        # items thrown away by one null), which reads to the caller as a cold
+        # start and re-baselines the whole feed.
+        out: dict[str, float] = {}
+        for k, v in data.items():
+            try:
+                ts = float(v)
+            except (TypeError, ValueError):
+                continue
+            if ts == ts and ts not in (float("inf"), float("-inf")):  # drop NaN/inf
+                out[str(k)] = ts
+        return out
     except Exception as e:
         logger.debug("seen-set load failed (%s): %s", path.name, e)
         return None
 
 
-def write_seen(path: Path, seen: dict[str, float], max_keys: int) -> None:
+def write_seen(path: Path, seen: dict[str, float], max_keys: int,
+               protect: "set[str] | None" = None) -> None:
     """Persist the newest `max_keys` entries.
 
     Pruning is by recency and never by key order: an alphabetical cap (the
     shape the example scanners used) can evict an item that is still on the
     feed, which lets it fire again on the next sweep — the exact bug the
     seen-set exists to prevent.
+
+    `protect`: keys STILL VISIBLE on the feed this sweep, which are exempt
+    from eviction. Recency alone is not enough, because the stored timestamp
+    is when an item was FIRST seen and is never refreshed. A pinned or
+    stickied post therefore holds the oldest timestamp in the set no matter
+    how long it stays up, so it is the FIRST thing evicted when the cap trips
+    — and then re-fires as if brand new. That is precisely the bug this
+    module was written to prevent, and it was invisible to the suite because
+    the existing test only proves recency beats alphabetical order (audit
+    2026-08-29; measured then as ~32 days from tripping on the live
+    ai_labs set).
     """
     try:
+        if max_keys <= 0:
+            # Writing {} here silently wipes the set and re-fires everything.
+            logger.warning("seen-set %s: max_keys=%d is not a cap, refusing to "
+                           "wipe the set", path.name, max_keys)
+            return
         if len(seen) > max_keys:
-            seen = dict(sorted(seen.items(), key=lambda kv: kv[1], reverse=True)[:max_keys])
+            keep = dict(sorted(seen.items(), key=lambda kv: kv[1], reverse=True)[:max_keys])
+            for key in (protect or ()):
+                if key in seen:
+                    keep[key] = seen[key]
+            seen = keep
         atomic_write_text(path, json.dumps(seen))
     except Exception as e:
-        logger.debug("seen-set save failed (%s): %s", path.name, e)
+        # Not .debug: an unwritable seen-set means the caller re-baselines
+        # every cycle and the source goes permanently dark with no line an
+        # operator can find at default level.
+        logger.warning("seen-set save failed (%s): %s — this source will "
+                       "re-baseline every cycle until it succeeds", path.name, e)

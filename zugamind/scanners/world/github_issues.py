@@ -29,6 +29,7 @@ import urllib.request
 from pathlib import Path
 
 from foundation.fs import atomic_write_text
+from .. import safe_http
 from typing import Any
 
 logger = logging.getLogger("zugamind.scanners.github_issues")
@@ -76,8 +77,11 @@ def _fetch_issues(repo: str) -> list[dict[str, Any]]:
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-        data = json.loads(resp.read().decode("utf-8", errors="replace"))
+    # opener(), not urlopen(): urllib's stock redirect handler copies every
+    # header onto the redirect target with no host check, so this Bearer token
+    # would be handed to whatever host answered a 30x. See scanners/safe_http.
+    with safe_http.opener().open(req, timeout=_TIMEOUT) as resp:
+        data = json.loads(safe_http.decode_body(resp.read()))
     return data if isinstance(data, list) else []
 
 

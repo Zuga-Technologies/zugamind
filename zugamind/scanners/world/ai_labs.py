@@ -288,8 +288,11 @@ def _read_seen() -> dict[str, float] | None:
     return read_seen(_seen_file())
 
 
-def _write_seen(seen: dict[str, float]) -> None:
-    write_seen(_seen_file(), seen, _SEEN_MAX)
+def _write_seen(seen: dict[str, float], protect: "set[str] | None" = None) -> None:
+    """`protect`: keys still on the feed, exempt from eviction. See
+    scanners.seen_items.write_seen — recency alone evicts a pinned item
+    first, because its stamp is first-seen and never refreshed."""
+    write_seen(_seen_file(), seen, _SEEN_MAX, protect=protect)
 
 
 def _item_key(it: dict[str, Any]) -> str:
@@ -365,6 +368,12 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     r"|legislation|lawmaker|\bcongress\b|\bparliament\b|\bai\s+act\b"
     r"|\belections?\b|\bgovernments?\b|global\s+affairs|public\s+affairs"
     r"|philanthrop|\bnonprofit\b|economic\s+index|economic\s+research"
+    # The noun forms ("partnership", "partnering with") were covered; the
+    # VERB form was not, and it is how the announcements are actually
+    # titled -- "OpenAI partners with Scale...", "Google DeepMind partners
+    # with game studios" (that one was in the live cache). Measured
+    # 2026-08-29: 13 archive items demote cleanly, zero HIGH collateral.
+    r"|\bpartners?\s+with\b|\bpartnered\s+with\b|\bagreement\s+with\b"
     r"|\bappoints?\b|\bappointment\b|chief\s+\w+\s+officer"
     r"|to\s+join\s+\w+\s+as\b|\bboard\s+of\s+directors\b|\bgovernor\b"
     r"|\bpartnering\s+with\b|\bpartnership\b|\bletter\s+to\b|\bstatement\s+on\b"
@@ -404,6 +413,26 @@ _PROMO_HOW_RE = re.compile(rf"\bHow\s+{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b")
 _PROMO_OUTCOME_RE = re.compile(
     rf"^{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b.*\bwith\s+[A-Z]"
 )
+# "How loveholidays is making everyone a builder with Codex"
+#
+# _PROMO_HOW_RE needs a CAPITALISED buyer and a verb from the whitelist above,
+# so a lowercase brand or an auxiliary+participle ("is making", "is
+# transforming") walks straight through. Measured 2026-08-29: 45 archive
+# titles starting "How " priced DEFAULT — i.e. above the wake floor — and one
+# was sitting in the live cache.
+#
+# The discriminator is the TAIL, not the verb: a case study ends "with
+# <Product>" or "using <Product>", capitalised. The negative lookahead
+# protects first-person and first-party subjects, which are real work posts
+# ("How we built a realtime system", "How Claude's text watermark works").
+# Measured on the 1,399-item corpus: 10 DEFAULT -> NON-WORK, zero HIGH
+# collateral, and none of the protected titles flipped.
+_PROMO_CASE_STUDY_RE = re.compile(
+    r"^How\s+"
+    r"(?!(?:we|our|I|the|a|an|OpenAI|Anthropic|Google|DeepMind|Microsoft|"
+    r"Claude|GPT|Gemini|ChatGPT|Codex|Sora)\b)"
+    r"[A-Za-z].*\b(?:with|using)\s+[A-Z]"
+)
 # A third grammar needs no buyer capture at all: "powered by" is a partner
 # describing whose engine runs under their own product, and no lab post about
 # its OWN model is ever phrased that way about itself. Caught the 2026-08-19
@@ -414,7 +443,7 @@ _PROMO_OUTCOME_RE = re.compile(
 # token alone bought it HIGH.
 _PROMO_KEYWORD_RE = re.compile(
     r"\bcase\s+stud|customer\s+stor|\bsuccess\s+stor|\btestimonial"
-    r"|\bhow\s+enterprises\b|\bpowered\s+by\b",
+    r"|\bhow\s+enterprises\b",
     re.IGNORECASE,
 )
 
@@ -464,14 +493,51 @@ _HIGH_RELEVANCE_RE = re.compile(
 )
 
 
-def _is_non_work(text: str) -> bool:
+_POWERED_BY_RE = re.compile(r"\bpowered\s+by\b", re.IGNORECASE)
+
+
+def _is_partner_powered_by(text: str) -> bool:
+    """True when "powered by" names a MODEL — i.e. someone else running the
+    lab's engine, which is promotion.
+
+    This used to demote on the bare phrase anywhere in title or summary, on
+    the premise that "no lab post about its OWN model is ever phrased that way
+    about itself". OpenAI's own feed falsifies that, and the fix is not
+    precedence and not position -- both the promo and the launch carry the
+    phrase in their SUMMARY. It is the OBJECT of the phrase:
+
+      "Replit introduces Free Mode, powered by GPT-5.6 Luna"
+          -> a partner running the lab's model. Promotion. (the 2026-08-19 wake)
+      "Preview Ultrafast, a new OpenAI API service tier ... Powered by Cerebras"
+          -> the lab crediting a hardware supplier under its OWN product.
+             A launch, and the single thing this scanner exists to catch.
+
+    So: demote only when a model token follows the phrase. Measured
+    2026-08-29 -- the bare-phrase rule was silencing 25 of 266 posts with
+    shipping language in the title (9.4%), several of them first-party
+    launches, by scoring them under the wake floor.
+    """
+    for m in _POWERED_BY_RE.finditer(text or ""):
+        # A short window: the object sits right after the phrase, and a wider
+        # one would sweep in an unrelated model mention later in the blurb.
+        if _HIGH_RELEVANCE_RE.search(text[m.end():m.end() + 40]):
+            return True
+    return False
+
+
+def _is_non_work(text: str, title: str = "") -> bool:
     """The lab talking about itself, selling itself, or doing science that
     isn't about the models — public affairs, promotion, or an off-topic
-    scientific domain."""
+    scientific domain.
+
+    `title` is accepted for callers that want to pass it separately; the
+    rules here all read the combined text."""
     return bool(
-        _PUBLIC_AFFAIRS_RE.search(text)
+        _is_partner_powered_by(text)
+        or _PUBLIC_AFFAIRS_RE.search(text)
         or _PROMO_HOW_RE.search(text)
         or _PROMO_OUTCOME_RE.search(text)
+        or _PROMO_CASE_STUDY_RE.search(text)
         or _PROMO_KEYWORD_RE.search(text)
         or _SCI_DOMAIN_RE.search(text)
     )
@@ -497,6 +563,10 @@ def _relevance_for(title: str, summary: str = "", lab: str = "") -> float:
     quota. `lab` defaults to "" (curated) so an unlabelled call keeps the old
     answer.
     """
+    # Order matters and NON-WORK deliberately wins: a promo that names a model
+    # is still a promo (the 2026-08-19 Replit wake). What changed on
+    # 2026-08-29 is not the precedence but WHERE "powered by" is looked for --
+    # see _PROMO_POWERED_BY_RE.
     if _is_non_work(f"{title or ''} {summary or ''}"):
         return _RELEVANCE_NON_WORK
     if _HIGH_RELEVANCE_RE.search(title or ''):
@@ -715,5 +785,5 @@ def scan_ai_labs() -> list[dict[str, Any]]:
         })
 
     if triggers:
-        _write_seen(seen)
+        _write_seen(seen, protect={_item_key(it) for it in items})
     return triggers

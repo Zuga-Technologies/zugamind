@@ -42,8 +42,34 @@ _DEFAULT_MAX_CADENCE = 6 * 3600  # 6h backoff ceiling
 # Default per-source emit quota (mirrors ZUGAMIND_PER_SCANNER_CAP). The yield-weighted
 # budget flexes around this; the global ceiling bounds the total so the GWT auction
 # can't be flooded by one high-yield source.
-_DEFAULT_EMIT_CAP = int(os.environ.get("ZUGAMIND_PER_SCANNER_CAP", "3"))
-_GLOBAL_EMIT_CEILING = int(os.environ.get("ZUGAMIND_GLOBAL_TRIGGER_CEILING", "40"))
+def _int_env(name: str, default: int) -> int:
+    """Read an int dial tolerantly, at call time.
+
+    These were bare `int(os.environ.get(...))` at MODULE level, so an empty or
+    mistyped value raised ValueError during import — and stream.runner imports
+    this at module scope, so one bad character in a tuning dial stopped the
+    whole agent from booting (.env.example invites exactly this shape). A
+    misconfigured dial should degrade to its default, not take the process
+    down. `_flag_enabled()` below already got this right; these two were the
+    outliers.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("scheduler: %s=%r is not an integer — using %d",
+                       name, raw, default)
+        return default
+
+
+def _default_emit_cap() -> int:
+    return _int_env("ZUGAMIND_PER_SCANNER_CAP", 3)
+
+
+def _global_emit_ceiling() -> int:
+    return _int_env("ZUGAMIND_GLOBAL_TRIGGER_CEILING", 40)
 
 # Honors ZUGAMIND_DATA_DIR without importing foundation — scanners stay standalone.
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent / "data")
@@ -159,7 +185,20 @@ class SourceScheduler:
         last = self.ledger.last_polled.get(name)
         if last is None:
             return True
-        return (now - last) >= self.effective_cadence(name)
+        age = now - last
+        if age < 0:
+            # A stamp in the FUTURE — a clock step, a timezone slip, another
+            # writer's units. `age >= cadence` is then false for as long as the
+            # stamp leads the clock, so the source is silently blocked, and the
+            # stamp persists on disk across restarts. Measured 2026-08-29: a
+            # year-ahead stamp still blocked the source six months later, with
+            # no log line at any level. Treat it as due and say so.
+            logger.warning(
+                "scheduler: %s last_polled is %.0fs in the FUTURE — clock "
+                "artefact; treating as due", name, -age,
+            )
+            return True
+        return age >= self.effective_cadence(name)
 
     def due_sources(self, now: Optional[float] = None) -> list[SourceSpec]:
         """The specs whose sources are due this cycle.
@@ -186,13 +225,19 @@ class SourceScheduler:
         return set(self._polled_this_cycle)
 
     # ---- yield-weighted emit budget -----------------------------------------
-    def emit_budget(self, name: str, base_cap: int = _DEFAULT_EMIT_CAP) -> int:
+    def emit_budget(self, name: str, base_cap: "int | None" = None) -> int:
         """Per-source emit quota, flexed by rolling yield. >=1 always (never mute).
 
         High-yield sources earn one extra slot; a source dead for the full window
         is squeezed to a single slot. Mid sources keep the base cap. The global
-        ceiling (applied by the caller) still bounds the total.
+        ceiling still bounds the total -- EXCEPT that as of the 2026-08-29
+        audit neither this method nor _global_emit_ceiling() has any
+        caller in the runner, so nothing bounds the per-cycle total
+        today. Kept and tested so it can be wired; the claim is
+        corrected here rather than left reading as a live guarantee.
         """
+        if base_cap is None:
+            base_cap = _default_emit_cap()
         window = self.ledger.yields.get(name) or []
         rate = self.yield_rate(name)
         full = len(window) >= _YIELD_WINDOW
