@@ -17,6 +17,10 @@ cheaper, neither able to spend a paid token:
 Both are best-effort and never raise into the cycle: an idle cycle that
 cannot reflect is still a valid idle cycle.
 
+A completed reflection is also a CANDIDATE THOUGHT: after it is journaled it
+is handed to cognition.thoughts, where gates.share_filter decides whether it
+is worth a human's attention (journal-only delivery; see that module).
+
 Kill switch: ZUGAMIND_REFLECTION_ENABLED=false restores the old behaviour
 (state transition only, no model calls).
 """
@@ -30,11 +34,21 @@ from continuity import journal
 from gates.integrity import MIN_INTEGRITY_SAMPLES, compute_consciousness_integrity
 from gates.operational_truth import format_block, is_stale_operational
 
+from ..thoughts import consider_thought
 from .answer_router import answer_question
 from .domain_classifier import classify_domain
 from .question_generator import generate_question
 
 logger = logging.getLogger("zugamind.reflection")
+
+# share_filter needs a confidence, and a reflection has no number of its own.
+# This is NOT an invented probability: it is a two-step ladder on the one
+# thing observable about the pair -- whether a real source was consulted for
+# the answer. A question nothing resolved is a guess, and lands under
+# share_filter.CONFIDENCE_FLOOR (0.6) on purpose; one a source answered
+# clears it. Anything finer would be a number this engine cannot justify.
+_CONFIDENCE_ANSWERED = 0.7
+_CONFIDENCE_UNANSWERED = 0.2
 
 # How far back to look for something worth reflecting on. An idle stretch of
 # ten cycles is minutes to hours depending on POLL_INTERVAL, so the last real
@@ -70,6 +84,26 @@ def _recent_winner(limit: int = _WINNER_LOOKBACK) -> Optional[dict]:
         if isinstance(winner, dict) and winner:
             return winner
     return None
+
+
+def _as_thought(result: dict) -> dict:
+    """The reflection in the shape share_filter reads.
+
+    topic_class is always "question" -- that is what a Socratic pass
+    produces -- and ask_text is the question itself, so the guard's
+    question-form rule is what judges it: a "question" that does not end in
+    "?" is not one, and the guard says so.
+    """
+    text = result["question"]
+    if result.get("answer"):
+        text = f"{text}\n{result['answer']}"
+    return {
+        "text": text,
+        "confidence": result["confidence"],
+        "topic_class": "question",
+        "proposed_action": "",
+        "ask_text": result["question"],
+    }
 
 
 def reflect_once() -> Optional[dict]:
@@ -117,15 +151,18 @@ def reflect_once() -> Optional[dict]:
             trigger=trigger,
         )
 
+        answered = bool(answer.get("success"))
         result = {
             "domain": domain,
             "question": question["text"],
             "source": answer.get("source"),
-            "answered": bool(answer.get("success")),
+            "answered": answered,
             "answer": str(answer.get("content") or "")[:600],
             "latency_ms": answer.get("latency_ms"),
+            "confidence": _CONFIDENCE_ANSWERED if answered else _CONFIDENCE_UNANSWERED,
         }
         journal.append_event("reflection", result)
+        consider_thought(_as_thought(result))
         return result
     except Exception as exc:  # noqa: BLE001 — idle-cycle work is never load-bearing
         logger.debug("reflection failed: %s", exc)

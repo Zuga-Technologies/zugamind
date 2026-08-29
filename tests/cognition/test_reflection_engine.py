@@ -116,6 +116,48 @@ def test_reflection_never_raises_into_the_cycle():
 
 
 # ---------------------------------------------------------------------------
+# the reflection is a candidate thought, and share_filter sits in front of it
+# ---------------------------------------------------------------------------
+
+def _reflect_with(answer, question="does the floor still calibrate?"):
+    _cycle({"source_module": "repo", "content": "issue #12 reopened"})
+    with patch.object(engine, "generate_question",
+                      lambda *a, **kw: {"text": question,
+                                        "answer_source_hint": "none"}), \
+         patch.object(engine, "answer_question", lambda *a, **kw: answer):
+        return engine.reflect_once()
+
+
+def test_an_unanswered_reflection_never_becomes_a_shared_thought(monkeypatch):
+    """No source resolved the question, so the pair is a guess. Its
+    confidence lands under the share floor and the guard's reason -- which
+    only share_filter produces -- must reach the journal, not vanish."""
+    monkeypatch.setenv("ZUGAMIND_THOUGHTS_ENABLED", "true")
+
+    result = _reflect_with({"source": "none", "content": "", "success": False,
+                            "latency_ms": 1})
+
+    assert result["confidence"] == 0.2
+    assert _events("thought_shared") == []
+    suppressed = _events("thought_suppressed")
+    assert len(suppressed) == 1
+    assert suppressed[0]["reason"] == "low_confidence:0.20"
+
+
+def test_an_answered_reflection_reaches_the_journal_as_a_shared_question(monkeypatch):
+    monkeypatch.setenv("ZUGAMIND_THOUGHTS_ENABLED", "true")
+
+    _reflect_with({"source": "code_search", "content": "calibrator.py:40 ...",
+                   "success": True, "latency_ms": 12})
+
+    shared = _events("thought_shared")
+    assert len(shared) == 1
+    assert shared[0]["text"].startswith("does the floor still calibrate?")
+    assert shared[0]["topic_class"] == "question"
+    assert _events("thought_suppressed") == []
+
+
+# ---------------------------------------------------------------------------
 # grounding
 # ---------------------------------------------------------------------------
 
