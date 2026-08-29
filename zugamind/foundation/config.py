@@ -92,6 +92,32 @@ REASONING_TIMEOUT = int(os.environ.get("ZUGAMIND_REASONING_TIMEOUT", "180"))
 
 # Approximate per-call costs (heuristics for the local budget ledger, not
 # billing-grade figures — actual provider invoices are the source of truth).
+def env_flag(name: str, default: bool = False) -> bool:
+    """Read a boolean switch. Anything unrecognised is OFF, and says so.
+
+    Every flag in this repo was parsed as `value not in ("0","false","no",
+    "off","")` -- a DENY-list of five spellings, so everything else was ON.
+    Measured 2026-08-29: ZUGAMIND_SELF_MOD_ENABLED=disabled ARMS the agent's
+    ability to rewrite its own system prompt. So do "none", "n", "nope",
+    "falsee", "0.0" and "-1" -- which is the vocabulary someone reaching for
+    "off" actually types. A switch whose failure direction is ON does not
+    belong in front of a privilege boundary.
+
+    Same reasoning as _money_from_env above: a misconfigured dial degrades to
+    the safe default rather than disabling the control.
+    """
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    logger.warning("%s=%r is not a recognised on/off value — treating as OFF",
+                   name, raw)
+    return False
+
+
 def _money_from_env(name: str, default: float) -> float:
     """A dollar amount from the environment. Never negative, never infinite.
 

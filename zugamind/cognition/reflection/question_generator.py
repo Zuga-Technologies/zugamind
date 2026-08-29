@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from typing import Any
 
 logger = logging.getLogger("zugamind.workspace.question_generator")
 
 _VALID_HINTS = ("code_search", "file_read", "none")
+# Seconds one idle-cycle question may take. See generate_question.
+_QUESTION_TIMEOUT_S = int(os.environ.get("ZUGAMIND_REFLECT_QUESTION_TIMEOUT_S", "20"))
 _TEXT_CAP = 300  # bound the returned question the same way siblings bound their text fields
 
 _DOMAIN_GUIDANCE = {
@@ -43,19 +46,36 @@ _DOMAIN_GUIDANCE = {
 
 _LENS_KEYS = ("what", "why", "who", "where", "when", "how", "problem", "process", "performance")
 _LEGACY_KEYS = ("kind", "type", "source", "detail", "file", "text", "path")
+# The keys a REAL workspace winner actually carries. Measured against the
+# live journal 2026-08-29: 55 of 55 winners matched none of the two lists
+# above, so _trigger_brief fell through to a raw json.dumps truncated
+# mid-value on every single reflection. The curated brief this function
+# exists to produce had never once been produced.
+_WINNER_KEYS = ("source_module", "content", "thought_type")
 
 
 def _trigger_brief(trigger: dict[str, Any]) -> str:
     """One-line summary the model can chew on without drowning in payload."""
     try:
         parts: list[str] = []
-        for k in _LENS_KEYS + _LEGACY_KEYS:
+        for k in _WINNER_KEYS + _LENS_KEYS + _LEGACY_KEYS:
             v = trigger.get(k)
             if isinstance(v, str) and v:
-                parts.append(f"{k}={v[:120]}")
+                # Whitespace FLATTENED, not just truncated. This text is
+                # scanner-sourced and lands in the same prompt as the
+                # VERIFIED LIVE STATE grounding block -- with newlines intact
+                # a trigger can forge a second, contradicting block AFTER the
+                # genuine one, which is precisely what the grounding exists to
+                # prevent. continuity/journal._untrusted() was written for
+                # this exact attack shape against the wake briefing
+                # (audit 2026-08-28); this is the same rule here.
+                parts.append(f"{k}={' '.join(v.split())[:120]}")
             elif isinstance(v, (int, float, bool)) and k in _LENS_KEYS:
                 parts.append(f"{k}={v}")
-        return " | ".join(parts) if parts else json.dumps(trigger, default=str)[:300]
+        if parts:
+            return " | ".join(parts)
+        # Last resort, flattened for the same reason as above.
+        return " ".join(json.dumps(trigger, default=str).split())[:300]
     except Exception as exc:
         # trigger wasn't a dict, or held something json.dumps chokes on
         # (datetime, set, custom object) -- a malformed trigger must never
@@ -132,7 +152,14 @@ def generate_question(
     )
 
     try:
-        raw = ollama_query_fn(prompt, max_tokens=120, system="")
+        # Bounded. ollama_query defaults to timeout=90 with retries=3, i.e.
+        # four attempts plus backoff -- over six minutes for ONE call, on a
+        # cycle thread whose poll interval is 180s. cognition/proposer.py
+        # already passes an explicit timeout; these two calls did not.
+        # Retries buy nothing here: idle-cycle reflection is explicitly
+        # allowed to produce no question.
+        raw = ollama_query_fn(prompt, max_tokens=120, system="",
+                              timeout=_QUESTION_TIMEOUT_S, retries=0)
     except Exception as exc:
         logger.debug("ollama_query raised: %s", exc)
         return None

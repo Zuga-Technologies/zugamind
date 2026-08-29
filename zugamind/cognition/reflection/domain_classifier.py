@@ -20,8 +20,12 @@ your own deployment. Never raises; an unrecognized trigger returns
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
+
+_CLASSIFY_TIMEOUT_S = int(os.environ.get(
+    "ZUGAMIND_REFLECT_CLASSIFY_TIMEOUT_S", "10"))
 
 logger = logging.getLogger("zugamind.workspace.domain_classifier")
 
@@ -156,7 +160,12 @@ def _llm_fallback(text: str) -> str | None:
         "Reply with EXACTLY one word: SELF, OPERATIONAL, or EXTERNAL."
     )
     try:
-        resp = ollama_query(prompt, max_tokens=10, system="")
+        # Bounded for the same reason as question_generator: the default is
+        # four attempts at 90s. This fallback fires on 31 of 55 real winners
+        # (measured on the live journal 2026-08-29), so it is the common
+        # path, not a tail case.
+        resp = ollama_query(prompt, max_tokens=10, system="", timeout=_CLASSIFY_TIMEOUT_S,
+                            retries=0)
     except Exception as exc:
         logger.debug("ollama_query raised: %s", exc)
         return None

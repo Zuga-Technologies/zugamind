@@ -58,9 +58,15 @@ FACETS: tuple[str, ...] = ("sentinel", "deliberative")
 
 
 def _enabled() -> bool:
-    return os.environ.get(
-        "ZUGAMIND_SELF_MOD_ENABLED", "false",
-    ).strip().lower() not in ("0", "false", "no", "off", "")
+    """Is self-modification armed? Defaults OFF, and fails OFF.
+
+    Uses foundation.config.env_flag: an ALLOW-list, so an unrecognised
+    value is OFF and logs. This used to be a deny-list of five
+    spellings, which meant ZUGAMIND_SELF_MOD_ENABLED=disabled ARMED it
+    (measured 2026-08-29) -- along with "none", "n" and "nope".
+    """
+    from foundation.config import env_flag  # noqa: WPS433 — lazy, like the siblings
+    return env_flag("ZUGAMIND_SELF_MOD_ENABLED", default=False)
 
 
 def _data_dir() -> Path:
@@ -102,7 +108,14 @@ def propose(facet: str, text: str, *, why: str, evidence: str = "",
         key = str(path)
         try:
             cool = cooldown if cooldown is not None else SelfModCooldown()
-            remaining = float(cool.remaining_seconds(key, now=ts))
+            # try_claim, not remaining_seconds. The old pair was a
+            # check-then-act with the audit write AND the file write inside
+            # the window, and that window is the only rate limit on an agent
+            # rewriting its own system prompt. Measured 2026-08-29: eight
+            # threads against one 24h lock applied up to 8 of 8, and six
+            # separate processes breached it in five runs of twelve. The claim
+            # is one conditional UPSERT -- see gates/self_mod_cooldown.try_claim.
+            remaining = float(cool.try_claim(key, now=ts))
         except Exception as exc:  # noqa: BLE001 — fail-closed: no lock, no edit
             return _refuse(facet, f"cooldown_error:{type(exc).__name__}:{exc}"[:160], why)
         if remaining > 0:
@@ -135,8 +148,6 @@ def propose(facet: str, text: str, *, why: str, evidence: str = "",
                 except Exception:  # noqa: BLE001
                     pass
                 return _refuse(facet, f"write_error:{type(exc).__name__}:{exc}"[:160], why)
-
-        cool.record(key, now=ts)
         journal.append_event("cognition_mod_applied" if enabled else "cognition_mod_proposed", {
             "facet": facet, "path": key, "why": (why or "")[:200],
             "evidence": (evidence or "")[:200], "enabled": enabled,

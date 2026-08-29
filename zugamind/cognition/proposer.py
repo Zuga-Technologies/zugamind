@@ -56,9 +56,15 @@ _SYSTEM = (
 
 
 def _enabled() -> bool:
-    return os.environ.get(
-        "ZUGAMIND_SELF_MOD_PROPOSER_ENABLED", "false",
-    ).strip().lower() not in ("0", "false", "no", "off", "")
+    """Is self-modification armed? Defaults OFF, and fails OFF.
+
+    Uses foundation.config.env_flag: an ALLOW-list, so an unrecognised
+    value is OFF and logs. This used to be a deny-list of five
+    spellings, which meant ZUGAMIND_SELF_MOD_PROPOSER_ENABLED=disabled ARMED it
+    (measured 2026-08-29) -- along with "none", "n" and "nope".
+    """
+    from foundation.config import env_flag  # noqa: WPS433 — lazy, like the siblings
+    return env_flag("ZUGAMIND_SELF_MOD_PROPOSER_ENABLED", default=False)
 
 
 def _prompt(question: str, answer: str) -> str:

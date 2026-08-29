@@ -33,7 +33,7 @@ from typing import Any, List, Optional
 
 from continuity import journal
 from gates.llm_judge import judge_post
-from gates.work_claim import check_work_claim
+from gates.work_claim import check_entity_grounding, check_work_claim
 
 logger = logging.getLogger("zugamind.reports")
 
@@ -92,22 +92,73 @@ def emit_report(text: str, *, commits: Optional[List[str]] = None,
     except Exception as exc:  # noqa: BLE001 — fail-open by contract
         logger.warning("reports: check_work_claim raised, failing open: %s", exc)
         wc = {"backed": True, "unbacked": [], "reason": f"guard_error:{exc}"[:160]}
+    if not isinstance(wc, dict):
+        # A malformed RETURN is as likely as a raise and used to escape the
+        # try above -- wc.get(...) then raised AttributeError out of the CLI,
+        # writing zero journal events and breaking two documented guarantees
+        # ("exactly one journal event", "never raises"). cognition/thoughts.py
+        # gets this right; this did not (audit 2026-08-29).
+        wc = {"backed": True, "unbacked": [],
+              "reason": f"gate_malformed:{type(wc).__name__}"}
     if not wc.get("backed", True):
         return _suppress(text, "work_claim", str(wc.get("reason")), wc.get("unbacked") or [])
+
+    # The NOUN half of the same question. check_work_claim matches claim VERBS
+    # against commits; a claim with no listed verb ("ClickHouse is now in our
+    # stack" -- the example this module's own docstring names) walks straight
+    # past it. check_entity_grounding is the half that catches it: free,
+    # deterministic, stdlib, and already running on harness replies in
+    # stream/runner.py -- but only ADVISORY there, while this path, the one
+    # that reaches a human, ran the weaker composition. It goes after
+    # work_claim and before the judge deliberately: it is a SUPPRESS-action
+    # gate whose dictionary is empty on Windows (see work_claim's own
+    # docstring), so a false positive here costs one refused report rather
+    # than a silenced agent.
+    try:
+        eg = check_entity_grounding(text, repo_root=repo_root)
+    except Exception as exc:  # noqa: BLE001 — fail-open, same contract as above
+        logger.warning("reports: check_entity_grounding raised, failing open: %s", exc)
+        eg = {"grounded": True, "ungrounded": [], "reason": f"guard_error:{exc}"[:160]}
+    if not isinstance(eg, dict):
+        eg = {"grounded": True, "ungrounded": [],
+              "reason": f"gate_malformed:{type(eg).__name__}"}
+    if not eg.get("grounded", True):
+        return _suppress(text, "entity_grounding", str(eg.get("reason")),
+                         eg.get("ungrounded") or [])
 
     try:
         jv = judge_post(text, commits=commits, window_minutes=window_minutes)
     except Exception as exc:  # noqa: BLE001 — judge_post is itself fail-open; belt and braces
         logger.warning("reports: judge_post raised, failing open: %s", exc)
         jv = {"verdict": "ALLOW", "reason": f"guard_error:{exc}"[:160]}
-    if jv.get("verdict") == "SUPPRESS":
+    if not isinstance(jv, dict):
+        jv = {"verdict": "ALLOW", "reason": f"gate_malformed:{type(jv).__name__}"}
+    if str(jv.get("verdict", "")).strip().upper() == "SUPPRESS":
         return _suppress(text, "judge", str(jv.get("reason")), [])
 
+    # Whether anything actually CHECKED this. Both narrative gates are
+    # fail-open by contract, so with no git and no local model a report sails
+    # through and reads exactly like one both gates passed. The reasons were
+    # journaled but never surfaced, so the one reader who could act on it --
+    # the human holding the draft -- could not tell (audit 2026-08-29).
+    unchecked = [
+        name for name, reason in (
+            ("work_claim", str(wc.get("reason", ""))),
+            ("entity_grounding", str(eg.get("reason", ""))),
+            ("judge", str(jv.get("reason", ""))),
+        )
+        if reason.startswith(("probe_unavailable", "gate_error", "guard_error",
+                              "gate_malformed", "judge_unavailable", "judge_error",
+                              "no_repo"))
+    ]
     journal.append_event("report_emitted", {
-        "text": text, "work_claim": wc.get("reason"), "judge": jv.get("reason"),
+        "text": text, "work_claim": wc.get("reason"),
+        "entity_grounding": eg.get("reason"), "judge": jv.get("reason"),
+        "unchecked_by": unchecked,
     })
     return {"emitted": True, "stage": None, "reason": "emitted",
-            "unbacked": [], "judge": jv.get("reason")}
+            "unbacked": [], "judge": jv.get("reason"),
+            "gated": not unchecked, "unchecked_by": unchecked}
 
 
 def _suppress(text: str, stage: str, reason: str, unbacked: list) -> dict[str, Any]:

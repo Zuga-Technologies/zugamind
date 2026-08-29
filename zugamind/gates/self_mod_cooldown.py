@@ -87,3 +87,43 @@ class SelfModCooldown:
 
     def is_cooling(self, file_path: str, *, now: Optional[float] = None) -> bool:
         return self.remaining_seconds(file_path, now=now) > 0.0
+
+    def try_claim(self, file_path: str, *, now: Optional[float] = None) -> float:
+        """Atomically take the cooldown for `file_path`.
+
+        Returns 0.0 if the claim was WON (the caller may proceed), else the
+        seconds still remaining.
+
+        This exists because `remaining_seconds()` followed by `record()` is a
+        check-then-act: everything the caller does in between -- the audit
+        write AND the actual file write -- happens inside a window where a
+        second caller sees the same "free" answer. That window is the only
+        rate limit on an agent rewriting its own system prompt, and under
+        concurrency it stopped nothing: measured 2026-08-29, eight threads
+        against one 24h lock applied 2, 3, 8, 7 and 8 of 8 across five runs,
+        and six separate PROCESSES breached it in five runs of twelve.
+
+        The whole decision is one conditional UPSERT, which sqlite executes as
+        a single implicit transaction -- there is no window left to race in.
+        The WHERE clause only lets the timestamp move forward once the
+        cooldown has actually elapsed, so a losing caller changes nothing.
+        """
+        ts = time.time() if now is None else now
+        conn = self._connect()
+        try:
+            cur = conn.execute(
+                "INSERT INTO file_cooldown (path, last_ts) VALUES (?, ?) "
+                "ON CONFLICT(path) DO UPDATE SET last_ts=excluded.last_ts "
+                "WHERE excluded.last_ts - file_cooldown.last_ts >= ?",
+                (file_path, ts, self.cooldown_seconds),
+            )
+            if cur.rowcount == 1:
+                return 0.0
+            row = conn.execute(
+                "SELECT last_ts FROM file_cooldown WHERE path=?", (file_path,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return 0.0
+        return max(0.0, self.cooldown_seconds - (ts - float(row["last_ts"])))

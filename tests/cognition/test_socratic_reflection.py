@@ -59,7 +59,7 @@ def test_classify_domain_keyword_is_word_bounded():
 # --- question_generator -------------------------------------------------------
 
 def test_generate_question_parses_valid_response():
-    def fake_ollama(prompt, max_tokens=120, system=""):
+    def fake_ollama(prompt, max_tokens=120, system="", **kwargs):
         return '{"text": "Why did the workspace_winner change?", "answer_source_hint": "code_search"}'
 
     q = generate_question({"text": "workspace winner"}, "SELF", ollama_query_fn=fake_ollama)
@@ -80,14 +80,14 @@ def test_generate_question_none_on_model_failure():
 
 def test_generate_question_drops_unanswerable_code_search():
     # "hi ok to" are all stopwords/too-short — no extractable keyword.
-    def fake_ollama(prompt, max_tokens=120, system=""):
+    def fake_ollama(prompt, max_tokens=120, system="", **kwargs):
         return '{"text": "is it ok?", "answer_source_hint": "code_search"}'
 
     assert generate_question({"text": "x"}, "SELF", ollama_query_fn=fake_ollama) is None
 
 
 def test_generate_question_invalid_hint_defaults_to_none():
-    def fake_ollama(prompt, max_tokens=120, system=""):
+    def fake_ollama(prompt, max_tokens=120, system="", **kwargs):
         return '{"text": "What changed?", "answer_source_hint": "carrier_pigeon"}'
 
     q = generate_question({"text": "x"}, "SELF", ollama_query_fn=fake_ollama)
@@ -117,7 +117,7 @@ def test_answer_question_code_search_success(monkeypatch):
     r = answer_question("what is workspace_winner?", "code_search")
     assert r["success"] is True
     assert "workspace_winner" in r["content"]
-    assert r["meta"]["matches"] == 1
+    assert r["meta"]["shown"] == 1
 
 
 def test_answer_question_code_search_no_matches(monkeypatch):

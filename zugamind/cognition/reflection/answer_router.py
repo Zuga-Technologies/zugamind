@@ -30,6 +30,9 @@ from __future__ import annotations
 import re
 import subprocess
 import time
+
+# Matching lines kept from a search. See _answer_via_code_search.
+_MAX_LINES = 20
 from pathlib import Path
 from typing import Any
 
@@ -74,9 +77,16 @@ def _answer_via_code_search(question: str) -> dict[str, Any]:
     # separator so this call stays safe on its own.
     cmds = [
         ["git", "grep", "-n", "-I", "-E", "--max-count=3", "--", pattern],
+        # `--exclude-dir=data` is the important one. git grep sees TRACKED
+        # files only; this fallback ignores .gitignore entirely, so without it
+        # a model-authored question grep-scrapes the agent's own episodic
+        # memory -- journal.jsonl, state.json, the scanner caches -- and
+        # returns it as an "answer" that gets journaled and handed onward.
+        # The two commands must have the same visibility or the answer depends
+        # on which one happened to run (audit 2026-08-29).
         ["grep", "-rn", "-I", "-E", "--max-count=3", "--exclude-dir=.git",
-         "--exclude-dir=node_modules", "--exclude-dir=.venv", "--exclude-dir=__pycache__",
-         "--", pattern, "."],
+         "--exclude-dir=data", "--exclude-dir=node_modules", "--exclude-dir=.venv",
+         "--exclude-dir=__pycache__", "--", pattern, "."],
     ]
     out = ""
     err_msg = ""
@@ -103,7 +113,8 @@ def _answer_via_code_search(question: str) -> dict[str, Any]:
         return {"content": f"no matches for `{', '.join(keywords)}`", "success": True,
                 "meta": {"keywords": keywords, "matches": 0}}
 
-    raw_lines = out.splitlines()[:20]
+    all_lines = out.splitlines()
+    raw_lines = all_lines[:_MAX_LINES]
     by_file: dict[str, list[tuple[str, str]]] = {}
     for line in raw_lines:
         parts = line.split(":", 2)
@@ -113,7 +124,12 @@ def _answer_via_code_search(question: str) -> dict[str, Any]:
         else:
             by_file.setdefault("(misc)", []).append(("", line))
 
-    md_parts = [f"Found {len(raw_lines)} matches for `{', '.join(keywords)}`:\n"]
+    # raw_lines has already been sliced to _MAX_LINES above, so this count is
+    # "what we are showing", not "what exists". Saying "Found 20" when 162
+    # lines matched is a number that is not the number, in a record a human
+    # reads (audit 2026-08-29).
+    md_parts = [f"Showing {len(raw_lines)} matching line(s) for "
+                f"`{', '.join(keywords)}`:\n"]
     for f, hits in by_file.items():
         md_parts.append(f"**`{f}`**")
         md_parts.append("```")
@@ -122,7 +138,10 @@ def _answer_via_code_search(question: str) -> dict[str, Any]:
             md_parts.append(f"{prefix}{match}")
         md_parts.append("```")
     content = "\n".join(md_parts)[:_CONTENT_CAP]
-    return {"content": content, "success": True, "meta": {"keywords": keywords, "matches": len(raw_lines)}}
+    return {"content": content, "success": True,
+            "meta": {"keywords": keywords, "shown": len(raw_lines),
+                     "total_matches": len(all_lines),
+                     "truncated": len(all_lines) > len(raw_lines)}}
 
 
 def answer_question(

@@ -62,8 +62,12 @@ def test_report_shows_the_suppression_reason_not_the_draft(data_dir, monkeypatch
 
     out = capsys.readouterr().out
     assert rc == 1
-    assert "SUPPRESSED" in out and "judge" in out
-    assert "ClickHouse appears in no commit" in out
+    # entity_grounding, not judge: the noun-side check is free, deterministic
+    # and now runs BEFORE the model on the human-facing path, so it catches
+    # "ClickHouse is now in our stack" -- a claim with no work-claim VERB --
+    # without spending an inference (audit 2026-08-29).
+    assert "SUPPRESSED" in out and "entity_grounding" in out
+    assert "ClickHouse" in out
     assert "now in our stack" not in out
     kinds = [e["kind"] for e in journal.read_events(limit=50)]
     assert "report_suppressed" in kinds
