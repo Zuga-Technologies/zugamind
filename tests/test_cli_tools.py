@@ -89,6 +89,26 @@ def test_report_with_an_empty_window_says_so(data_dir, capsys):
     assert "nothing" in capsys.readouterr().out.lower()
 
 
+# --- self-mod: the agent's own override file, under cooldown -------------------------
+
+def test_self_mod_applies_once_then_refuses_and_says_how_long(data_dir, monkeypatch, capsys):
+    monkeypatch.setenv("ZUGAMIND_SELF_MOD_ENABLED", "true")
+    from cognition import self_mod
+    text_file = data_dir / "new_override.md"
+    text_file.write_text("Prefer the smaller fix.", encoding="utf-8")
+
+    rc1 = cli_tools.cmd_self_mod(_ns(facet="deliberative", text_file=str(text_file),
+                                     why="reflection said so", evidence="reflection@1"))
+    out1 = capsys.readouterr().out
+    rc2 = cli_tools.cmd_self_mod(_ns(facet="deliberative", text_file=str(text_file),
+                                     why="again", evidence="reflection@2"))
+    out2 = capsys.readouterr().out
+
+    assert rc1 == 0 and "applied" in out1
+    assert self_mod.override_path("deliberative").read_text(encoding="utf-8") == "Prefer the smaller fix."
+    assert rc2 == 1 and "cooling" in out2 and "h" in out2  # "... 23.9h left"
+
+
 # --- parse_when ----------------------------------------------------------------------
 
 def test_parse_when_relative_and_today():

@@ -551,6 +551,40 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# self-mod — rewrite one facet's runtime override, under the 24h cooldown
+# ---------------------------------------------------------------------------
+
+def cmd_self_mod(args: argparse.Namespace) -> int:
+    """First caller of cognition.self_mod.propose. Applies only when
+    ZUGAMIND_SELF_MOD_ENABLED is on; otherwise records the proposal. Exit 1
+    on any refusal (cooling, unknown facet, empty text, cannot lock)."""
+    from cognition.self_mod import FACETS, propose
+
+    try:
+        text = Path(args.text_file).read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"cannot read {args.text_file}: {exc}")
+        return 1
+    v = propose(args.facet, text, why=args.why, evidence=getattr(args, "evidence", "") or "")
+    if v["applied"]:
+        print(f"applied: {v['facet']} override rewritten -> {v['path']}")
+        print("  cooling 24h; the previous text is in the audit log; `rm` the file to revert fully")
+        return 0
+    if v["reason"] == "disabled":
+        print(f"recorded, NOT applied: ZUGAMIND_SELF_MOD_ENABLED is off "
+              f"({v['facet']} is now cooling 24h anyway; proposal is in the audit log)")
+        return 0
+    if v["reason"] == "cooling":
+        print(f"refused: {v['facet']} is cooling -- {v['remaining_seconds'] / 3600:.1f}h left")
+        return 1
+    if v["reason"] == "unknown_facet":
+        print(f"refused: unknown facet {args.facet!r}; one of {', '.join(FACETS)}")
+        return 1
+    print(f"refused: {v['reason']}")
+    return 1
+
+
+# ---------------------------------------------------------------------------
 # registration
 # ---------------------------------------------------------------------------
 
@@ -588,6 +622,16 @@ def register(sub: "argparse._SubParsersAction") -> None:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_report)
 
+    p = sub.add_parser("self-mod", help="rewrite one facet's runtime override (data/overrides/<facet>.md) "
+                                        "under the 24h per-file cooldown; applies only if "
+                                        "ZUGAMIND_SELF_MOD_ENABLED, else records the proposal")
+    p.add_argument("facet", help="sentinel | deliberative")
+    p.add_argument("text_file", help="file whose contents become the new override")
+    p.add_argument("--why", required=True, help="one line: why this change")
+    p.add_argument("--evidence", default="", help="what backs it (journal ids, a reflection, ...)")
+    p.set_defaults(func=cmd_self_mod)
+
 
 __all__ = ["register", "run_doctor", "explain_cycle", "summarize_event", "parse_when",
-           "cmd_doctor", "cmd_logs", "cmd_budget", "cmd_explain", "cmd_verify", "cmd_report"]
+           "cmd_doctor", "cmd_logs", "cmd_budget", "cmd_explain", "cmd_verify", "cmd_report",
+           "cmd_self_mod"]
