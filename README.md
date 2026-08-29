@@ -40,7 +40,7 @@ means there is no install step:
 ```bash
 git clone https://github.com/Zuga-Technologies/zugamind.git
 cd zugamind
-python demo.py        # offline demo — no key, no network
+python demo.py        # offline demo — no key, no network (add --live to spend)
 ```
 
 ![Real terminal recording of python demo.py --cycles 4 — salience bids compete, one winner per cycle, final winner routed through the action gate in dry-run](docs/assets/zugamind-demo.gif)
@@ -71,9 +71,23 @@ zugamind              # starts the daemon if it isn't already running, then
 
 ```bash
 zugamind start        # start it in the background, detached, and exit
-zugamind status        # one-shot snapshot: running?, state, last wake
+zugamind status        # one-shot snapshot: running?, state, last wake, spend
 zugamind watch          # attach to a running daemon, stream activity live
 zugamind stop             # stop the background daemon
+```
+
+Operator tools (added 2026-08-29 — each answers a question you used to
+answer by reading source or hand-parsing `journal.jsonl`):
+
+```bash
+zugamind doctor                 # is my wiring sane? config, key presence, local
+                                #   model, budget, journal health, stale PID. Exit 1 on FAIL
+zugamind logs -n 50             # the journal, one line per event, across segments
+zugamind logs --since 3h --kind harness_invocation,alarm
+zugamind logs -f                # follow (rotation-aware); --json for jq
+zugamind budget                 # this month's spend vs the cap, calls by tier, pace
+zugamind explain                # why did the last winning cycle wake (or not)
+zugamind verify --dry-run       # the end-to-end canary wake test
 ```
 
 Ctrl-C on `zugamind`/`zugamind watch` only stops *watching* — the daemon

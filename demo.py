@@ -70,7 +70,7 @@ def scan_toy_external_signal(rng: random.Random) -> list[dict]:
 TOY_SCANNERS = [scan_toy_infrastructure, scan_toy_code_changes, scan_toy_external_signal]
 
 
-def run_demo(cycles: int, seed: int) -> None:
+def run_demo(cycles: int, seed: int, live: bool = False) -> None:
     rng = random.Random(seed)
 
     workspace = Workspace()
@@ -83,7 +83,13 @@ def run_demo(cycles: int, seed: int) -> None:
 
     planner = WorkspacePlanner()
     budget = {"remaining": 10.0}
-    has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    # A paid call happens ONLY with an explicit --live. A merely-exported
+    # ANTHROPIC_API_KEY (most dev shells have one) used to be enough, and the
+    # spend landed in the live daemon's budget.json — the README promises
+    # "no key, no network" and the default must keep that promise.
+    has_key = live and bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if live and not has_key:
+        print("--live given but ANTHROPIC_API_KEY is not set: staying dry-run.\n")
 
     for cycle in range(1, cycles + 1):
         triggers: list[dict] = []
@@ -125,7 +131,8 @@ def run_demo(cycles: int, seed: int) -> None:
             if result.get("response"):
                 print(f"  Claude says: {result['response'][:300]}")
         else:
-            print(f"  (dry run — set ANTHROPIC_API_KEY to actually call Claude) -> {result}")
+            print(f"  (dry run — pass --live with ANTHROPIC_API_KEY set to actually call Claude; "
+                  f"that spends from the engine's budget.json) -> {result}")
 
     print(f"\nDone. {cycles} cycles, {workspace.attention_schema.attention_switches} "
           f"attention switches, blind spots: {workspace.attention_schema.blind_spots}")
@@ -135,5 +142,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cycles", type=int, default=8, help="number of workspace cycles to run")
     parser.add_argument("--seed", type=int, default=7, help="RNG seed for the toy scanners")
+    parser.add_argument("--live", action="store_true",
+                        help="route the final winner to Claude for real (needs ANTHROPIC_API_KEY; spends money)")
     args = parser.parse_args()
-    run_demo(args.cycles, args.seed)
+    run_demo(args.cycles, args.seed, live=args.live)

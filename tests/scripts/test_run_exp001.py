@@ -201,3 +201,16 @@ def test_condition_a_replays_identically_for_the_same_seed(tiny_corpus, tmp_path
         random.random()
     second = go("two")
     assert first == second
+
+
+def test_condition_a_restores_the_actuator_loaders(tiny_corpus, tmp_path):
+    """Condition A overrides two process-global loaders on the actuator so
+    the experiment's config wins. It used to leave them overridden: any
+    later caller of the real loader in the same process (the test suite,
+    the zugamind doctor command) got the oracle config instead of the file
+    on disk. Caught 2026-08-29."""
+    before = (exp.command_actuator.load_harness_configs, exp.command_actuator.load_quiet_hours)
+    exp.run_once_for_condition("A", run_idx=0, seed=11, out_dir=tmp_path / "out",
+                               dry_run=True, tick_hours=4.0,
+                               harness_cfg=exp.oracle_config(for_condition_a=True))
+    assert (exp.command_actuator.load_harness_configs, exp.command_actuator.load_quiet_hours) == before

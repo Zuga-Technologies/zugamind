@@ -15,11 +15,17 @@ Subcommands:
                                from this terminal (survives it closing).
     zugamind stop              stop the background daemon.
     zugamind status             one-shot snapshot: running?, current state,
-                                 last wake, latest cycle. No watching.
+                                 last wake, latest event, this month's spend,
+                                 journal size. No watching.
     zugamind watch               attach to a running daemon and stream its
                                   activity live (real time, timestamped).
+                                  --result-file PATH (or $ZUGAMIND_RESULT_FILE)
+                                  also tails the file your harness writes its
+                                  result to, after each wake.
     zugamind demo                 run the zero-setup synthetic demo
                                    (python demo.py) — no daemon, no state.
+    zugamind doctor | logs | budget | explain | verify
+                                  operator tools — see cli_tools.py.
 
 Stdlib only, matching the rest of this package's zero-dependency design.
 Cross-platform (Windows + POSIX) detach and liveness-check, no OS branching
@@ -57,7 +63,30 @@ BANNER = r"""
 """
 
 ANSI_RE = re.compile(r"\033\[[0-9;]*m")
-ANSI = sys.stdout.isatty()
+
+
+def _colour_enabled() -> bool:
+    """Colour only on a real terminal, never under NO_COLOR, and on Windows
+    only after switching the console into VT mode — legacy conhost prints
+    the escape sequences as literal garbage otherwise."""
+    if os.environ.get("NO_COLOR"):
+        return False
+    if not sys.stdout.isatty():
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            handle = k32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+            mode = ctypes.c_uint32()
+            if k32.GetConsoleMode(handle, ctypes.byref(mode)):
+                k32.SetConsoleMode(handle, mode.value | 0x0004)  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+        except Exception:  # noqa: BLE001 — colour is cosmetic
+            return False
+    return True
+
+
+ANSI = _colour_enabled()
 RESET = "\033[0m" if ANSI else ""
 DIM = "\033[2m" if ANSI else ""
 BOLD = "\033[1m" if ANSI else ""
@@ -69,6 +98,44 @@ YELLOW = "\033[93m" if ANSI else ""
 
 def _now() -> str:
     return datetime.now().strftime("%H:%M:%S")
+
+
+def _wrap(text: str, width: int, indent: str = "", first: str = "") -> str:
+    words = [w for w in text.split(" ") if w]
+    if not words:
+        return ""
+    lines, prefix, cur = [], first, []
+    for w in words:
+        trial = prefix + " ".join(cur + [w])
+        if cur and len(ANSI_RE.sub("", trial)) > width:
+            lines.append(prefix + " ".join(cur))
+            prefix, cur = indent, [w]
+        else:
+            cur.append(w)
+    lines.append(prefix + " ".join(cur))
+    return "\n".join(lines)
+
+
+def render_markdown(text: str, width: int = 0) -> str:
+    """Terminal rendering of a harness reply: headings, bullets, **bold**,
+    `code`, wrapped to the terminal. Ported from the retired
+    tools/live-wake-monitor.py — `watch` used to print the raw markdown."""
+    width = width or max(20, shutil.get_terminal_size(fallback=(100, 24)).columns - 2)
+    out = []
+    for raw in text.split("\n"):
+        if not raw.strip():
+            out.append("")
+            continue
+        m = re.match(r"^(#{1,4})\s+(.*)$", raw)
+        if m:
+            out.append(_wrap(f"{BOLD}{CYAN}{m.group(2)}{RESET}", width, "  ", f"{CYAN}|{RESET} "))
+            continue
+        m = re.match(r"^(\s*)[-*]\s+(.*)$", raw)
+        body = m.group(2) if m else raw
+        body = re.sub(r"\*\*(.+?)\*\*", f"{BOLD}\\1{RESET}", body)
+        body = re.sub(r"`([^`]+)`", f"{YELLOW}\\1{RESET}", body)
+        out.append(_wrap(body, width, "  ", f"{CYAN}>{RESET} ") if m else _wrap(body, width))
+    return "\n".join(out)
 
 
 def _status_line(text: str) -> None:
@@ -83,6 +150,50 @@ def _status_line(text: str) -> None:
     pad = max(0, cols - len(visible) - 1)
     sys.stdout.write("\r" + text + " " * pad)
     sys.stdout.flush()
+
+
+def _safe_stdout() -> None:
+    """A redirected stdout on Windows is cp1252 (or cp437) — one glyph outside
+    it and `print` raises UnicodeEncodeError, and `watch > log.txt` dies the
+    first time something notable happens. Replace, never raise."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except Exception:  # noqa: BLE001 — not a real TextIOWrapper (captured, closed)
+            pass
+
+
+_OWNER_CACHE: dict[int, bool] = {}
+
+
+def _pid_is_ours(pid: int) -> bool:
+    """Is that live PID actually the daemon, or a recycled number now owned
+    by some unrelated process? Best-effort: image name on Windows, cmdline
+    on POSIX. Unknown -> True (never turn a live daemon into 'not running'
+    on a lookup hiccup). Cached per PID: `watch` polls this in a loop."""
+    if pid in _OWNER_CACHE:
+        return _OWNER_CACHE[pid]
+    ours = True
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True, timeout=5).stdout
+            if out.strip() and not out.lower().startswith("info:"):
+                image = out.split(",")[0].strip('"').lower()
+                ours = "python" in image or "zugamind" in image
+        else:
+            proc = Path(f"/proc/{pid}/cmdline")
+            if proc.exists():
+                cmdline = proc.read_bytes().replace(b"\0", b" ").decode("utf-8", "replace").lower()
+            else:
+                cmdline = subprocess.run(["ps", "-p", str(pid), "-o", "args="],
+                                         capture_output=True, text=True, timeout=5).stdout.lower()
+            if cmdline.strip():
+                ours = "stream.runner" in cmdline or "zugamind" in cmdline or "python" in cmdline
+    except Exception:  # noqa: BLE001
+        ours = True
+    _OWNER_CACHE[pid] = ours
+    return ours
 
 
 def _read_pid() -> Optional[int]:
@@ -110,7 +221,7 @@ def _pid_alive(pid: int) -> bool:
 
 def _running_pid() -> Optional[int]:
     pid = _read_pid()
-    if pid and _pid_alive(pid):
+    if pid and _pid_alive(pid) and _pid_is_ours(pid):
         return pid
     return None
 
@@ -184,6 +295,41 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return 0
 
 
+def _tail(path: Path, pos: int) -> tuple:
+    """Read everything appended to `path` since byte `pos`; returns
+    (text, new_pos, rotated). The journal RENAMES itself when it rotates,
+    so the path can suddenly be a smaller, fresh file: a plain seek to the
+    old offset then reads nothing until the new file grows past it —
+    events silently missed. A shrink resets the cursor to 0."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return "", 0, False
+    rotated = size < pos
+    if rotated:
+        pos = 0
+    with open(path, "rb") as f:  # bytes: the cursor is a byte offset, not a text-mode cookie
+        f.seek(pos)
+        new = f.read()
+        return new.decode("utf-8", "replace"), f.tell(), rotated
+
+
+def _wait_for_result_file(result_file: Path, rpos: int) -> int:
+    """Tail a separate file the harness writes its result to (observation-
+    mode harnesses append to a notes file instead of printing). Folded in
+    from the retired tools/live-wake-monitor.py; returns the new cursor."""
+    print(f"{YELLOW}waiting for the result to land in {result_file}...{RESET}")
+    while True:
+        time.sleep(1)
+        new, rpos, _ = _tail(result_file, rpos)
+        if new.strip():
+            print(f"\n{GREEN}{BOLD}> RESULT LANDED  [{_now()}]{RESET}\n")
+            print(render_markdown(new.strip()[:4000]))
+            print()
+            return rpos
+        _status_line(f"{DIM}[{_now()}] watching {result_file.name}...{RESET}")
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     pid = _running_pid()
     print(f"daemon: {GREEN + 'running' + RESET if pid else RED + 'not running' + RESET}"
@@ -201,18 +347,35 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         print("state: (no state file yet — hasn't run a cycle)")
 
-    if JOURNAL_FILE.exists():
-        try:
-            last_line = None
-            with open(JOURNAL_FILE, encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        last_line = line
-            if last_line:
-                ev = json.loads(last_line)
-                print(f"last journal event: {ev.get('kind')} @ {ev.get('ts', '?')}")
-        except Exception:
-            pass
+    # Last event across BOTH journal segments: right after a rotation the
+    # active file is empty and the newest event lives in journal.1.jsonl.
+    try:
+        from continuity import journal as _journal  # noqa: WPS433 — test-patchable seam
+        last = _journal.read_events(limit=1)
+        if last:
+            ev = last[0]
+            print(f"last journal event: {ev.get('kind')} @ {ev.get('ts', '?')}")
+        segments = [seg for seg in (_journal.previous_segment(), _journal.JOURNAL_FILE) if seg.exists()]
+        if segments:
+            total = sum(seg.stat().st_size for seg in segments)
+            archived = len(_journal.archive_files())
+            print(f"journal: {total / 1024:.0f} KB live in {len(segments)} segment(s)"
+                  + (f", {archived} archived" if archived else ""))
+    except Exception:
+        pass
+
+    # Money: the one number an operator of a wake-spending daemon needs.
+    try:
+        from foundation.budget import load_budget  # noqa: WPS433
+        from foundation.config import monthly_cap  # noqa: WPS433
+        b = load_budget()
+        calls = b.get("calls") or {}
+        paid = sum(int(v) for k, v in calls.items() if k != "local")
+        print(f"spend this month: ${float(b.get('paid_spent', 0.0)):.4f} of ${monthly_cap():.2f} cap "
+              f"(${float(b.get('remaining', 0.0)):.2f} left) — "
+              f"{paid} paid call(s), {int(calls.get('local', 0))} local")
+    except Exception:
+        pass
     return 0
 
 
@@ -231,17 +394,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
         JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
         JOURNAL_FILE.touch()
 
-    with open(JOURNAL_FILE, encoding="utf-8") as f:
-        f.seek(0, os.SEEK_END)
-        pos = f.tell()
+    pos = JOURNAL_FILE.stat().st_size
+    result_file = getattr(args, "result_file", None) or os.environ.get("ZUGAMIND_RESULT_FILE")
+    result_path = Path(result_file) if result_file else None
+    rpos = result_path.stat().st_size if result_path and result_path.exists() else 0
 
     try:
         while True:
             time.sleep(1)
-            with open(JOURNAL_FILE, encoding="utf-8") as f:
-                f.seek(pos)
-                new = f.read()
-                pos = f.tell()
+            new, pos, rotated = _tail(JOURNAL_FILE, pos)
+            if rotated:
+                print(f"\n{DIM}(journal rotated — following the fresh file)  [{_now()}]{RESET}")
             if new:
                 for line in new.strip().split("\n"):
                     if not line:
@@ -283,9 +446,9 @@ def cmd_watch(args: argparse.Namespace) -> int:
                                 human = LABELS.get(mod, mod)
                                 if won:
                                     content = (w.get("content") or "").strip()
-                                    print(f"\n{GREEN}{BOLD}  ⚡ NOTICED{RESET}  "
+                                    print(f"\n{GREEN}{BOLD}  * NOTICED{RESET}  "
                                           f"{DIM}[{_now()}]{RESET}")
-                                    print(f"  {human} → {content[:110]}")
+                                    print(f"  {human} -> {content[:110]}")
                                 else:
                                     print(f"  {DIM}· saw {human}, not urgent yet"
                                           f"  [{_now()}]{RESET}")
@@ -293,12 +456,31 @@ def cmd_watch(args: argparse.Namespace) -> int:
                     elif kind == "alarm":
                         print(f"\n\n{RED}{BOLD}! ALARM  [{_now()}]{RESET}  {ev.get('detail')}")
                     elif kind == "harness_invocation":
-                        print(f"\n\n{GREEN}{BOLD}> WAKE FIRED  [{_now()}]{RESET}  "
-                              f"harness={ev.get('harness')}")
+                        ok = ev.get("ok")
+                        tag = "WAKE FIRED" if ok else f"WAKE FAILED ({ev.get('error', '?')})"
+                        colour = GREEN if ok else RED
+                        print(f"\n\n{colour}{BOLD}> {tag}  [{_now()}]{RESET}  "
+                              f"harness={ev.get('harness')}{' (dry-run)' if ev.get('dry_run') else ''}")
                         stdout = (ev.get("stdout") or "").strip()
                         if stdout:
-                            print(stdout)
+                            print(render_markdown(stdout[:4000]))
                         print()
+                        if result_path and ok and not ev.get("dry_run"):
+                            rpos = _wait_for_result_file(result_path, rpos)
+                    elif kind == "quiet_hours_deferred":
+                        w = ev.get("winner") or {}
+                        print(f"\n{YELLOW}~ DEFERRED (quiet hours)  [{_now()}]{RESET}  "
+                              f"{ev.get('harness')} <- {w.get('source_module', '?')}")
+                    elif kind == "harness_rate_limited":
+                        print(f"\n{YELLOW}~ RATE LIMITED  [{_now()}]{RESET}  {ev.get('harness')} "
+                              f"({ev.get('window')} cap {ev.get('recent_count')}/"
+                              f"{ev.get('max_per_hour') or ev.get('max_per_day')})")
+                    elif kind in ("cycle_error", "harness_rate_limit_indeterminate", "budget_persist_failed"):
+                        print(f"\n{RED}{BOLD}! {kind.upper()}  [{_now()}]{RESET}  "
+                              f"{str(ev.get('error') or ev.get('failure_reason') or '')[:200]}")
+                    elif kind in ("paused", "resumed", "daemon_restarted", "floor_calibrated",
+                                  "floor_basis_switched", "floor_drifted"):
+                        print(f"\n{DIM}· {kind}  [{_now()}]{RESET}")
             else:
                 _status_line(f"{DIM}[{_now()}] watching...{RESET}")
     except KeyboardInterrupt:
@@ -316,12 +498,19 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
 def cmd_default(args: argparse.Namespace) -> int:
     if not _running_pid():
-        cmd_start(args)
+        try:
+            cmd_start(args)
+        except Exception as e:  # noqa: BLE001 — bad interpreter, unwritable data dir, ...
+            print(f"{RED}could not start the daemon:{RESET} {e}")
+            print(f"{DIM}try `zugamind doctor`, or look in {DAEMON_LOG}{RESET}")
+            if not _running_pid():
+                return 1
         print()
     return cmd_watch(args)
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    _safe_stdout()
     parser = argparse.ArgumentParser(prog="zugamind", description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command")
@@ -338,11 +527,17 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_status.set_defaults(func=cmd_status)
 
     p_watch = sub.add_parser("watch", help="attach and watch live")
+    p_watch.add_argument("--result-file", default=None,
+                         help="also tail this file for the harness's result after each wake "
+                              "(default: $ZUGAMIND_RESULT_FILE)")
     p_watch.set_defaults(func=cmd_watch)
 
     p_demo = sub.add_parser("demo", help="run the zero-setup synthetic demo")
     p_demo.add_argument("rest", nargs=argparse.REMAINDER)
     p_demo.set_defaults(func=cmd_demo)
+
+    from cli_tools import register as _register_tools  # noqa: WPS433 — keeps this file's import graph small
+    _register_tools(sub)
 
     args = parser.parse_args(argv)
     if args.command is None:

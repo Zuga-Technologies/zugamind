@@ -392,6 +392,14 @@ def run_once_for_condition(condition: str, run_idx: int, seed: int, out_dir: Pat
         cfg = dict(harness_cfg) if harness_cfg else oracle_config(for_condition_a=True)
         if "wake_min_salience" not in cfg:
             cfg["wake_min_salience"] = 0.35
+        # These are process-global overrides of the actuator's loaders. They
+        # MUST be restored: when this module is imported into a shared
+        # process (the test suite), leaving them in place fed the oracle
+        # config to every later caller of the real loader (caught
+        # 2026-08-29 — `zugamind doctor` tests saw a harness named
+        # "oracle" that exists in no file).
+        _orig_load = command_actuator.load_harness_configs
+        _orig_quiet = command_actuator.load_quiet_hours
         command_actuator.load_harness_configs = (  # experiment config wins
             lambda *a, _cfg=cfg, **kw: [_cfg])
         # Isolate quiet hours too: load_quiet_hours() reads the DEFAULT
@@ -401,7 +409,11 @@ def run_once_for_condition(condition: str, run_idx: int, seed: int, out_dir: Pat
         # in that window — contaminating 4 sweep runs. Simulated weeks have
         # no operator sleep schedule.
         command_actuator.load_quiet_hours = lambda *a, **kw: None
-        records = run_condition_a(events, n_ticks, tick_hours, dry_run)
+        try:
+            records = run_condition_a(events, n_ticks, tick_hours, dry_run)
+        finally:
+            command_actuator.load_harness_configs = _orig_load
+            command_actuator.load_quiet_hours = _orig_quiet
     else:
         cfg = harness_cfg or oracle_config()
         records = run_condition_bc(events, n_ticks, tick_hours, dry_run,
