@@ -41,6 +41,54 @@ def _ns(**kw):
     return argparse.Namespace(**kw)
 
 
+# --- report: the agent's account of its own work, judged before it is shown --------
+
+def test_report_shows_the_suppression_reason_not_the_draft(data_dir, monkeypatch, capsys):
+    """`zugamind report` is the one place the agent composes prose about its
+    own work for a human. A draft the judge refuses must come back as WHY it
+    was refused -- the draft itself stays in the journal for inspection."""
+    import cognition.models.ollama as ollama_mod
+    import gates.work_claim as work_claim_mod
+
+    journal.append_event("harness_invocation", {
+        "harness": "claude-code", "ok": True, "dry_run": False,
+        "stdout": "ClickHouse is now in our stack.",
+    })
+    monkeypatch.setattr(work_claim_mod, "_recent_commits", lambda *a, **kw: [])
+    monkeypatch.setattr(ollama_mod, "ollama_query",
+                        lambda *a, **kw: "SUPPRESS\nClickHouse appears in no commit")
+
+    rc = cli_tools.cmd_report(_ns(minutes=60, json=False))
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "SUPPRESSED" in out and "judge" in out
+    assert "ClickHouse appears in no commit" in out
+    assert "now in our stack" not in out
+    kinds = [e["kind"] for e in journal.read_events(limit=50)]
+    assert "report_suppressed" in kinds
+
+
+def test_report_emits_the_composed_text_when_both_guards_allow(data_dir, monkeypatch, capsys):
+    import cognition.models.ollama as ollama_mod
+
+    journal.append_event("cycle", {"trigger_count": 1,
+                                   "winner": {"source_module": "repo", "content": "issue #12"}})
+    monkeypatch.setattr(ollama_mod, "ollama_query", lambda *a, **kw: "ALLOW\nfine")
+
+    rc = cli_tools.cmd_report(_ns(minutes=60, json=False))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "1 cycle" in out and "repo" in out
+
+
+def test_report_with_an_empty_window_says_so(data_dir, capsys):
+    rc = cli_tools.cmd_report(_ns(minutes=60, json=False))
+    assert rc == 0
+    assert "nothing" in capsys.readouterr().out.lower()
+
+
 # --- parse_when ----------------------------------------------------------------------
 
 def test_parse_when_relative_and_today():

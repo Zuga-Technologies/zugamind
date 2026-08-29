@@ -521,6 +521,36 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# report — the agent's account of its own work, judged before it is shown
+# ---------------------------------------------------------------------------
+
+def cmd_report(args: argparse.Namespace) -> int:
+    """Compose a report from the journal and show it ONLY if both narrative
+    gates let it through. A refusal prints the stage and reason, never the
+    draft: the draft is in the journal (`logs --kind report_suppressed`).
+    Exit 1 on suppression so a script can tell the two apart."""
+    from cognition.reports import compose_report, emit_report
+
+    minutes = int(getattr(args, "minutes", 60) or 60)
+    draft = compose_report(window_minutes=minutes)
+    if not draft:
+        print(f"nothing in the journal for the last {minutes} minutes")
+        return 0
+    verdict = emit_report(draft, window_minutes=minutes)
+    if getattr(args, "json", False):
+        print(json.dumps({**verdict, "text": draft if verdict["emitted"] else None}, default=str))
+        return 0 if verdict["emitted"] else 1
+    if verdict["emitted"]:
+        print(draft)
+        return 0
+    print(f"REPORT SUPPRESSED at {verdict['stage']}: {verdict['reason']}")
+    for sentence in verdict.get("unbacked") or []:
+        print(f"  unbacked claim: {sentence}")
+    print("  (draft kept in the journal: zugamind logs --kind report_suppressed)")
+    return 1
+
+
+# ---------------------------------------------------------------------------
 # registration
 # ---------------------------------------------------------------------------
 
@@ -552,6 +582,12 @@ def register(sub: "argparse._SubParsersAction") -> None:
     p.add_argument("rest", nargs=argparse.REMAINDER, help="passed through, e.g. --dry-run")
     p.set_defaults(func=cmd_verify)
 
+    p = sub.add_parser("report", help="what did the agent do lately? composed from the journal, "
+                                      "judged (work_claim + local model) before it is shown")
+    p.add_argument("--minutes", type=int, default=60, help="window to report on (default 60)")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_report)
+
 
 __all__ = ["register", "run_doctor", "explain_cycle", "summarize_event", "parse_when",
-           "cmd_doctor", "cmd_logs", "cmd_budget", "cmd_explain", "cmd_verify"]
+           "cmd_doctor", "cmd_logs", "cmd_budget", "cmd_explain", "cmd_verify", "cmd_report"]
