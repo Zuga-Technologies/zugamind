@@ -1,13 +1,41 @@
-"""ZugaMind 5W1H3P Decision Contract — the single typed carrier for every
-workspace decision handoff (sentinel -> injection -> worker).
+"""ZugaMind action taxonomy, plus a DESIGNED-BUT-UNWIRED 5W1H3P carrier.
+
+Read that first line carefully, because this docstring used to lie. It said
+"the single typed carrier for every workspace decision handoff (sentinel ->
+injection -> worker)" and "the source of truth every handoff imports". As of
+2026-08-29 nothing in the repo constructs a DecisionContract, calls
+validate(), or reads to_task_payload()/to_issue_body(). Verify before
+trusting either version of this paragraph:
+
+    git grep -l "DecisionContract" -- zugamind examples demo.py \
+      | grep -v contracts/
+
+What IS live, and the reason this file matters today:
+
+    DELIVERABLE_ACTIONS / RESEARCH_ACTIONS / classify_action()
+        The canonical action taxonomy. gates/value_gate.py imports the two
+        frozensets rather than re-listing them, which is the whole point --
+        one definition, so the two cannot drift.
+
+Everything else here -- the DecisionContract dataclass, assemble(),
+validate(), derive_facts(), the two serializers -- is a complete, tested
+design with no caller. That is a legitimate state for it to be in. It is not
+a legitimate thing to describe as load-bearing, because a module that reads
+as protection and protects nothing is the exact failure this codebase found
+five separate times on 2026-08-29 (five gate files, an entity-grounding
+check, a cursor sweep in an uninstalled hook, a trigger brief that never once
+produced a brief, and this). Every one of them looked wired.
+
+So: wire it, or keep this paragraph honest. Do not delete the paragraph and
+leave the claim.
 
 5W1H3P = **W**hat, **W**hy, **W**ho, **W**here, **W**hen, **H**ow + **P**roblem,
 **P**rocess, **P**erformance.
 
 Stdlib-only — dataclasses + uuid + json, NO pydantic, no third-party deps.
-This module is the source of truth every handoff imports.
 
-Field ownership:
+Field ownership (enforced only inside assemble(); a direct constructor call
+bypasses it):
     code derives  -> who, where, when           (derive_facts)
     model judges  -> what, why, how, problem, process
     code builds   -> performance                (build_performance_check)
@@ -15,9 +43,12 @@ Field ownership:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+logger = logging.getLogger("zugamind.decision_contract")
 
 
 # 5W1H3P judgment fields the local model fills. Appended to the sentinel's
@@ -45,6 +76,11 @@ DELIVERABLE_ACTIONS = frozenset(
 RESEARCH_ACTIONS = frozenset({"research"})
 # Everything else (analyze, reflect, log, alert, none, remediate, ...) is
 # cognition — a reflect/analyze thought, not a real-state change.
+
+
+# The only three classes validate() knows how to enforce. Anything else is
+# re-derived rather than trusted -- see validate().
+_ACTION_CLASSES = frozenset({"deliverable", "research", "cognition"})
 
 
 def classify_action(action: str) -> str:
@@ -305,7 +341,18 @@ def validate(contract: DecisionContract) -> ValidationResult:
 
     A mid-boot/mid-swap `when.defer` parks the cycle regardless of class.
     """
-    cls = contract.action_class or classify_action(contract.action)
+    # Re-derive anything outside the known set. `action_class` arrives
+    # verbatim from from_task_payload's untrusted JSON, and the tail of this
+    # function used to be an unguarded `else` that treated ANY unrecognised
+    # value as research -- so "DELIVRABLE" (a typo), "DELIVERABLE" (wrong
+    # case) or "x" turned a code action with a SOFT check into inject, in a
+    # function whose first docstring line says fail-closed (audit 2026-08-29).
+    cls = contract.action_class
+    if cls not in _ACTION_CLASSES:
+        if cls:
+            logger.warning("decision_contract: unrecognised action_class %r — "
+                           "re-deriving from action %r", cls, contract.action)
+        cls = classify_action(contract.action)
 
     # defer guard first — applies to every class
     if contract.when and contract.when.defer:
@@ -329,8 +376,15 @@ def validate(contract: DecisionContract) -> ValidationResult:
             return ValidationResult(False, "rest", "deliverable requires a runnable performance check")
         return ValidationResult(True, "inject", "deliverable ok (runnable check)")
 
-    # research: spends but soft check accepted
-    return ValidationResult(True, "inject", "research ok (soft check, spends)")
+    if cls == "research":
+        # research: spends but soft check accepted
+        return ValidationResult(True, "inject", "research ok (soft check, spends)")
+
+    # Unreachable while cls is re-derived above, and terminal on purpose: an
+    # implicit `else` here is what let an unknown class inject. A class this
+    # function cannot name is a class it cannot enforce, and the safe answer
+    # to "may I act on something I do not understand" is rest.
+    return ValidationResult(False, "rest", f"unknown action_class {cls!r}")
 
 
 # ---------------------------------------------------------------------------

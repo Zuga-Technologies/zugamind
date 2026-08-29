@@ -138,6 +138,32 @@ def summarize_event(ev: Dict[str, Any]) -> str:
 
 def cmd_budget(args: argparse.Namespace) -> int:
     from foundation.budget import load_budget  # noqa: WPS433 — lazy, test-patchable
+
+    # --reconcile folds spends that were BILLED but never written into the
+    # ledger back in. action_gate journals a budget_persist_failed event at
+    # the moment it happens; without this, one failed write under-counts the
+    # monthly cap for the rest of the month, because every later call reloads
+    # budget.json fresh. --dry-run first: this moves a money number.
+    if getattr(args, "reconcile", False) or getattr(args, "dry_run", False):
+        from foundation.budget_reconcile import reconcile  # noqa: WPS433
+
+        summary = reconcile(dry_run=bool(getattr(args, "dry_run", False)))
+        if getattr(args, "json", False):
+            print(json.dumps(summary, indent=2))
+            return 0
+        if not summary["events"]:
+            print("nothing to reconcile — every recorded spend reached the ledger")
+            return 0
+        verb = "would fold" if summary["dry_run"] else "folded"
+        print(f"{verb} ${summary['amount']:.4f} from {summary['events']} "
+              f"unrecorded spend(s) into the ledger")
+        for name, amount in sorted(summary["by_caller"].items(),
+                                   key=lambda kv: -kv[1]):
+            print(f"    {name:<32} ${amount:.4f}")
+        if summary["dry_run"]:
+            print("  (dry run — nothing written; re-run with --reconcile)")
+        return 0
+
     b = load_budget()
     cap = foundation_config.monthly_cap()
     if getattr(args, "json", False):
@@ -632,6 +658,11 @@ def register(sub: "argparse._SubParsersAction") -> None:
 
     p = sub.add_parser("budget", help="this month's spend against the cap")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--reconcile", action="store_true",
+                   help="fold spends that were billed but never written "
+                        "(budget_persist_failed) back into the ledger")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run",
+                   help="show what --reconcile would fold, and write nothing")
     p.set_defaults(func=cmd_budget)
 
     p = sub.add_parser("explain", help="why did that cycle wake (or not)")

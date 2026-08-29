@@ -63,11 +63,26 @@ def test_cognition_scores_zero():
 # --- persistence + rate -----------------------------------------------------
 
 def test_rate_reflects_history(db, enabled):
+    """Only FINAL rows count. An unreconciled research row is provisional --
+    credit for having run, which is a placeholder, not a score."""
     for _ in range(3):
         vg.score_action("arxiv", "none", "ai_lab_research", db_path=db)
     vg.score_action("arxiv", "research", "ai_lab_research", summary="note", db_path=db)
     rate, n = vg.value_rate("arxiv", "ai_lab_research", db_path=db)
-    assert n == 4 and rate == pytest.approx(0.25)
+    assert n == 3 and rate == pytest.approx(0.0), \
+        "the provisional research row must not inflate the rate"
+
+
+def test_a_reconciled_research_outcome_does_count(db, enabled):
+    """The other half: once a real outcome lands, research scores like
+    anything else. The point is that it must be EARNED, not that research
+    can never win."""
+    vg.record_outcome("r1", 1, db_path=db, source_module="arxiv",
+                      trigger_type="ai_lab_research", action="research")
+    vg.score_action("arxiv", "research", "ai_lab_research", summary="note",
+                    corr_id="r1", db_path=db)
+    rate, n = vg.value_rate("arxiv", "ai_lab_research", db_path=db)
+    assert n >= 1 and rate == pytest.approx(1.0)
 
 
 def test_deferred_deliverable_written_pending(db, enabled):
@@ -86,8 +101,11 @@ def test_low_value_type_dampened(db, enabled):
 
 
 def test_high_value_type_boosted(db, enabled):
-    for _ in range(4):
-        vg.score_action("daemon", "research", "daemon_result", summary="note", db_path=db)
+    # RECONCILED outcomes, not bare research calls: a provisional row is
+    # pending and no longer feeds the prior (2026-08-29).
+    for i in range(4):
+        vg.record_outcome(f"c{i}", 1, db_path=db, source_module="daemon",
+                          trigger_type="daemon_result", action="research")
     b = _bid("daemon", 0.5, "daemon_result")
     vg._apply_value_prior([b], db_path=db)
     assert b.salience > 0.5

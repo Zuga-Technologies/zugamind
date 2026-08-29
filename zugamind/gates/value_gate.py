@@ -96,7 +96,15 @@ from foundation.contracts.decision_contract import (
     DELIVERABLE_ACTIONS as _DELIVERABLE_ACTIONS,
     RESEARCH_ACTIONS as _RESEARCH_ACTIONS,
 )
-_COGNITION_ACTIONS = {"none", "reflect", "analyze", "log", "observe", "remediate"}
+# NOTE the asymmetry that makes this list a drift hazard, and why it is
+# written down here: decision_contract.classify_action treats cognition as the
+# OPEN default (everything unmatched lands there), while this set is CLOSED.
+# So adding an action to workspace_planner is silently correct for one and
+# silently wrong for the other -- `advance_goal` was added to the planner with
+# a comment saying "so the action gate can route this" and never added here,
+# which quietly sent it to the local-model branch (audit 2026-08-29).
+_COGNITION_ACTIONS = {"none", "reflect", "analyze", "log", "observe",
+                      "remediate", "advance_goal"}
 # 'alert' (and any unlisted action) stays ambiguous -> local-model fallback.
 
 
@@ -184,17 +192,21 @@ def _judge_value(
             return outcome, "deliverable: recorded performance outcome"
         return None, "deliverable: deferred -- awaiting performance outcome"
     if a in _RESEARCH_ACTIONS:
-        # Spends, but soft check: artifact produced = provisional credit, never auto-zero.
+        # Spends, and now has to show for it (Buga's ruling, 2026-08-29).
         #
-        # Known sharp edge, named rather than quietly changed (audit
-        # 2026-08-29): `summary` is non-empty at every real call site, so this
-        # branch returns 1 essentially always. Research therefore earns credit
-        # for having RUN, not for having paid off, and the one action class
-        # that reliably spends is the one the value prior can never starve.
-        # That is the documented "provisional credit" design and the tests
-        # encode it on purpose -- raising the bar (a minimum artifact size, or
-        # requiring a reconciled outcome the way a deliverable does) is a
-        # policy decision about how research earns its keep, not a defect fix.
+        # This used to be pure provisional credit: `summary` is non-empty at
+        # every real call site, so the branch returned 1 essentially always.
+        # Research earned credit for having RUN, which made the one action
+        # class that reliably spends the one class the value prior could never
+        # starve. Now it works like a deliverable where it can -- a RECORDED
+        # outcome is authoritative -- and falls back to provisional credit
+        # only when no outcome has landed yet. The provisional row is written
+        # `pending` (see score_action), so it stays out of the rate until a
+        # reconcile promotes it: credit for running is a placeholder, not a
+        # score.
+        outcome = _recorded_outcome(corr_id or "", db_path=db_path)
+        if outcome is not None:
+            return outcome, "research: recorded performance outcome"
         if (summary or "").strip():
             return 1, "research: provisional credit (artifact present)"
         return 0, "research: no artifact yet (floored by prior)"
@@ -283,7 +295,15 @@ def score_action(
     dispatch-time provisional/telemetry write). Telemetry emits regardless of flag."""
     value, reason = _judge_value(action, trigger_type, summary, corr_id=corr_id, db_path=db_path)
     deferred = value is None
-    row_status = "pending" if (deferred or status == "pending") else "final"
+    # Research credit is provisional by construction unless a reconcile has
+    # already recorded a real outcome for this corr_id -- so it is written
+    # pending, like a deferred deliverable, and value_rate (which reads
+    # status='final') does not count it toward the auction re-weighting.
+    provisional = (
+        (action or "").lower() in _RESEARCH_ACTIONS
+        and _recorded_outcome(corr_id or "", db_path=db_path) is None
+    )
+    row_status = "pending" if (deferred or provisional or status == "pending") else "final"
     _emit("value_scored",
           {"source_module": source_module, "action": action,
            "trigger_type": trigger_type, "value": value, "reason": reason,

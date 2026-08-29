@@ -55,8 +55,34 @@ def load_budget() -> dict:
         "spent": 0.0,
         "paid_spent": 0.0,
         "calls": {"local": 0, "haiku": 0, "sonnet": 0, "opus": 0},
+        "spent_by_caller": {},
         "remaining": round(monthly_cap(), 4),
     }
+
+
+# Cap on distinct callers tracked. A ledger that grows one key per caller
+# forever is the unbounded-growth shape this repo has fixed twice already;
+# the point is attribution, and a caller too small to make the top N is not
+# the one exhausting your cap.
+_MAX_CALLERS = 32
+
+
+def _attribute(existing, caller: "str | None", cost: float) -> dict:
+    """Add `cost` to `caller`'s running total. Bounded, never raises."""
+    out = dict(existing) if isinstance(existing, dict) else {}
+    name = (caller or "unattributed").strip()[:64] or "unattributed"
+    try:
+        out[name] = round(float(out.get(name, 0.0) or 0.0) + cost, 6)
+    except (TypeError, ValueError):
+        out[name] = round(cost, 6)
+    if len(out) > _MAX_CALLERS:
+        # Keep the biggest spenders; fold the tail into one row rather than
+        # dropping it, so the per-caller totals still sum to `spent`.
+        ranked = sorted(out.items(), key=lambda kv: kv[1], reverse=True)
+        kept = dict(ranked[:_MAX_CALLERS - 1])
+        kept["other"] = round(sum(v for _, v in ranked[_MAX_CALLERS - 1:]), 6)
+        out = kept
+    return out
 
 
 def _money(value, default: float, field: str) -> float:
@@ -156,7 +182,8 @@ def can_spend(budget: dict, tier: str) -> bool:
     return remaining >= cost
 
 
-def record_spend(budget: dict, tier: str, cost: "float | None" = None) -> dict:
+def record_spend(budget: dict, tier: str, cost: "float | None" = None,
+                 caller: "str | None" = None) -> dict:
     """Record a spend event: deduct cost, bump the call counter, persist.
 
     `cost` is the real USD amount from the provider's usage block when the
@@ -170,6 +197,11 @@ def record_spend(budget: dict, tier: str, cost: "float | None" = None) -> dict:
     callers may still choose to persist at a cycle boundary). Paid-tier
     spends are written to disk immediately for crash-durability.
     """
+    # `caller` is attributed, not just logged. It was threaded through every
+    # spend in action_gate and recorded nowhere, so one caller could exhaust
+    # the shared monthly cap and nothing afterwards could say which one
+    # (audit 2026-08-29). The ledger already keeps per-tier counts; this is
+    # the same question asked of the other axis.
     cost = float(cost) if cost is not None else _COSTS.get(tier, 0.0)
     if not math.isfinite(cost) or cost < 0:
         logger.warning("budget: ignoring nonsensical cost %r for tier %r", cost, tier)
@@ -204,6 +236,8 @@ def record_spend(budget: dict, tier: str, cost: "float | None" = None) -> dict:
         nxt["paid_spent"] = _money(current.get("paid_spent", 0.0), 0.0,
                                    "paid_spent") + cost
         nxt["calls"] = new_calls
+        nxt["spent_by_caller"] = _attribute(current.get("spent_by_caller"),
+                                            caller, cost)
         nxt["remaining"] = round(monthly_cap() - new_spent, 4)
         save_budget(nxt)
         budget.clear()

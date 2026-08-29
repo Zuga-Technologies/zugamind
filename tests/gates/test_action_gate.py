@@ -24,7 +24,7 @@ def _can_spend_no(_budget, _tier):
     return False
 
 
-def _record_spend_inc(budget, tier):
+def _record_spend_inc(budget, tier, **kwargs):
     cost = {"haiku": 0.005, "sonnet": 0.05, "local": 0.0}.get(tier, 0.0)
     budget["spent"] += cost
     budget["remaining"] -= cost
@@ -291,7 +291,7 @@ class ActionGateTest(unittest.TestCase):
         stop meaning anything. Must retry once, then surface the failure."""
         attempts = {"n": 0}
 
-        def _record_spend_always_fails(budget, tier):
+        def _record_spend_always_fails(budget, tier, **kwargs):
             attempts["n"] += 1
             raise OSError("disk full")
 
@@ -322,7 +322,7 @@ class ActionGateTest(unittest.TestCase):
         happy path — no false alarm."""
         attempts = {"n": 0}
 
-        def _record_spend_flaky(budget, tier):
+        def _record_spend_flaky(budget, tier, **kwargs):
             attempts["n"] += 1
             if attempts["n"] == 1:
                 raise OSError("transient")
@@ -410,7 +410,7 @@ class BudgetPersistFailureJournalTest(unittest.TestCase):
     def test_double_persist_failure_journals_structured_event(self):
         import tempfile
 
-        def record_spend_boom(_budget, _tier):
+        def record_spend_boom(_budget, _tier, **kwargs):
             raise OSError("disk wedged")
 
         with tempfile.TemporaryDirectory() as tmp:

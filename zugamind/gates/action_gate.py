@@ -396,9 +396,10 @@ def _persist_spend(record_spend, budget: dict, tier: str, usage_meta: dict,
         try:
             real = _real_cost(usage_meta)
             if real is not None:
-                new_budget = record_spend(budget, tier, cost=real)
+                new_budget = record_spend(budget, tier, cost=real, caller=caller)
             else:
-                new_budget = record_spend(budget, tier)  # flat per-tier estimate
+                # flat per-tier estimate
+                new_budget = record_spend(budget, tier, caller=caller)
             persist_exc = None
             break
         except Exception as exc:  # noqa: BLE001 — retried once, then surfaced below

@@ -57,6 +57,16 @@ def atomic_write_text(path: Path, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(text)  # newline="\n": no CRLF translation on Windows
+            # flush + fsync BEFORE the replace. Without them the rename is
+            # durable while the DATA it points at is not: NTFS and ext4 both
+            # journal metadata, not contents, so a power loss or OS crash can
+            # leave a correctly-renamed file that is empty or truncated -- and
+            # a zero-length state.json is exactly what foundation/state.py
+            # used to wedge the daemon on. The docstring's claim (a killed
+            # PROCESS cannot tear a file) held without this; the stronger
+            # claim people read it as did not (audit 2026-08-29).
+            fh.flush()
+            os.fsync(fh.fileno())
         # The handle is closed by now — Windows refuses to replace an open file.
         for attempt in range(_REPLACE_ATTEMPTS):
             try:

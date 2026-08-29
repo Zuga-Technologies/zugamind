@@ -58,7 +58,7 @@ def _budget(remaining: float = 5.0) -> dict:
             "remaining": remaining}
 
 
-def _record_spend_inc(budget, tier, cost=None):
+def _record_spend_inc(budget, tier, cost=None, **kwargs):
     amount = cost if cost is not None else {"haiku": 0.005, "sonnet": 0.05}.get(tier, 0.0)
     budget["spent"] += amount
     budget["remaining"] -= amount
@@ -141,7 +141,7 @@ def test_unreached_provider_records_nothing():
 
 
 def test_failed_ledger_write_does_not_report_the_spend_as_free():
-    def _boom(_budget, _tier, cost=None):
+    def _boom(_budget, _tier, cost=None, **kwargs):
         raise OSError("disk wedged")
 
     with patch.object(action_gate, "_resolve_budget_helpers", _helpers(record=_boom)), \
