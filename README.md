@@ -348,33 +348,48 @@ for that instead of assuming it away:
   the gate refuses to execute it at all. Wiring an actual notification
   (Discord, Slack, email, a ticket) onto that refusal is left to the
   integrator — the core guarantees the refusal, not the paging.
-- **Post-hoc integrity checks.** Two are wired into the shipped loop; three
-  ship as opt-in library modules for deployments that have the matching
-  surface:
+- **Post-hoc integrity checks.** Every gate has a caller (as of 2026-08-29;
+  `gates/__init__.py` carries the authoritative WIRED / DARK map — check it
+  against a grep, not this paragraph). "Ships dark" means the guard runs
+  and journals its verdict, but the effect it gates stays off until you
+  set its flag.
   - `gates/work_claim.py` — **wired**: every real (non-dry-run) harness
     reply is checked for accomplishment claims against real git history; a
     claim with no matching commit is journaled as a `work_claim` event
     flagged as confabulation, regardless of how confidently it's phrased.
+    Also the first, blocking check on the agent's own self-report
+    (`zugamind report`).
+  - `gates/llm_judge.py` — **wired**: local-model backstop on that same
+    self-report, after `work_claim`; fail-open, so a missing model is
+    `ALLOW` with the reason `judge_unavailable` in the journal, never a
+    silent drop.
   - `gates/value_gate.py` — **wired, ships dark**: registered as a bid
     modulator that dampens the salience of bid types that historically
     didn't change real state, plus a post-wake scorer that feeds it. A
     byte-identical no-op until you opt in via
     `ZUGAMIND_VALUE_GATE_ENABLED=true`.
-  - `gates/operational_truth.py` — **opt-in library**: a freshness gate
-    that re-probes live state before a claim is allowed to surface, so a
-    true-once observation can't be re-narrated as still-true indefinitely.
-    Populate its service-port map with your deployment's services and
-    inject `format_block()` into your briefing/prompt path.
-  - `gates/self_mod_cooldown.py` — **opt-in library**: a restart-durable,
-    disk-backed cooldown so a self-modification proposal can't thrash the
-    same file repeatedly — for integrators whose harness has a
-    self-modification lane.
-  - `gates/integrity.py` — **opt-in library**: a pure-stdlib Augmented
-    Dickey-Fuller stationarity test that classifies a drift-value time
-    series as STABLE / DRIFTING / CRITICAL — catches slow drift that stays
-    under any single-cycle threshold but trends over time. Takes a
-    `list[float]` and does no I/O: populate it from your own longitudinal
-    drift log and wire the returned `severity` to your own alerting.
+  - `gates/operational_truth.py` — **wired**: a freshness gate that
+    re-probes live state before an idle-cycle reflection is allowed to
+    reason on a remembered subject, so a true-once observation can't be
+    re-narrated as still-true indefinitely. Populate its service-port map
+    with your deployment's services.
+  - `gates/share_filter.py` — **wired, ships dark**: every completed
+    reflection is screened for share-worthiness and the verdict is
+    journaled (`thought_shared` / `thought_suppressed` with the reason).
+    Nothing is shared until `ZUGAMIND_THOUGHTS_ENABLED=true`, and delivery
+    is the journal only — no channel exists in this core.
+  - `gates/self_mod_cooldown.py` — **wired, ships dark**: a restart-durable,
+    disk-backed per-file cooldown consulted before every proposal to
+    rewrite a facet's runtime override (`data/overrides/<facet>.md`,
+    `zugamind self-mod`). The proposal is recorded and cools the file
+    either way; it is applied only under `ZUGAMIND_SELF_MOD_ENABLED=true`.
+    The audit log keeps the previous text; deleting the override file is a
+    full revert to the shipped persona.
+  - `gates/integrity.py` — **wired**: a pure-stdlib Augmented
+    Dickey-Fuller stationarity test that classifies the floor calibrator's
+    drift series as STABLE / DRIFTING / CRITICAL on the idle-cycle cadence
+    — catches slow drift that stays under any single-cycle threshold but
+    trends over time.
 - **Fully logged.** `Workspace.get_stats()`, the attention schema's
   `get_context()`, and every gate's telemetry are structured and
   loggable every cycle — "why did it do that" should always be answerable
