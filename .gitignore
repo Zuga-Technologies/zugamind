@@ -34,3 +34,8 @@ Thumbs.db
 
 experiments/exp001-out/
 experiments/exp001-tier1-pilot/
+
+# Worktrees created inside the checkout are NOT content -- a bare `git add -A`
+# records one as a broken submodule pointer (gitlink), which no clone can
+# resolve. Happened 2026-08-29 when a parallel session made one here.
+.claude/worktrees/
