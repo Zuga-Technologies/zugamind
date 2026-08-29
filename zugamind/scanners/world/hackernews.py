@@ -2,7 +2,19 @@
 
 Free public API (https://hacker-news.firebaseio.com/v0). No auth, no cost.
 Emits one trigger per fresh top-30 story whose title hits the keyword filter.
-Habituation dedupes by story_id within HABITUATION_HOURS.
+
+Dedupe (audit 2026-08-29): habituation alone is a FORGETTING window, not a
+memory — a top-30 story routinely outlives HABITUATION_HOURS(6h), so without
+its own memory this scanner re-fired the same front-page story every window,
+forever. Fixed the same way reddit_ai and ai_labs already were: a persistent
+per-story seen-set (scanners.seen_items), keyed on str(story_id), baselined
+silently on cold start so deploying this never reads the current front page
+as a month of breaking news.
+
+Emit cap: _MAX_TRIGGERS bounds one cycle to the best candidates (by urgency,
+sorted before the cut) rather than every one of _MAX_STORIES — nothing
+downstream was bounding this, and 30 triggers in one cycle dwarfs every
+sibling world scanner's cap.
 
 Domain: classifier will route most hits as CIVILIZATION (AI/ML topics) or
 BUSINESS (startup/funding/launch news).
@@ -14,8 +26,11 @@ Caching: this was the worst offender —
   * each story item is cached for _ITEM_TTL (items are effectively immutable);
   * story_ids already in the fresh item cache are NOT re-fetched.
 Steady state drops to ~1 call/cycle (a topstories refresh) plus a fetch only for
-genuinely new entrants. Stdlib-only, fail-silent — a cache miss/corruption just
-falls back to a live fetch.
+genuinely new entrants. Both endpoints now go through scanners.safe_http's
+fetch_json, so on top of that they get conditional GET (an unchanged
+topstories list answers 304, no body) and 429 backoff (a throttled HN used to
+read exactly like a dead feed). Stdlib-only, fail-silent — a cache miss/
+corruption just falls back to a live fetch.
 """
 from __future__ import annotations
 
@@ -26,11 +41,11 @@ import time
 from pathlib import Path
 from typing import Any
 
-import urllib.request
 import json as _json
 
+from foundation.text_format import truncate_title
 from scanners import safe_http
-from scanners.seen_items import atomic_write_text
+from scanners.seen_items import atomic_write_text, read_seen, write_seen
 
 logger = logging.getLogger("zugamind.scanners.hackernews")
 
@@ -84,6 +99,18 @@ _KEEP_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_STORIES = 30
+# One cycle must not be able to put more into the workspace than every
+# sibling world scanner combined (ai_labs=4, github_issues=5) — nothing
+# downstream bounded this, so _MAX_STORIES itself (30) was the de-facto cap.
+# Sort by urgency BEFORE slicing (see scan_hackernews) so the cap keeps the
+# best candidates, not just whichever 4 happened to sit first in HN's own
+# top-30 ranking.
+_MAX_TRIGGERS = 4
+# 30 candidates a sweep, and a story's trip through the top-30 is measured in
+# hours-to-a-few-days, not weeks — new entrants turn over far slower than the
+# per-sweep count, so this holds many weeks of history (same sizing logic as
+# reddit_ai's and ai_labs's own seen-sets).
+_SEEN_MAX = 900
 
 # Brand watch: mentions of YOUR project outrank ambient industry news.
 # ZUGAMIND_BRAND_TERMS is a comma-separated term list (e.g. "zugamind,zuga");
@@ -96,17 +123,42 @@ _BRAND_TERMS = [t.strip() for t in
 _BRAND_RE = (re.compile("|".join(re.escape(t) for t in _BRAND_TERMS), re.IGNORECASE)
              if _BRAND_TERMS else None)
 
+# `detail` is the literal briefing text handed to a paid model, and a title
+# is third-party, untrusted text — a newline or control byte inside it is a
+# prompt-injection seam, not cosmetic noise. Collapse to single spaces FIRST,
+# then hand the result to truncate_title, so a title padded with control
+# characters can't dodge the length cut by hiding real content past it.
+_CONTROL_WS_RE = re.compile(r"[\s\x00-\x1f\x7f]+")
+
+
+def _clean_title(title: str) -> str:
+    return truncate_title(_CONTROL_WS_RE.sub(" ", title or "").strip(), 140)
+
+
+# Per-URL safe_http state (etag/last_modified/blocked_until/fails), kept for
+# the life of the process — item URLs are one-per-story and each fetched at
+# most a handful of times ever, so there is no on-disk cache format to grow
+# for this; it just needs to survive across cycles within one running daemon
+# so a 429 backoff and an ETag actually get reused. See safe_http's own
+# module docstring for the "four scanners, four re-implementations" history
+# this replaces.
+_HTTP_STATE: dict[str, dict] = {}
+
 
 def _fetch_json(url: str) -> Any:
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "ZugaMind/scanner"})
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            # utf-8-sig + errors=replace: a proxy-injected BOM or one
-            # bad byte used to lose the ENTIRE response here, silently.
-            return _json.loads(safe_http.decode_body(resp.read()))
-    except Exception as e:
-        logger.debug("hn fetch failed for %s: %s", url, e)
-        return None
+    """One HTTP GET, routed through safe_http. This used to be a bare
+    urlopen() with no conditional GET and no 429 handling, so a throttled HN
+    read exactly like a dead feed instead of a rate limit."""
+    state = _HTTP_STATE.setdefault(url, {})
+    status, data = safe_http.fetch_json(url, state=state, timeout=_TIMEOUT,
+                                        name=f"hackernews:{url}")
+    if status == "ok":
+        state["_last_ok"] = data
+        return data
+    if status == "not_modified":
+        return state.get("_last_ok")
+    logger.debug("hn fetch failed for %s (status=%s)", url, status)
+    return None
 
 
 def _load_cache() -> dict:
@@ -125,6 +177,13 @@ def _save_cache(cache: dict) -> None:
         atomic_write_text(_CACHE_PATH, _json.dumps(cache))
     except Exception as e:  # persistence best-effort — never break the cycle
         logger.debug("hn cache save failed (non-fatal): %s", e)
+
+
+def _seen_path() -> Path:
+    # Derived from _CACHE_PATH (not a fixed module constant) so a test that
+    # isolates the disk cache by patching _CACHE_PATH isolates the seen-set
+    # right along with it — the same reasoning ai_labs uses for _seen_file().
+    return _CACHE_PATH.parent / "hackernews_seen.json"
 
 
 def _top_ids(cache: dict, now: float) -> list:
@@ -173,47 +232,91 @@ def scan_hackernews() -> list[dict]:
     top = _top_ids(cache, now)
     if not top:
         return []
-    out: list[dict] = []
-    for sid in top[:_MAX_STORIES]:
+    top_slice = top[:_MAX_STORIES]
+
+    seen = read_seen(_seen_path())
+    # None means "no seen-set on disk at all" — a genuine cold start, not an
+    # empty memory. Baseline it silently below rather than reading the
+    # current front page as a month of breaking news the instant this ships.
+    cold_start = seen is None
+    if cold_start:
+        seen = {}
+
+    candidates: list[dict] = []
+    for sid in top_slice:
         item = _item(cache, sid, now)
         if not item or not isinstance(item, dict):
             continue
         title = item.get("title", "") or ""
-        url = item.get("url", "") or ""
-        score = item.get("score", 0) or 0
         if not title:
             continue
         brand_hit = bool(_BRAND_RE and _BRAND_RE.search(title))
         if not brand_hit and not _KEEP_RE.search(title):
             continue
+        key = str(sid)
+        if not cold_start and key in seen:
+            # Already emitted once — a top-30 story routinely outlives the 6h
+            # habituation window and would otherwise re-fire every window,
+            # forever (the whole reason this seen-set exists).
+            continue
+        url = item.get("url", "") or ""
+        # Third-party numeric — a null/string/negative score must not raise
+        # mid-sweep or silently win every comparison as NaN.
+        score = safe_http.num(item.get("score"), 0.0)
+        clean_title = _clean_title(title)
         # Engagement velocity (points/hour) is free in the API — a story at
         # 100pts/hour deserves to out-bid one that took a day to get there.
         # 0.3 floor = the old flat prior; cap 0.65 keeps ambient news from
         # ever reaching the alarm lane on velocity alone.
-        age_h = max((now - float(item.get("time") or now)) / 3600.0, 0.5)
+        age_h = max((now - safe_http.num(item.get("time"), now)) / 3600.0, 0.5)
         # clamp01 both ends. The old min()-only clamp let a negative or
         # non-numeric score out of the 0..1 contract entirely —
         # measured -2499.7 from a negative score, and NaN read as the
         # maximum. urgency is auction currency: an out-of-range value
         # does not look wrong, it outbids every honest sense.
         urgency = round(safe_http.clamp01(
-            min(0.65, 0.3 + (safe_http.num(score) / age_h) / 400.0)), 3)
+            min(0.65, 0.3 + (score / age_h) / 400.0)), 3)
         trig = {
             "type": "hackernews_story",
-            "detail": f"HN [{score}pts]: {title[:140]}",
+            "detail": f"HN [{int(score)}pts]: {clean_title}",
             "url": url,
             "story_id": sid,
             "score": score,
-            "novelty": 0.55,
-            "relevance": 0.5,
+            "novelty": safe_http.clamp01(0.55),
+            "relevance": safe_http.clamp01(0.5),
             "urgency": urgency,
         }
         if brand_hit:
-            trig["detail"] = f"HN BRAND MENTION [{score}pts]: {title[:140]}"
+            trig["detail"] = f"HN BRAND MENTION [{int(score)}pts]: {clean_title}"
             trig["brand_mention"] = True
-            trig.update({"novelty": 0.9, "relevance": 0.9,
-                         "urgency": safe_http.clamp01(max(0.75, urgency))})
-        out.append(trig)
+            trig["novelty"] = safe_http.clamp01(0.9)
+            trig["relevance"] = safe_http.clamp01(0.9)
+            trig["urgency"] = safe_http.clamp01(max(0.75, urgency))
+        candidates.append(trig)
+
+    if cold_start:
+        # Whole current front page marked seen, zero triggers — same silent
+        # baseline reddit_ai and ai_labs use. Cost: a story published inside
+        # this very sweep is missed once.
+        write_seen(_seen_path(), {str(sid): now for sid in top_slice}, _SEEN_MAX)
+        out: list[dict] = []
+    else:
+        # Urgency descending BEFORE the cap: HN's own top-30 order is a
+        # ranking, not a priority order for US, so _MAX_TRIGGERS must keep
+        # the best candidates rather than whichever ones sat first in it.
+        candidates.sort(key=lambda t: t["urgency"], reverse=True)
+        out = candidates[:_MAX_TRIGGERS]
+        for t in out:
+            seen[str(t["story_id"])] = now
+        if out:
+            # protect = every story id still on the front page this sweep —
+            # see seen_items.write_seen's docstring. The stored stamp is
+            # FIRST-seen and never refreshed, so a story that sits on the
+            # front page for days holds the OLDEST stamp in the set and would
+            # be the first thing evicted at the cap, then re-fire as new.
+            write_seen(_seen_path(), seen, _SEEN_MAX,
+                       protect={str(sid) for sid in top_slice})
+
     _prune_items(cache, now)
     _save_cache(cache)
     return out

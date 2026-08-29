@@ -17,7 +17,8 @@ import foundation.config as config
 import scanners.scheduler as scheduler
 import scanners.world.ai_labs as ai_labs
 import scanners.world.hackernews as hackernews
-from scanners import habituation_filter, safe_http, seen_items
+from scanners import (habituation_filter, record_seen, safe_http,
+                      seen_items)
 
 
 @pytest.fixture
@@ -190,13 +191,30 @@ def test_a_mistyped_dial_degrades_instead_of_killing_the_process(monkeypatch, va
 
 def test_urgency_cannot_leave_the_contract(monkeypatch, tmp_path):
     """urgency is auction currency: an out-of-range value does not look
-    wrong, it outbids every honest sense. Measured -2499.7 before the clamp."""
+    wrong, it outbids every honest sense. Measured -2499.7 before the clamp.
+
+    The first sweep is a COLD START (hackernews gained a persistent seen-set
+    on 2026-08-29, which silently baselines rather than emitting a back
+    catalogue), so this asserts on the SECOND sweep. Written the obvious way
+    it passed while iterating nothing at all -- the failure mode where a green
+    test reports coverage it does not have.
+    """
     monkeypatch.setattr(hackernews, "_CACHE_PATH", tmp_path / "hn.json")
-    monkeypatch.setattr(hackernews, "_fetch_json", lambda url: (
-        [1] if url == hackernews._TOP_URL
-        else {"title": "AI thing", "url": "", "score": -500000, "time": 1e9}))
     monkeypatch.setattr(hackernews.time, "time", lambda: 1e9 + 3600)
-    for trigger in hackernews.scan_hackernews():
+
+    story = {"title": "AI thing", "url": "", "score": -500000, "time": 1e9}
+    monkeypatch.setattr(hackernews, "_fetch_json",
+                        lambda url: ([1] if url == hackernews._TOP_URL else story))
+    assert hackernews.scan_hackernews() == [], "sweep 1 is the cold-start baseline"
+
+    # Past the top-list TTL, or sweep 2 just replays sweep 1's cached ids and
+    # emits nothing -- which is how this test went vacuous in the first place.
+    monkeypatch.setattr(hackernews.time, "time", lambda: 1e9 + 3600 + 10_000)
+    monkeypatch.setattr(hackernews, "_fetch_json",
+                        lambda url: ([2] if url == hackernews._TOP_URL else story))
+    triggers = hackernews.scan_hackernews()
+    assert triggers, "sweep 2 must actually emit, or this test proves nothing"
+    for trigger in triggers:
         for field in ("novelty", "relevance", "urgency"):
             assert 0.0 <= trigger[field] <= 1.0, f"{field}={trigger[field]}"
 
@@ -266,3 +284,53 @@ def test_the_verb_form_of_a_partnership_is_public_affairs_too(title):
     """The noun forms were covered; the verb form is how the announcements
     are actually titled."""
     assert ai_labs._relevance_for(title) == ai_labs._RELEVANCE_NON_WORK
+
+
+# ---------------------------------------------------------------------------
+# a sighting the workspace never received must not be spent
+# ---------------------------------------------------------------------------
+
+def test_a_trigger_the_router_never_took_is_still_unseen_next_cycle(tmp_seen):
+    """Habituation used to mark "seen" the instant it filtered, so anything
+    that failed between the filter and the workspace discarded the triggers
+    while leaving them recorded for the full window."""
+    trigger = {"type": "hn_story", "story_id": 7, "detail": "x"}
+
+    # cycle 1: filtered, then the router raises -- nothing is recorded
+    assert habituation_filter([trigger], now=1e6, record=False) == [trigger]
+
+    # cycle 2: a healthy router must still get it
+    survivors = habituation_filter([trigger], now=1e6 + 60, record=False)
+    assert survivors == [trigger], "the unspent sighting was burned"
+
+    # only now, having actually been consumed, does it damp
+    record_seen(survivors, now=1e6 + 60)
+    assert habituation_filter([trigger], now=1e6 + 120, record=False) == []
+
+
+def test_recording_is_still_the_default_for_every_other_caller(tmp_seen):
+    """record=False is opt-in; the single-call shape must not change."""
+    trigger = {"type": "hn_story", "story_id": 9, "detail": "x"}
+    assert habituation_filter([trigger], now=1e6) == [trigger]
+    assert habituation_filter([trigger], now=1e6 + 60) == []
+
+
+# ---------------------------------------------------------------------------
+# the scheduler's ledger must land where the caller isolated it
+# ---------------------------------------------------------------------------
+
+def test_the_ledger_path_honours_a_data_dir_set_after_import(monkeypatch, tmp_path):
+    """It was a module constant, so a test or script that isolated its data
+    dir still wrote the LIVE deployment's ledger -- while every other scanner
+    in the package resolved its path per call and was correctly isolated."""
+    monkeypatch.setenv("ZUGAMIND_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(scheduler, "_LEDGER_PATH", scheduler._DEFAULT_LEDGER_PATH)
+    assert str(tmp_path) in str(scheduler._ledger_path())
+
+
+def test_an_explicit_ledger_patch_still_wins(monkeypatch, tmp_path):
+    """The existing test seam monkeypatches _LEDGER_PATH directly; per-call
+    resolution must not break it."""
+    explicit = tmp_path / "explicit.json"
+    monkeypatch.setattr(scheduler, "_LEDGER_PATH", explicit)
+    assert scheduler._ledger_path() == explicit

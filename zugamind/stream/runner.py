@@ -115,6 +115,7 @@ from gates.work_claim import check_entity_grounding, check_work_claim
 from scanners import (
     discover_dynamic_scanners,
     habituation_filter,
+    record_seen,
     scan_ai_labs,
     scan_hackernews,
     scan_reddit_ai,
@@ -274,7 +275,9 @@ class StreamRunner:
             raw_count += len(found)
             if found and name in self._habituated:
                 try:
-                    found = habituation_filter(found)
+                    # record=False: marking them seen happens only after the
+                    # router has actually taken them, further down run_once.
+                    found = habituation_filter(found, record=False)
                 except Exception as e:  # noqa: BLE001 — damping is best-effort, never lossy
                     logger.warning("habituation filter failed (non-fatal, unfiltered): %s", e)
             triggers.extend(found)
@@ -309,6 +312,10 @@ class StreamRunner:
         try:
             triggers = self._collect_triggers()
             route_triggers_to_modules(triggers, self.modules)
+            # Only NOW are they really seen. A raise above leaves them
+            # unmarked, so the next cycle gets another chance at them instead
+            # of the window swallowing a sighting the workspace never got.
+            record_seen(triggers)
         except Exception as e:  # noqa: BLE001
             # Perception ran OUTSIDE any guard until 2026-08-29: a raise in
             # the router or the scheduler killed --once with no journal line,

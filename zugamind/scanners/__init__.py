@@ -23,7 +23,7 @@ from .world.reddit_ai import scan_reddit_ai
 from .world.ai_labs import scan_ai_labs
 
 __all__ = ["scan_hackernews", "scan_reddit_ai", "scan_ai_labs",
-           "discover_dynamic_scanners", "habituation_filter"]
+           "discover_dynamic_scanners", "habituation_filter", "record_seen"]
 
 
 # ---- Habituation filtering ----------------------------------------------------
@@ -84,12 +84,19 @@ def _trigger_key(trigger: dict) -> str:
     return f"{trigger.get('type', '?')}:{digest}"
 
 
-def habituation_filter(triggers: list, now: "float | None" = None) -> list:
+def habituation_filter(triggers: list, now: "float | None" = None,
+                       record: bool = True) -> list:
     """Drop triggers whose key was seen within its habituation window.
 
-    Survivors are recorded as seen. Fail-silent throughout: a corrupt or
-    unwritable seen-file must never sink the cycle — worst case is a repeat
-    trigger getting through, never a fresh one being lost.
+    `record=True` (the default) also marks the survivors as seen, which is the
+    original single-call behaviour and what every existing caller and test
+    expects. `record=False` filters WITHOUT marking, so a caller that can fail
+    downstream can mark them only once they have actually been consumed — see
+    record_seen below.
+
+    Fail-open throughout: a corrupt or unwritable seen-file must never sink
+    the cycle — worst case is a repeat trigger getting through, never a fresh
+    one being lost.
 
     `now` (epoch seconds) is injectable for tests; default is real time.
     """
@@ -147,6 +154,11 @@ def habituation_filter(triggers: list, now: "float | None" = None) -> list:
         seen[key] = now
         fresh.append(t)
 
+    if not record:
+        # Filtered but NOT marked: nothing is written, so a trigger the caller
+        # never gets to consume is still unseen next cycle.
+        return fresh
+
     # Prune anything older than the longest window so the file stays bounded,
     # and anything stamped in the future, which age-based eviction can never
     # reach.
@@ -169,6 +181,48 @@ def habituation_filter(triggers: list, now: "float | None" = None) -> list:
             "this write succeeds", exc,
         )
     return fresh
+
+
+def record_seen(triggers: list, now: "float | None" = None) -> None:
+    """Mark `triggers` as seen, AFTER they have actually been consumed.
+
+    Habituation used to write "seen" the instant it filtered. Anything that
+    failed between the filter and the workspace — a raise in the router, a
+    crashed cycle — discarded the triggers while leaving them recorded as
+    seen for the full window. Proved 2026-08-29: cycle 1 raised in the router
+    (trigger_count 0, raw 1); cycle 2 with a HEALTHY router still saw
+    trigger_count 0, because the only sighting had already been spent. The
+    filter's own docstring promises "never a fresh one being lost", and this
+    was the second way it was.
+
+    Best-effort and never raises: the triggers are already downstream by the
+    time this runs, so a failure here costs a repeat, not a loss.
+    """
+    if not triggers:
+        return
+    from foundation import config as _config  # lazy, as above
+
+    if now is None:
+        now = _time.time()
+    try:
+        seen = _json.loads(_config.SEEN_TRIGGERS_FILE.read_text())
+        if not isinstance(seen, dict):
+            seen = {}
+    except Exception:
+        seen = {}
+
+    for t in triggers:
+        if isinstance(t, dict):
+            seen[_trigger_key(t)] = now
+
+    try:
+        _config.SEEN_TRIGGERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(_config.SEEN_TRIGGERS_FILE, _json.dumps(seen))
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning(
+            "habituation state not saved (%s) — repeat damping is OFF until "
+            "this write succeeds", exc,
+        )
 
 
 # ---- Dynamic scanner discovery -----------------------------------------------

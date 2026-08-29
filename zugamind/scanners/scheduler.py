@@ -72,8 +72,30 @@ def _global_emit_ceiling() -> int:
     return _int_env("ZUGAMIND_GLOBAL_TRIGGER_CEILING", 40)
 
 # Honors ZUGAMIND_DATA_DIR without importing foundation — scanners stay standalone.
-_DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent / "data")
-_LEDGER_PATH = _DATA_DIR / "scanner_cache" / "_source_ledger.json"
+#
+# Resolved per call, not at import. As a module constant this ignored a
+# ZUGAMIND_DATA_DIR set after import, so a test or a script that isolated its
+# data dir still wrote the LIVE deployment's ledger — while every other
+# scanner in the package (reddit_ai._cache_path, ai_labs._cache_file) resolves
+# its own path per call and was correctly isolated. Kept as a module-level
+# name too, because tests monkeypatch _LEDGER_PATH directly.
+def _data_dir() -> Path:
+    return Path(os.environ.get("ZUGAMIND_DATA_DIR")
+                or Path(__file__).resolve().parent.parent / "data")
+
+
+def _ledger_path() -> Path:
+    """The live ledger path. Honours a _LEDGER_PATH monkeypatch when a test
+    has set one, so the existing test seam keeps working."""
+    patched = globals().get("_LEDGER_PATH")
+    if patched is not None and patched != _DEFAULT_LEDGER_PATH:
+        return patched
+    return _data_dir() / "scanner_cache" / "_source_ledger.json"
+
+
+_DATA_DIR = _data_dir()
+_DEFAULT_LEDGER_PATH = _DATA_DIR / "scanner_cache" / "_source_ledger.json"
+_LEDGER_PATH = _DEFAULT_LEDGER_PATH
 
 
 def _flag_enabled() -> bool:
@@ -124,8 +146,9 @@ class _Ledger:
 
 def _load_ledger() -> _Ledger:
     try:
-        if _LEDGER_PATH.exists():
-            return _Ledger.from_json(json.loads(_LEDGER_PATH.read_text("utf-8")))
+        path = _ledger_path()
+        if path.exists():
+            return _Ledger.from_json(json.loads(path.read_text("utf-8")))
     except Exception as e:  # fail-closed: a corrupt ledger starts fresh, never crashes
         logger.debug("source ledger load failed (starting fresh): %s", e)
     return _Ledger()
@@ -133,7 +156,7 @@ def _load_ledger() -> _Ledger:
 
 def _save_ledger(ledger: _Ledger) -> None:
     try:
-        atomic_write_text(_LEDGER_PATH, json.dumps(ledger.to_json(), indent=2))
+        atomic_write_text(_ledger_path(), json.dumps(ledger.to_json(), indent=2))
     except Exception as e:  # persistence is best-effort; never break the cycle
         logger.debug("source ledger save failed (non-fatal): %s", e)
 

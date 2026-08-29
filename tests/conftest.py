@@ -115,5 +115,11 @@ def _isolate_live_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(_scheduler, "_LEDGER_PATH", cache_dir / "_source_ledger.json")
     monkeypatch.setattr(_ai_labs, "_CACHE_DIR", cache_dir)
     monkeypatch.setattr(_github_issues, "_CACHE_DIR", cache_dir)
+    # Belt-and-suspenders alongside github_issues._cache_file()'s per-call
+    # resolution (the real fix — see that module's docstring, fix 4): this
+    # module attribute is inert now, but patching it here too means it can
+    # never again silently point at the live cache if something starts
+    # reading it directly.
+    monkeypatch.setattr(_github_issues, "_CACHE_FILE", cache_dir / "github_issues.json")
     monkeypatch.setattr(_github_repo_events, "_CACHE_FILE", cache_dir / "github_repo_events.json")
     monkeypatch.setattr(_hackernews, "_CACHE_PATH", cache_dir / "hackernews.json")

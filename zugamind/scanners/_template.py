@@ -20,6 +20,36 @@ CONTRACT (every scanner module MUST follow):
        relevance: float (0..1)
        urgency:   float (0..1)
 
+  3b. IDENTITY — the field that decides whether your scanner nags.
+      Habituation drops a trigger it has seen recently, and it recognises
+      "the same trigger" by looking for ONE of these keys, in order:
+
+          story_id, id, issue_id, post_slug, url, link, post_url, issue_url
+
+      If your trigger carries none of them, the key falls back to a HASH OF
+      `detail`. That fallback is wrong in both directions at once: two
+      different items that happen to share a detail string collide into one
+      key (the second is silently swallowed for the whole window), and
+      editing an item's text mints a brand-new key (it re-fires). So:
+
+        * ALWAYS emit a stable id under one of those names, and
+        * NEVER put anything that changes between cycles into `detail`
+          — a score, a count, an age, a timestamp. A detail reading
+          "Queue depth is 412" defeats habituation outright the moment it
+          becomes 415.
+
+      Two live scanners were falling through to the text hash on 2026-08-29
+      because their id fields were not on that list, which is why the list is
+      written down here rather than only in scanners/__init__.py, which no
+      scanner author reads.
+
+  3c. FEED-SHAPED SOURCES need a seen-set as well as habituation.
+      Habituation forgets after HABITUATION_HOURS; an item that stays on a
+      feed longer than that re-fires every window. `scanners/seen_items.py`
+      is the shared answer (read_seen / write_seen with a silent cold-start
+      baseline). Pass `protect=` — the keys still visible this sweep — or a
+      pinned item gets evicted first and comes back looking new.
+
   4. OPTIONAL fields the trigger system understands:
        bypass_habituation: bool  (re-emit on 60min cooldown instead of
                                   HABITUATION_HOURS — set TRUE only for

@@ -191,6 +191,7 @@ from __future__ import annotations
 
 import calendar
 import email.utils
+import html as html_lib  # aliased -- _parse_anthropic_html's `html` param shadows the module
 import json
 import logging
 import os
@@ -205,6 +206,8 @@ from typing import Any
 
 from foundation.text_format import truncate_title
 from foundation.fs import atomic_write_text
+from scanners.safe_http import decode_body
+from scanners import safe_http
 from scanners.seen_items import read_seen, write_seen
 
 logger = logging.getLogger("zugamind.scanners.ai_labs")
@@ -242,6 +245,17 @@ def _cache_file() -> Path:
 def _seen_file() -> Path:
     return _CACHE_DIR / "ai_labs_seen.json"
 
+
+def _lab_history_file() -> Path:
+    """lab -> epoch of that lab's first-ever successful sweep. Permanent,
+    never cleared by an ordinary fetch failure -- unlike `feeds[url]` in the
+    fetch cache, which is rebuilt from scratch every sweep and drops a URL
+    entirely the moment it fails once. Exists so `scan_ai_labs` can tell "this
+    lab has never produced an item before" apart from "this lab just had one
+    bad sweep"; see the comment above the fetch loop for why that distinction
+    is the whole fix for the per-feed cold-start problem."""
+    return _CACHE_DIR / "ai_labs_lab_history.json"
+
 # Feed audit: anthropic never had an RSS feed (404 since introduction; the
 # /news and /research indexes ARE server-rendered, so scrape them), deepmind
 # moved off /discover, meta_fair has no feed at all (removed), hf_papers RSS
@@ -267,7 +281,12 @@ def _read_cache(ignore_ttl: bool = False) -> dict[str, Any] | None:
         path = _cache_file()
         if not path.exists():
             return None
-        d = json.loads(path.read_text())
+        # Explicit encoding — read_seen (scanners.seen_items) already reads its
+        # file as utf-8; this one read it with the platform default, which is
+        # cp1252 on the Windows host this runs on and silently mis-decodes any
+        # non-ASCII byte in a cached title instead of raising where it'd be
+        # noticed.
+        d = json.loads(path.read_text(encoding="utf-8"))
         if not ignore_ttl and time.time() - d.get("ts", 0) > _CACHE_TTL:
             return None
         return d
@@ -458,6 +477,20 @@ _PROMO_KEYWORD_RE = re.compile(
 # since robotics posts use it for actuation/movement, not geospatial data --
 # only paired with the geospatial-data phrasing this class of post actually
 # uses.
+#
+# Extended 2026-08-29 for two more fields absent from the list above, both
+# measured sitting at DEFAULT on the live cache: health/clinical/biomedical
+# (GlucoFM's glucose monitoring, biomarker triage from wearable sensor data,
+# cardiometabolic-risk estimation, AMIE's audio-visual clinical consultations
+# -- all google_res) and weather/climate/Earth-system (Aurora 1.5's "weather
+# and Earth-system applications", msft_research). Same discipline as the rest
+# of this list: phrases from confirmed hits, not the bare field name --
+# msft_research's own "Introducing CARE-X: Towards Clinically Useful
+# Radiology VLMs..." is a real launch ("Introducing" satisfies HIGH) that
+# happens to use "Clinically" in its own headline, so bare "clinical" or
+# "radiology" would have demoted a launch through this exact list. "clinical"
+# is matched only paired with trial/consultations/diagnos-, which "Clinically
+# Useful" is not.
 _SCI_DOMAIN_RE = re.compile(
     r"weather\s+forecast|forecast\w*\s+(?:weather|cyclones?|hurricanes?|storms?)"
     r"|(?:cyclones?|hurricanes?|storms?)\s+forecast|climate\s+model"
@@ -466,7 +499,10 @@ _SCI_DOMAIN_RE = re.compile(
     r"|protein\s+fold|protein\s+structure\s+predict"
     r"|drug\s+discovery|drug\s+design"
     r"|materials?\s+discovery"
-    r"|mobility\s+(?:data|patterns?)|understanding\s+of\s+place",
+    r"|mobility\s+(?:data|patterns?)|understanding\s+of\s+place"
+    r"|biomarkers?|glucose\s+monitoring|cardiometabolic"
+    r"|clinical\s+(?:trials?|consultations?|diagnos\w*)|biomedical"
+    r"|earth[\s-]system|climate\s+change",
     re.IGNORECASE,
 )
 
@@ -481,6 +517,20 @@ _SCI_DOMAIN_RE = re.compile(
 # "sonnet-5". Demotion reads the summary because openai's RSS carries the
 # subject in the description and a wrong demotion only costs silence; promotion
 # does not, because a wrong promotion spends a Claude session.
+# The model-token half used to require a digit IMMEDIATELY after the family
+# name ("gemini[-\s]?\d"), so a real product line with a qualifier word
+# between the two missed HIGH entirely: [deepmind] "Gemini Omni 1.1 Flash
+# lets you build with more control" and "Gemini Robotics ER 2: powering
+# robotics..." both sat at DEFAULT, no headroom over a floor that moves.
+# Widened to allow up to two qualifier words between the family name and the
+# digit -- but from a fixed vocabulary of known lineup/mode words, not any
+# word: an open "any capitalized word" version was tried first and matched
+# "New Sonnet Update Adds 2 Features" on the word "Update", because these
+# feeds' headlines are sentence-case, not Title Case, so capitalization alone
+# doesn't discriminate a product qualifier from an ordinary headline word.
+# Measured against the live cache (56 items) and every quoted string in the
+# three ai_labs test files (214 strings): exactly the two named posts flip,
+# zero collateral.
 _HIGH_RELEVANCE_RE = re.compile(
     r"\bintroducing\b|\bannouncing\b|\bpreviewing\b|\blaunching\b"
     r"|\bnow\s+available\b|\bgenerally\s+available\b|\bdeprecat\w+"
@@ -488,6 +538,8 @@ _HIGH_RELEVANCE_RE = re.compile(
     r"|\bpricing\b|\brate\s+limits?\b|\brelease\s+notes\b|\bchangelog\b"
     r"|\bapis?\b|\bsdks?\b"
     r"|\b(?:gpt|claude|gemini|llama|qwen|opus|sonnet|haiku|fable|codex)"
+    r"(?:[\s‑-]+(?:omni|robotics|er|flash|pro|ultra|mini|nano|turbo|vision|"
+    r"audio|live|instant|reasoning|thinking|lite|max|air|plus|base)){0,2}"
     r"[\s‑-]?\d",
     re.IGNORECASE,
 )
@@ -606,7 +658,24 @@ def _fetch(url: str, validators: dict[str, str] | None = None,
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            text = resp.read().decode("utf-8", errors="ignore")
+            # safe_http.decode_body, not a bare .decode("utf-8", "ignore"): a
+            # BOM-prefixed body used to leave a leading ﻿ that broke the
+            # XML/JSON parser downstream with a message about the wrong
+            # thing, and "ignore" drops a bad byte instead of replacing it.
+            # Bounded read. This text is handed to ET.fromstring below, and
+            # stdlib ElementTree is vulnerable to entity-expansion blowup
+            # ("billion laughs"); it does NOT resolve external entities, so
+            # XXE is not the exposure here -- expansion is, and expansion
+            # needs a body to expand from. defusedxml is the usual answer and
+            # is a third-party dependency this package cannot take, so the
+            # bound goes at the only place bytes enter. Same ceiling as
+            # scanners/safe_http.
+            raw = resp.read(safe_http._MAX_BODY_BYTES + 1)
+            if len(raw) > safe_http._MAX_BODY_BYTES:
+                logger.warning("ai_labs: %s body exceeds %d bytes — skipped",
+                               url, safe_http._MAX_BODY_BYTES)
+                return "failed", "", validators
+            text = decode_body(raw)
             new_validators = {k: v for k, v in (("etag", resp.headers.get("ETag")),
                                                 ("last_modified", resp.headers.get("Last-Modified")))
                               if v}
@@ -625,7 +694,14 @@ def _parse_feed(xml_text: str, lab: str) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     try:
         root = ET.fromstring(xml_text)
-    except Exception:
+    except Exception as e:
+        # Used to be a bare `except: return []` with nothing logged at any
+        # level -- a malformed feed and a quiet one were indistinguishable at
+        # the production log level. This alone doesn't repeat the item the
+        # feed lost; the "ok but zero items parsed" branch in scan_ai_labs is
+        # what keeps the old cache alive and escalates to warning when there
+        # is history to fall back on.
+        logger.debug("ai_labs: %s feed did not parse as XML: %s", lab, e)
         return items
     for it in root.iter():
         tag = it.tag.lower().split("}")[-1]
@@ -654,11 +730,52 @@ def _parse_feed(xml_text: str, lab: str) -> list[dict[str, str]]:
     return items
 
 
+# Real anthropic.com card markup, measured against a live fetch of both
+# /news and /research on 2026-08-29. Two templates render across those pages:
+# "FeaturedGrid" puts the headline in an <h2> (the pinned hero card) or <h4>
+# (an ordinary card) and, when there is one, a body blurb in a <p> -- both
+# identified by a class attribute containing "title"/"body" respectively.
+# "PublicationList" (the plain list further down the page) has no blurb at
+# all; its headline sits alone in a <span> whose class contains "title".
+# Neither is matched with a `\btitle\b` word boundary: the CSS-module class
+# names glue "title" directly onto the preceding identifier with no non-word
+# character in between (e.g. "...W1FydW__title"), so a word-boundary
+# assertion would match nothing there -- matched as a bare case-insensitive
+# substring of the opening tag instead.
+_ANTHROPIC_HEADLINE_RE = re.compile(
+    r'<h[1-6][^>]*title[^>]*>(.*?)</h[1-6]>|<span[^>]*title[^>]*>(.*?)</span>',
+    re.S | re.I,
+)
+_ANTHROPIC_BODY_RE = re.compile(r'<p[^>]*body[^>]*>(.*?)</p>', re.S | re.I)
+_ANTHROPIC_TIME_RE = re.compile(r'<time[^>]*>(.*?)</time>', re.S | re.I)
+
+
+def _strip_and_unescape(fragment: str) -> str:
+    """Tag-stripped, whitespace-collapsed, HTML-entity-unescaped text from one
+    card fragment. `html.unescape` matters here specifically: anthropic's own
+    card markup renders an apostrophe as the literal hex entity `&#x27;`, so
+    without this every title/summary carrying one reached the human (and the
+    relevance regexes) as "Fable 5&#x27;s" rather than "Fable 5's"."""
+    return html_lib.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", fragment))).strip()
+
+
 def _parse_anthropic_html(html: str, lab: str) -> list[dict[str, str]]:
     """Scrape a server-rendered anthropic.com index page (no RSS exists).
 
     Covers both /news/<slug> and /research/<slug> cards — research posts
     do not appear on /news.
+
+    Used to flatten the WHOLE card -- category label, date, headline AND body
+    blurb, up to 200 chars -- into `title`. That broke the documented
+    invariant that HIGH is matched against the TITLE ALONE, unlike the
+    demotion patterns (a policy card whose blurb happened to mention pricing
+    or a model name could promote itself), and it is also what the human
+    reads in `detail`: raw HTML entities (`&#x27;`) and a mid-word cut at the
+    200-char slice boundary. Fixed by reading the headline and body out of
+    their own elements (see _ANTHROPIC_HEADLINE_RE / _ANTHROPIC_BODY_RE)
+    instead of stripping tags from the anchor's entire innerHTML, unescaping
+    entities, and truncating through truncate_title (word-boundary-aware)
+    instead of a bare slice.
     """
     items: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -667,12 +784,34 @@ def _parse_anthropic_html(html: str, lab: str) -> list[dict[str, str]]:
         if href in seen:
             continue
         seen.add(href)
-        title = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", inner)).strip()
+
+        headline_m = _ANTHROPIC_HEADLINE_RE.search(inner)
+        if headline_m:
+            raw_title = headline_m.group(1) or headline_m.group(2) or ""
+        else:
+            # The markup drifted again and neither known template matched --
+            # fail open on the old whole-card flatten rather than silently
+            # dropping the item. See point 1 in the module docstring: ugly
+            # beats invisible.
+            raw_title = inner
+        title = _strip_and_unescape(raw_title)
         if len(title) < 8:  # skip bare nav anchors
             continue
-        items.append({"lab": lab, "title": title[:200],
-                      "link": "https://www.anthropic.com" + href, "summary": "",
-                      "published": _parse_date(title)})
+
+        body_m = _ANTHROPIC_BODY_RE.search(inner)
+        summary = _strip_and_unescape(body_m.group(1)) if body_m else ""
+
+        time_m = _ANTHROPIC_TIME_RE.search(inner)
+        # Fail open the same way as the headline: no <time> tag (markup
+        # drift, or the fallback branch above already consumed the only
+        # structure there was) still lets _parse_date search the raw card
+        # text, which is exactly what this function did before this fix.
+        date_text = _strip_and_unescape(time_m.group(1)) if time_m else inner
+
+        items.append({"lab": lab, "title": truncate_title(title, 200),
+                      "link": "https://www.anthropic.com" + href,
+                      "summary": truncate_title(summary, 300),
+                      "published": _parse_date(date_text)})
         if len(items) >= 8:
             break
     return items
@@ -683,7 +822,10 @@ def _parse_hf_json(txt: str) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     try:
         data = json.loads(txt)
-    except Exception:
+    except Exception as e:
+        # Same fix as _parse_feed's except: a bare `return []` here was
+        # silent at every log level.
+        logger.debug("ai_labs: hf_papers did not parse as JSON: %s", e)
         return items
     for p in data[:8] if isinstance(data, list) else []:
         if not isinstance(p, dict):
@@ -716,6 +858,11 @@ def _round_robin(items: list[dict[str, str]]) -> list[dict[str, str]]:
 
 def scan_ai_labs() -> list[dict[str, Any]]:
     cached = _read_cache()
+    # Populated only via the refetch branch below -- items belonging to a lab
+    # that has never before produced a successful sweep. Stays [] on a warm
+    # cache hit, which is what keeps every test that seeds the cache directly
+    # (bypassing the network) untouched by the per-feed cold-start fix.
+    newly_recovered_items: list[dict[str, Any]] = []
     if cached and "items" in cached:
         items = cached["items"]
     else:
@@ -725,6 +872,19 @@ def scan_ai_labs() -> list[dict[str, Any]]:
         # fall back on. A legacy cache (no "feeds") = one unconditional fetch.
         stale = _read_cache(ignore_ttl=True) or {}
         prev = stale.get("feeds") if isinstance(stale.get("feeds"), dict) else {}
+        # Consecutive-failure count per URL. `feeds[url]` above is a snapshot
+        # of the last GOOD fetch and is silent about how many attempts have
+        # failed since, so it cannot carry this -- and _fetch's own logging is
+        # debug-only per call, which reads identically whether a feed failed
+        # once five minutes ago or has been dark for a week. Escalated to
+        # warning at 3 in a row, the same threshold safe_http.fetch_json uses.
+        fail_counts: dict[str, int] = dict(stale.get("fetch_fails") or {}) \
+            if isinstance(stale.get("fetch_fails"), dict) else {}
+        # lab -> epoch of that lab's first-ever successful sweep, permanent
+        # and never cleared by an ordinary fetch failure -- see
+        # _lab_history_file's docstring for why `feeds[url]` (rebuilt from
+        # scratch every sweep) can't stand in for this.
+        lab_history = read_seen(_lab_history_file()) or {}
         feeds: dict[str, dict[str, Any]] = {}
         items = []
         for lab, url, fmt in _FEEDS:
@@ -733,6 +893,7 @@ def scan_ai_labs() -> list[dict[str, Any]]:
             status, txt, new_validators = _fetch(url, reusable.get("validators") if reusable else None)
             if status == "not_modified" and reusable:
                 feeds[url] = reusable
+                fail_counts.pop(url, None)
             elif status == "ok" and txt:
                 if fmt == "anthropic_html":
                     parsed = _parse_anthropic_html(txt, lab)
@@ -740,11 +901,54 @@ def scan_ai_labs() -> list[dict[str, Any]]:
                     parsed = _parse_hf_json(txt)
                 else:
                     parsed = _parse_feed(txt, lab)
-                feeds[url] = {"validators": new_validators, "items": parsed}
+                if not parsed and reusable:
+                    # The fetch said "ok" but the body parsed to zero items
+                    # while the cache still held some -- a Cloudflare
+                    # interstitial, a page-shape change, anything that still
+                    # answers 200 with a body this parser can't read.
+                    # Overwriting with [] here is how this scanner used to go
+                    # PERMANENTLY silent on one lab with nothing logged at any
+                    # level: the next sweep's conditional GET sends THIS
+                    # response's own ETag, gets 304, and reuses the empty
+                    # list forever. Keep the last known-good items and
+                    # validators instead, so a later sweep still attempts a
+                    # real GET rather than fast-pathing into a 304 against a
+                    # page that was never right.
+                    logger.warning(
+                        "ai_labs: %s answered 200 but parsed to zero items "
+                        "while the cache held %d -- keeping the old items "
+                        "instead of going dark", url, len(reusable["items"]),
+                    )
+                    feeds[url] = reusable
+                else:
+                    feeds[url] = {"validators": new_validators, "items": parsed}
+                fail_counts.pop(url, None)
             else:
+                n = fail_counts.get(url, 0) + 1
+                fail_counts[url] = n
+                if n >= 3:
+                    logger.warning(
+                        "ai_labs: %s has failed %d fetches in a row -- this "
+                        "is a dark feed, not a quiet one", url, n,
+                    )
                 continue
-            items.extend(feeds[url]["items"])
-        _write_cache({"ts": time.time(), "items": items, "feeds": feeds})
+            feed_items = feeds[url]["items"]
+            if feed_items and lab not in lab_history:
+                # This lab has never produced an item in any sweep this
+                # scanner remembers -- whether the whole scanner is brand new
+                # (the global "seen is None" cold start below still owns that
+                # case) or this ONE feed has been failing every sweep since
+                # deployment and only now answers. Without this, a feed that
+                # was down since day one dumps its entire back catalogue as
+                # breaking news the moment it recovers, because the seen-set's
+                # cold start only ever fires once, for whichever feeds
+                # happened to answer on THAT sweep.
+                lab_history[lab] = time.time()
+                newly_recovered_items.extend(feed_items)
+            items.extend(feed_items)
+        if newly_recovered_items:
+            write_seen(_lab_history_file(), lab_history, max_keys=64)
+        _write_cache({"ts": time.time(), "items": items, "feeds": feeds, "fetch_fails": fail_counts})
 
     if not items:
         return []  # every feed down: stay cold rather than baseline an empty sweep
@@ -759,10 +963,31 @@ def scan_ai_labs() -> list[dict[str, Any]]:
         return []
 
     now = time.time()
+    # A feed recovering for the first time gets the SAME silent baseline a
+    # brand-new scanner gets above -- marked seen without being emitted, one
+    # time, the sweep it first succeeds. `newly_baselined` forces the write
+    # below even when this is the only thing that happened: without it, the
+    # marks made here live only in this function's local `seen` dict and are
+    # never persisted unless `triggers` is also non-empty, so the next sweep
+    # reads the OLD seen file from disk and re-baselines nothing.
+    newly_baselined = False
+    for it in newly_recovered_items:
+        key = _item_key(it)
+        if key not in seen:
+            seen[key] = now
+            newly_baselined = True
+
     unseen = [it for it in items if _item_key(it) not in seen]
     # Newest first WITHIN each lab before round-robin: feed order is publisher
     # order, and a pinned/featured block puts month-old posts at the top.
-    unseen.sort(key=lambda it: it.get("published") or 0.0, reverse=True)
+    # Undated items sort as NOW, not epoch 0 (`or 0.0` used to do that) -- the
+    # file's own doctrine is that unknown age fails OPEN at the fresh urgency
+    # (_urgency_for below treats published=None as fresh), and sorting an
+    # undated item behind a 700-hour-old dated one contradicted that: a parser
+    # regression that stops exposing dates must not also make the scanner
+    # treat its own posts as ancient and starve them out of _MAX_TRIGGERS.
+    unseen.sort(key=lambda it: it.get("published") if it.get("published") is not None else now,
+                reverse=True)
 
     triggers: list[dict[str, Any]] = []
     for it in _round_robin(unseen)[:_MAX_TRIGGERS]:
@@ -784,6 +1009,6 @@ def scan_ai_labs() -> list[dict[str, Any]]:
             "urgency": _urgency_for(published, now),
         })
 
-    if triggers:
+    if triggers or newly_baselined:
         _write_seen(seen, protect={_item_key(it) for it in items})
     return triggers

@@ -267,7 +267,7 @@ def test_broken_dynamic_scanner_is_logged_not_swallowed(monkeypatch, caplog):
 def test_cycle_event_carries_the_raw_count_next_to_the_habituated_one(engine, monkeypatch):
     r = _runner()
     r._habituated.add("scan_toy")                      # treat the toy as a default world scanner
-    monkeypatch.setattr(runner_mod, "habituation_filter", lambda found: [])
+    monkeypatch.setattr(runner_mod, "habituation_filter", lambda found, **kw: [])
     result = r.run_once()
     ev = _events("cycle")[-1]
     assert (ev["raw_trigger_count"], ev["trigger_count"]) == (1, 0)

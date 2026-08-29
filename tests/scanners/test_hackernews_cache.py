@@ -31,7 +31,14 @@ def test_cold_cycle_fetches_everything(tmp_path, monkeypatch):
     _, calls = fake_hn(tmp_path, monkeypatch)
     monkeypatch.setattr(hn.time, "time", lambda: 1000.0)
     out = hn.scan_hackernews()
-    assert len(out) == 30
+    # gap-1 fix (2026-08-29): the very first run on a machine has no seen-set
+    # on disk yet, so it baselines the whole front page SILENTLY (zero
+    # triggers) rather than reading 30 stories of unknown age as breaking
+    # news the instant this ships — same rule reddit_ai/ai_labs already use.
+    # The item/top fetch counts below are the actual proof case for this
+    # file (disk-cache round-trips); emission behavior is covered by
+    # tests/scanners/test_hn_reddit_audit.py.
+    assert out == []
     assert calls["top"] == 1
     assert calls["item"] == 30
 
@@ -43,7 +50,10 @@ def test_warm_cycle_makes_no_fetches(tmp_path, monkeypatch):
     calls["top"] = calls["item"] = 0
     monkeypatch.setattr(hn.time, "time", lambda: 1010.0)
     out = hn.scan_hackernews()
-    assert len(out) == 30
+    # Still [] — the first call above already baselined every one of these
+    # 30 story ids as seen, so nothing here is new. The zero-fetch counts are
+    # what this test exists to prove.
+    assert out == []
     assert calls["top"] == 0
     assert calls["item"] == 0
 
@@ -66,5 +76,7 @@ def test_corrupt_cache_falls_back_to_live(tmp_path, monkeypatch):
     hn._CACHE_PATH.write_text("{ not json", "utf-8")
     monkeypatch.setattr(hn.time, "time", lambda: 1000.0)
     out = hn.scan_hackernews()
-    assert len(out) == 30
+    # Also a cold seen-set (fresh tmp_path) — see the comment in
+    # test_cold_cycle_fetches_everything for why this is [] and not 30.
+    assert out == []
     assert calls["item"] == 30

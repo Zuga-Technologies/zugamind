@@ -25,6 +25,23 @@ crossing one is a moment the operator plausibly wants a wake for; a routine
 
 Stdlib only, fail-silent, disk-cached (ZUGAMIND_DATA_DIR honored) — per the
 scanner contract in scanners/__init__.py.
+
+2026-08-29 audit fixes:
+
+5. Adopts safe_http.fetch_json for both endpoints this scanner polls per
+   repo (repo info + latest release), so an unchanged repo answers 304 with
+   no body -- which on GitHub does not count against the rate limit -- and a
+   rate-limited repo backs off instead of being retried into a 403 every
+   pass. On a 304 the previously observed stars/forks/release fields are
+   reused (they're already sitting in `cache["repos"][repo]`, this
+   scanner's own diff baseline) instead of re-fetching a body that would
+   just say the same thing.
+7. `cache["repos"]` (and the new per-URL `cache["feeds"]`) is pruned of any
+   repo no longer in ZUGAMIND_WATCH_REPOS. Before this, a removed repo kept
+   its last-known counts forever, and re-adding it later diffed against
+   that stale baseline -- one giant fake "+N stars"/"+N forks" trigger for
+   everything gained while it sat unwatched, instead of the silent baseline
+   a repo is supposed to get the first time it's ever observed.
 """
 from __future__ import annotations
 
@@ -32,7 +49,6 @@ import json
 import logging
 import os
 import time
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -57,39 +73,60 @@ def _watched_repos() -> list[str]:
     return [r.strip() for r in raw.split(",") if r.strip()]
 
 
-def _fetch_json(url: str) -> Any:
-    try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "ZugaMind/scanner",
-            "Accept": "application/vnd.github+json",
-        })
-        token = os.environ.get("GITHUB_TOKEN", "").strip()
-        if token:
-            req.add_header("Authorization", f"Bearer {token}")
-        # opener(), not urlopen() — a redirect off api.github.com would
-        # otherwise carry this Bearer token to the new host. See safe_http.
-        with safe_http.opener().open(req, timeout=_TIMEOUT) as resp:
-            return json.loads(safe_http.decode_body(resp.read()))
-    except Exception as e:
-        logger.debug("repo_events fetch failed for %s: %s", url, e)
-        return None
+def _fetch(url: str, state: dict[str, Any], name: str) -> tuple:
+    """One conditional GET through the shared helper. See safe_http.fetch_json
+    for the (status, data) contract; `state` is the per-URL etag/last_modified/
+    blocked_until/fails dict the CALLER persists (here: under cache["feeds"])."""
+    headers = {"Accept": "application/vnd.github+json"}
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    # fetch_json already uses safe_http.opener() internally, so a Bearer
+    # token added here still can't follow a redirect off api.github.com.
+    return safe_http.fetch_json(url, state=state, headers=headers,
+                                timeout=_TIMEOUT, name=name)
 
 
-def _repo_state(repo: str) -> dict[str, Any] | None:
-    """Current world-visible state of one repo, or None on fetch failure."""
-    data = _fetch_json(_REPO_API.format(repo=repo))
-    if not isinstance(data, dict) or "stargazers_count" not in data:
-        return None
+def _repo_state(repo: str, prev: "dict[str, Any] | None",
+                feed_state: dict[str, Any]) -> "dict[str, Any] | None":
+    """Current world-visible state of one repo, or None if the repo endpoint
+    could not be read at all (fresh 200 needed, or nothing to fall back to).
+
+    `feed_state` holds this repo's two per-URL safe_http state dicts (one for
+    the repo endpoint, one for the release endpoint) — persisted by the
+    caller across sweeps so conditional GET actually has something to send.
+    A 304 on either endpoint reuses the matching field(s) from `prev`, since
+    "unchanged" is exactly what `prev` already records.
+    """
+    prev = prev or {}
+    repo_status, data = _fetch(_REPO_API.format(repo=repo),
+                               feed_state.setdefault("repo", {}),
+                               name=f"repo_events:{repo}:repo")
+    if repo_status == "ok" and isinstance(data, dict) and "stargazers_count" in data:
+        stars = int(data.get("stargazers_count") or 0)
+        forks = int(data.get("forks_count") or 0)
+    elif repo_status == "not_modified":
+        stars = int(prev.get("stars") or 0)
+        forks = int(prev.get("forks") or 0)
+    else:
+        return None  # repo endpoint down and nothing reusable — try again next pass
+
     state = {
-        "stars": int(data.get("stargazers_count") or 0),
-        "forks": int(data.get("forks_count") or 0),
-        "release_id": None,
-        "release_tag": "",
+        "stars": stars,
+        "forks": forks,
+        "release_id": prev.get("release_id"),
+        "release_tag": prev.get("release_tag", ""),
     }
-    rel = _fetch_json(_RELEASE_API.format(repo=repo))
-    if isinstance(rel, dict) and rel.get("id"):
+
+    rel_status, rel = _fetch(_RELEASE_API.format(repo=repo),
+                             feed_state.setdefault("release", {}),
+                             name=f"repo_events:{repo}:release")
+    if rel_status == "ok" and isinstance(rel, dict) and rel.get("id"):
         state["release_id"] = rel["id"]
         state["release_tag"] = str(rel.get("tag_name") or "")[:60]
+    # "not_modified": release fields already carried over from `prev` above.
+    # "failed"/"rate_limited" (e.g. a repo with zero releases 404s forever):
+    # same — a release-endpoint blip must not erase a previously known release.
     return state
 
 
@@ -183,8 +220,21 @@ def scan_github_repo_events() -> list[dict]:
 
     triggers: list[dict] = []
     states = cache.setdefault("repos", {})
+    feeds = cache.setdefault("feeds", {})
+
+    # Prune anything no longer watched BEFORE diffing, so a re-added repo
+    # baselines silently (like a brand-new one) instead of diffing against
+    # a count frozen from whenever it was dropped. See fix 7 in the module
+    # docstring.
+    watched = set(repos)
+    for stale in [r for r in states if r not in watched]:
+        del states[stale]
+    for stale in [r for r in feeds if r not in watched]:
+        del feeds[stale]
+
     for repo in repos:
-        cur = _repo_state(repo)
+        feed_state = feeds.setdefault(repo, {})
+        cur = _repo_state(repo, states.get(repo), feed_state)
         if cur is None:
             continue  # fetch failed — keep prev state, try again next pass
         triggers.extend(diff_state(repo, states.get(repo), cur))
