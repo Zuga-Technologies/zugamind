@@ -173,12 +173,38 @@ def _idempotency_store(intent: dict, response: dict) -> None:
     _idempotency_cache[_intent_hash(intent)] = (time.monotonic(), response)
 
 
+# Hard ceiling on the serialized context that rides into a paid model call.
+# The winner's triggers were dumped verbatim AND re-embedded by the plan step
+# that copies the winner's context: five 5 KB triggers = a 51,939-char prompt
+# (audit 2026-08-28). The briefing that goes to the harness has had a cap for
+# months; this is the same idea for the gate's own prompt.
+_PROMPT_CONTEXT_CHARS = 12_000
+
+
+def _compact_context(context: dict) -> dict:
+    from foundation.text_format import compact_payload  # noqa: WPS433 — lazy, like the other helpers
+    compacted = compact_payload(context)
+    # Every plan template copies `triggers` out of the winner's own context,
+    # so a plan step's triggers are the winner's triggers, verbatim, again.
+    # The model sees them once, on the winner.
+    plan = compacted.get("plan")
+    if isinstance(plan, list):
+        for step in plan:
+            if isinstance(step, dict) and isinstance(step.get("context"), dict):
+                step["context"].pop("triggers", None)
+    return compacted
+
+
 def _build_prompt(intent: dict) -> str:
     summary = intent.get("summary", "")
     context = intent.get("context", {})
     if not context:
         return summary
-    return f"{summary}\n\nContext:\n{json.dumps(context, indent=2, default=str)}"
+    body = json.dumps(_compact_context(context) if isinstance(context, dict) else context,
+                      indent=2, default=str)
+    if len(body) > _PROMPT_CONTEXT_CHARS:
+        body = body[:_PROMPT_CONTEXT_CHARS] + "\n… [context truncated]"
+    return f"{summary}\n\nContext:\n{body}"
 
 
 # --- Public API ----------------------------------------------------------------

@@ -43,7 +43,12 @@ def _ttype(t: Any) -> str:
 
 def _str(t: Any, key: str, default: str = "") -> str:
     v = t.get(key) if isinstance(t, dict) else None
-    return v if isinstance(v, str) else (default if v is None else str(v))
+    if isinstance(v, str):
+        return v
+    if v is None:
+        return default
+    logger.debug("trigger field %r is %s, not str — coerced", key, type(v).__name__)
+    return str(v)
 
 
 # Bid content becomes the wake briefing. Only WorldSignals capped it; a
@@ -56,14 +61,21 @@ def _clip(s: str, n: int = _CONTENT_CLIP) -> str:
 
 
 def _num(t: Any, key: str, default: float = 0.0) -> float:
+    """A float, or `default`. Malformed input ("95%", True) degrades to the
+    default — for urgency that means "calm", which keeps a malformed critical
+    out of the alarm lane; the debug line is how you find that out."""
     v = t.get(key) if isinstance(t, dict) else None
     if isinstance(v, bool):
+        logger.debug("trigger field %r is a bool — treated as %r", key, default)
         return default
     if isinstance(v, (int, float)):
         return float(v)
+    if v is None:
+        return default
     try:
-        return float(v) if v is not None else default
+        return float(v)
     except (TypeError, ValueError):
+        logger.debug("trigger field %r=%r is not numeric — treated as %r", key, v, default)
         return default
 
 
@@ -471,11 +483,25 @@ class PriorityGoalsModule(WorkspaceModule):
     # 2026-07-12/13, three separate wakes, never fixed until now).
     STATE_FILE: Path = ENGINE_DIR / "priority_goals_state.json"
 
-    def __init__(self):
+    # Priority breaks TIES between equally-stale goals; it must never outweigh
+    # real staleness. It used to be 0.5 per rank, measured against HOURS of
+    # staleness — so once every goal had been touched once, goal #1 won
+    # every cycle unless another goal fell more than 30 real minutes behind,
+    # which never happens at a 7-minute cadence (500-cycle measurement,
+    # 2026-08-28: 283 of 285 priority_goals wins went to goal #1). The
+    # module's stated purpose — advance the LEAST-RECENTLY-TOUCHED goal —
+    # was silently defeated. 0.001 h = 3.6 s per rank.
+    PRIORITY_TIEBREAK_HOURS = 0.001
+
+    def __init__(self, now_fn=None):
         super().__init__()
         self._goal_last_touched: Dict[str, Optional[datetime]] = {
             g[0]: None for g in self.GOALS
         }
+        # Injectable clock: staleness feeds salience, so a real datetime.now()
+        # here leaks wall-clock into a DECISION — two identical cycles seconds
+        # apart bid 0.201250 vs 0.201299. A replay harness can freeze it.
+        self._now_fn = now_fn or datetime.now
         self._load_state()
 
     @staticmethod
@@ -529,12 +555,12 @@ class PriorityGoalsModule(WorkspaceModule):
         self._save_state()
 
     def generate_bid(self, context: Dict[str, Any]) -> Optional[SalienceBid]:
-        now = datetime.now()
+        now = self._now_fn()
         candidates = []
         for idx, (key, label) in enumerate(self.GOALS):
             last = self._goal_last_touched.get(key)
             hours_stale = 9999.0 if last is None else (now - last).total_seconds() / 3600.0
-            priority_bonus = (len(self.GOALS) - idx) * 0.5
+            priority_bonus = (len(self.GOALS) - idx) * self.PRIORITY_TIEBREAK_HOURS
             score = hours_stale + priority_bonus
             candidates.append((score, idx, key, label, hours_stale))
 
@@ -576,7 +602,7 @@ class PriorityGoalsModule(WorkspaceModule):
             if content and content.bid and content.bid.source_module == self.name:
                 key = content.bid.context.get("goal_key")
                 if key in self._goal_last_touched:
-                    self._goal_last_touched[key] = datetime.now()
+                    self._goal_last_touched[key] = self._now_fn()
                     self._save_state()
         except Exception as e:
             logger.debug("priority_goals on_broadcast failed: %s", e)
@@ -652,8 +678,8 @@ class WorldSignalsModule(WorkspaceModule):
             thought_type=ThoughtType.EXTERNAL_SIGNAL,
             context={
                 "trigger_count": len(self._triggers),
-                "top_type": best.get("type"),
-                "top_url": best.get("url") or best.get("link"),
+                "top_type": _ttype(best) or None,
+                "top_url": _str(best, "url") or _str(best, "link") or None,
                 "types": sorted({_ttype(t) or "?" for t in self._triggers}),
                 "triggers": lane_triggers,
             },
@@ -707,12 +733,22 @@ def route_triggers_to_modules(
     # own list) used to be routed NOTHING because TRIGGER_TYPE_TO_MODULE was
     # frozen when this file was imported (audit 2026-08-28). Two modules
     # claiming one type is a configuration error — say so, first wins.
+    # Tie-break by ALL_MODULES position, not by the caller's list order:
+    # "first wins" must mean the same module no matter how a caller sorted
+    # or filtered its list (a reordered list used to flip the winner
+    # silently). Classes not in ALL_MODULES rank after it, in encounter order.
+    def _rank(m: WorkspaceModule) -> int:
+        try:
+            return ALL_MODULES.index(type(m))
+        except ValueError:
+            return len(ALL_MODULES) + modules.index(m)
+
     routing: Dict[str, str] = {}
-    for m in modules:
+    for m in sorted(modules, key=_rank):
         for ttype in getattr(m, "TRIGGER_TYPES", ()) or ():
             if ttype in routing and routing[ttype] != m.name:
-                logger.warning("trigger type %r claimed by both %r and %r — routing to %r",
-                               ttype, routing[ttype], m.name, routing[ttype])
+                logger.warning("trigger type %r claimed by both %r and %r — routing to %r "
+                               "(earlier in ALL_MODULES)", ttype, routing[ttype], m.name, routing[ttype])
                 continue
             routing[ttype] = m.name
 

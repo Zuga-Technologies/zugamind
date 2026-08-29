@@ -88,6 +88,7 @@ from continuity import journal
 from foundation import config as foundation_config
 from foundation.failure_reason import map_local_slug
 from foundation.state import load_state, save_state, transition_state
+from foundation.text_format import compact_payload
 from gates.action_gate import escalate_for_action
 from gates.value_gate import _apply_value_prior, score_action
 from gates.work_claim import check_work_claim
@@ -170,6 +171,19 @@ class StreamRunner:
         attention_health_enabled: bool = True,
     ):
         self.workspace = Workspace(attention_health_enabled=attention_health_enabled)
+        # Restore the attention self-model (streaks, win counts, blind spots)
+        # from the last run. AttentionSchema.to_dict/restore_from_dict had
+        # existed for months with NO caller: every restart reset the mind's
+        # sense of what it had been attending to (audit 2026-08-28). The
+        # snapshot rides inside state.json under "attention". Restored before
+        # the modules are registered; the win table is seeded per module on
+        # its first valid bid, so a restore and a fresh start compose cleanly.
+        try:
+            snapshot = load_state().get("attention")
+            if isinstance(snapshot, dict) and snapshot:
+                self.workspace.attention_schema.restore_from_dict(snapshot)
+        except Exception as e:  # noqa: BLE001 — a bad snapshot must never block startup
+            logger.warning("attention snapshot not restored (%s); starting fresh", e)
         self.modules = create_all_modules()
         for m in self.modules:
             self.workspace.register_module(m)
@@ -253,16 +267,31 @@ class StreamRunner:
         triggers = self._collect_triggers()
         route_triggers_to_modules(triggers, self.modules)
 
-        content = self.workspace.run_cycle({"trigger_count": len(triggers)})
+        try:
+            content = self.workspace.run_cycle({"trigger_count": len(triggers)})
+        except Exception as e:  # noqa: BLE001 — one bad cycle must be a journal line, not a dead daemon
+            # Before 2026-08-28 this propagated: --once/--cycles died and
+            # --daemon swallowed it with NO journal event for the cycle.
+            reason = f"cycle_error:{e}"
+            logger.error("workspace cycle failed (%s); treating as no winner", e)
+            journal.append_event("cycle_error", {
+                "trigger_count": len(triggers), "error": str(e)[:300],
+                "failure_reason": map_local_slug(reason),
+            })
+            content = None
         winner_dict = content.to_dict() if content else None
 
         state = self._transition_state(winner_dict)
+        state["attention"] = self.workspace.attention_schema.to_dict()
         save_state(state)
 
         journal.append_event("cycle", {
             "trigger_count": len(triggers),
             "bids": self.workspace.get_stats()["last_bids"],
-            "winner": winner_dict,
+            # A bounded copy: the in-memory winner (with its full triggers)
+            # still drives the briefing and the gate; the journal gets a
+            # summary, not 25 KB of trigger text per cycle.
+            "winner": compact_payload(winner_dict) if winner_dict else None,
             "state": state.get("state"),
         })
 

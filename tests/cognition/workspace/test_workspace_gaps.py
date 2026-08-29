@@ -165,6 +165,8 @@ def test_restore_from_dict_round_trips_a_real_snapshot():
     ws.register_module(_Echo())
     for _ in range(4):
         ws.run_cycle({})
+    ws.attention_schema.set_adjustment("echo", -0.05)       # non-empty adjustments...
+    ws.attention_schema.current_focus_target = "goal-x"     # ...and a real target round-trip too
     snap = ws.attention_schema.to_dict()
     b = AttentionSchema()
     b.restore_from_dict(snap)
@@ -268,6 +270,59 @@ def test_a_module_that_never_won_is_still_a_blind_spot():
         ws.run_cycle({})
     assert ws.attention_schema.module_win_counts["chronic"] == 0
     assert "chronic" in ws.attention_schema.blind_spots
+
+
+class _Silent(WorkspaceModule):
+    name = "silent"
+    speak = False
+
+    def generate_bid(self, context):
+        if not _Silent.speak:
+            return None
+        return SalienceBid(self.name, "first words", 0.3, ThoughtType.KNOWLEDGE)
+
+
+def test_a_module_that_never_bid_is_not_a_blind_spot():
+    """Seeding at registration over-corrected: a module that had merely been
+    silent got the 1.4x rescue on its first-ever bid (a 0.3 bid won at 0.924
+    with the boosts stacked). Only a module that has competed is seeded."""
+    import random
+    random.seed(3)
+    _Silent.speak = False
+    ws = Workspace()
+    ws.register_module(_Silent())
+    ws.register_module(_Echo())
+    ws.register_module(_Echo2())
+    for _ in range(10):
+        ws.run_cycle({})
+    assert "silent" not in ws.attention_schema.module_win_counts
+    assert "silent" not in ws.attention_schema.blind_spots
+    _Silent.speak = True
+    ws.run_cycle({})
+    first = next(b for b in ws.last_cycle_bids if b.source_module == "silent")
+    assert first.salience < 0.6                       # no blind-spot rescue on a first bid
+    assert "silent" in ws.attention_schema.module_win_counts  # but it is now in the race
+
+
+def test_duplicate_claim_winner_does_not_depend_on_caller_order(caplog):
+    class _Dup2(WorkspaceModule):
+        name = "dup2"
+        TRIGGER_TYPES = {"repo_issue"}
+
+        def generate_bid(self, context):
+            return None
+    for order in ([wm.RepoIssuesModule(), _Dup2()], [_Dup2(), wm.RepoIssuesModule()]):
+        wm.route_triggers_to_modules([{"type": "repo_issue", "issue_title": "t"}], order)
+        repo = next(m for m in order if m.name == "repo_issues")
+        dup = next(m for m in order if m.name == "dup2")
+        assert len(repo._triggers) == 1 and dup._triggers == []
+
+
+def test_world_signal_top_fields_are_coerced():
+    ws = wm.WorldSignalsModule()
+    ws.set_triggers([{"type": 123, "detail": "x", "relevance": 0.5, "urgency": 0.1, "url": 42}])
+    ctx = ws.generate_bid({}).context
+    assert ctx["top_type"] == "123" and ctx["top_url"] == "42"
 
 
 def test_stats_expose_the_alarm_refractory_clock():

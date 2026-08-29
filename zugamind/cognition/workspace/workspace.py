@@ -181,10 +181,21 @@ class AttentionSchema:
     2. DIVERSITY CAP     : soft multiplier once an identity wins 3+ of the
                            last 6 cycles, plus a HARD ceiling applied after
                            modulation (0.25 at 3+ wins, 0.15 at 4+)
-    3. BLIND SPOT BOOST  : 1.4x for modules that haven't won in the last 8
-                           cycles (once enough history exists)
+    3. BLIND SPOT BOOST  : 1.4x for modules that have bid but not won in the
+                           last 8 cycles (once enough history exists)
     4. NOVELTY BONUS     : 1.1x for a bid whose identity differs from the
                            current focus
+
+    What a streak actually costs (measured 2026-08-28, 0.9 bidder vs 0.5):
+    three consecutive wins are, by definition, also 3 of the last 6, so the
+    soft cap (x0.7) and the HARD ceiling co-fire with the streak dampener —
+    the winner's salience goes 0.9 -> 0.25 at streak 3, 0.15 at streak 4,
+    not the 0.45 / 0.27 the ladder in item 1 reads as on its own. For any
+    base salience above ~0.5 the hard ceiling is what governs. Mechanism 3
+    is small under salience^4 selection: a chronic 0.05 bidder won 0.5% of
+    200 cycles with it; the (unwired, reference-only) WorkspaceActuator's
+    additive boost lifted that to 4.5%. It relabels starvation more than it
+    cures it; the actuator is the lever.
     """
 
     def __init__(self):
@@ -484,12 +495,6 @@ class Workspace:
     def register_module(self, module: WorkspaceModule):
         """Register a module to participate in workspace competition."""
         self._modules.append(module)
-        # Seed the win table: `blind_spots` is computed from its keys, so a
-        # module that had NEVER won could never be a blind spot and never
-        # got the 1.4x rescue — the correction only ever helped past winners
-        # (audit 2026-08-28: 60 simulated cycles, a chronic 0.02 bidder was
-        # never once boosted).
-        self.attention_schema.module_win_counts.setdefault(module.name, 0)
         logger.info("[Workspace] Registered module: %s", module.name)
 
     def register_modulator(self, modulator: BidModulator):
@@ -582,6 +587,18 @@ class Workspace:
                 bid = module.generate_bid(context)
                 if bid and bid.is_valid:
                     bids.append(bid)
+                    # Seed the win table on a module's FIRST VALID BID.
+                    # `blind_spots` is computed from its keys, so a module
+                    # that had never won could never be a blind spot and
+                    # never got the 1.4x rescue (audit 2026-08-28: a chronic
+                    # 0.02 bidder was never once boosted in 60 cycles).
+                    # Seeding at registration instead over-corrected: a
+                    # module that had simply never had anything to say got
+                    # the rescue the moment it first spoke, stacking with
+                    # the streak-break and novelty boosts (a 0.3 first bid
+                    # won at 0.924). "Competed and lost" earns the boost;
+                    # "silent so far" does not.
+                    self.attention_schema.module_win_counts.setdefault(module.name, 0)
             except Exception as e:
                 logger.warning("[Workspace] Module %s bid failed: %s", module.name, e)
         return bids

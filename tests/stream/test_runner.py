@@ -362,7 +362,12 @@ def test_pause_file_halts_the_whole_cycle(tmp_path, monkeypatch):
 
 def test_default_scanner_triggers_are_habituated_across_cycles(tmp_path, monkeypatch):
     """A default world-scanner re-emitting the same trigger is damped on the
-    second cycle; an injected extra_scanner emitting the same shape is not."""
+    second cycle; an injected extra_scanner emitting the same shape is not.
+
+    Note: the second StreamRunner below shares this test's state.json, so it
+    INHERITS the first runner's attention snapshot (restart survival, since
+    2026-08-28). This test does not depend on attention state; a test that
+    needs two INDEPENDENT runners must give each its own state file."""
     _patch_engine_dir(tmp_path, monkeypatch)
     monkeypatch.setattr(command_actuator, "load_harness_configs", lambda *a, **kw: [])
     monkeypatch.setattr(config, "SEEN_TRIGGERS_FILE", tmp_path / "seen_triggers.json")
