@@ -19,7 +19,10 @@ def db(tmp_path):
 @pytest.fixture
 def enabled(monkeypatch):
     monkeypatch.setenv("ZUGAMIND_VALUE_GATE_ENABLED", "true")
-    monkeypatch.setattr(vg, "_MIN_SAMPLES", 3)
+    # The tuning knobs are read from the environment at CALL time now, so the
+    # test drives the same seam an operator does instead of reaching in and
+    # rebinding a module constant.
+    monkeypatch.setenv("ZUGAMIND_VALUE_MIN_SAMPLES", "3")
 
 
 def _bid(module, salience, ttype=None):

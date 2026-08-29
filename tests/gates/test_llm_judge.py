@@ -129,7 +129,7 @@ def test_commits_none_falls_back_to_empty_when_repo_root_missing(monkeypatch):
 
     captured = {}
 
-    def _capture(prompt, max_tokens=None, system=None):
+    def _capture(prompt, max_tokens=None, system=None, **kwargs):
         captured["prompt"] = prompt
         return "ALLOW\nno evidence needed"
 
@@ -156,7 +156,7 @@ def test_commits_none_falls_back_to_empty_when_lookup_raises(monkeypatch):
 def test_explicit_commits_list_is_used_verbatim_in_prompt(monkeypatch):
     captured = {}
 
-    def _capture(prompt, max_tokens=None, system=None):
+    def _capture(prompt, max_tokens=None, system=None, **kwargs):
         captured["prompt"] = prompt
         return "ALLOW\nmatches"
 
@@ -169,7 +169,7 @@ def test_explicit_commits_list_is_used_verbatim_in_prompt(monkeypatch):
 def test_window_minutes_is_reflected_in_prompt(monkeypatch):
     captured = {}
 
-    def _capture(prompt, max_tokens=None, system=None):
+    def _capture(prompt, max_tokens=None, system=None, **kwargs):
         captured["prompt"] = prompt
         return "ALLOW\nok"
 

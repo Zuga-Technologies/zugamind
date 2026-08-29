@@ -111,7 +111,7 @@ from foundation.state import load_state, save_state, transition_state
 from foundation.text_format import compact_payload
 from gates.action_gate import escalate_for_action
 from gates.value_gate import _apply_value_prior, _enabled as _value_gate_enabled, score_action
-from gates.work_claim import check_work_claim
+from gates.work_claim import check_entity_grounding, check_work_claim
 from scanners import (
     discover_dynamic_scanners,
     habituation_filter,
@@ -707,13 +707,29 @@ class StreamRunner:
                 text = (hr.get("stdout") or "").strip()
                 if not text:
                     continue
-                wc = check_work_claim(text, repo_root=repo_by_harness.get(hr.get("harness")))
+                claim_repo = repo_by_harness.get(hr.get("harness"))
+                wc = check_work_claim(text, repo_root=claim_repo)
                 if wc.get("reason") != "no_work_claim":
                     journal.append_event("work_claim", {
                         "harness": hr.get("harness"),
                         "backed": wc.get("backed"),
                         "unbacked": (wc.get("unbacked") or [])[:3],
                         "reason": wc.get("reason"),
+                    })
+                # The verb-based check above is unbounded-leaky by design: a
+                # claim with no listed verb ("ClickHouse is now in our stack")
+                # passes it untouched. Entity grounding is the noun-side half of
+                # the same question and has existed, tested, called by nothing,
+                # since it was written — so that whole class of confabulation
+                # went unrecorded (audit 2026-08-29). Advisory and journal-only,
+                # like its neighbour: it flags, it never blocks.
+                eg = check_entity_grounding(text, repo_root=claim_repo)
+                if not eg.get("grounded", True):
+                    journal.append_event("entity_grounding", {
+                        "harness": hr.get("harness"),
+                        "grounded": False,
+                        "ungrounded": (eg.get("ungrounded") or [])[:5],
+                        "reason": eg.get("reason"),
                     })
             except Exception as e:  # noqa: BLE001 — integrity is advisory, never disruptive
                 logger.debug("work_claim check failed (fail-open): %s", e)

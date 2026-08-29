@@ -17,8 +17,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import time
+import unicodedata
 from typing import Any, Literal, TypedDict
 
 from foundation.failure_reason import map_local_slug
@@ -60,13 +62,37 @@ TIER_MODELS: dict[str, str] = {
     "local": "local",
     "haiku": "claude-haiku-4-5",
     "sonnet": "claude-sonnet-5",
-    "opus": "claude-opus-4-8",
+    "opus": "claude-opus-5",
 }
 
 # Idempotency cache: prevents double-spend if a caller retries the same
 # intent within a short window (e.g. a caller-side retry-on-timeout).
 _IDEMPOTENCY_WINDOW_S = 5.0
+# Hard cap on the cache. An entry was only ever evicted when the SAME hash was
+# looked up again after expiry, so a long-lived daemon that never repeats an
+# intent grew this dict forever (audit 2026-08-29). Every store now prunes what
+# has expired and, if that is still not enough, drops the oldest.
+_IDEMPOTENCY_MAX_ENTRIES = 512
 _idempotency_cache: dict[str, tuple[float, dict]] = {}
+
+# Circuit breaker. Nothing stopped a caller re-attempting a live model call
+# every cycle through a provider outage, and a paid call that fails after the
+# provider answered (a refusal, an empty content block) still costs money -- so
+# a sustained outage burned budget with no chance of a usable answer (audit
+# 2026-08-29). After this many CONSECUTIVE provider failures from one caller,
+# its circuit opens for the cooldown and further intents are refused without a
+# call. One success closes it.
+_CIRCUIT_FAIL_THRESHOLD = int(os.environ.get("ZUGAMIND_ACTION_CIRCUIT_FAILS", "5"))
+_CIRCUIT_COOLDOWN_S = float(os.environ.get("ZUGAMIND_ACTION_CIRCUIT_COOLDOWN_S", "300"))
+_circuit_failures: dict[str, int] = {}
+_circuit_open_until: dict[str, float] = {}
+
+# Hard ceiling on one call's max_tokens. can_spend() gates on a FLAT per-tier
+# estimate computed BEFORE the call, when nothing is known about output length
+# -- so an intent asking for 100k tokens is approved against the cost of a
+# 500-token one. This clamp is what keeps that estimate meaningful; without it
+# the budget check is advisory (audit 2026-08-29).
+_MAX_TOKENS_CEILING = int(os.environ.get("ZUGAMIND_ACTION_MAX_TOKENS", "4000"))
 
 
 # --- Content screen (H7): acute per-intent safety screen --------------------
@@ -86,10 +112,67 @@ _SHIELD_BLOCK_PATTERNS = (
 )
 # Editing/disabling this repo's OWN safety spine via a model-call intent.
 _SHIELD_SPINE_TOKENS = (
-    "budget.py", "action_gate.py", "gates/", "charter.md",
+    "budget.py", "action_gate.py", "gates/", "gates\\", "charter.md",
 )
 _SHIELD_MUTATE_VERBS = ("edit", "modify", "disable", "remove", "weaken",
                         "bypass", "rewrite", "delete", "patch")
+
+# Characters that render as nothing and split a word in two, defeating every
+# pattern above: a zero-width space inside `rm -rf` is not `rm -rf` to a
+# regex, but is once the text round-trips through a shell. The ranges are the
+# ones with measured attack-success rates against guardrail filters of exactly
+# this shape (arXiv 2504.11168): Unicode Tag block ~90%, bidirectional
+# overrides ~79-99%, emoji variation-selector smuggling ~100%.
+_INVISIBLE_RANGES = (
+    (0x200B, 0x200F),    # zero-width space/non-joiner/joiner, LRM/RLM
+    (0x202A, 0x202E),    # bidi embedding + override
+    (0x2060, 0x2064),    # word joiner, invisible operators
+    (0x2066, 0x2069),    # bidi isolates
+    (0xFE00, 0xFE0F),    # variation selectors 1-16
+    (0xE0000, 0xE007F),  # Unicode Tag block
+    (0xE0100, 0xE01EF),  # variation selectors supplement
+)
+_INVISIBLE = {cp: None for lo, hi in _INVISIBLE_RANGES
+              for cp in range(lo, hi + 1)}
+_INVISIBLE.update(dict.fromkeys(map(ord, "\u00ad\u180e\ufeff\u061c"), None))
+# Homoglyphs NFKC does NOT fold: Cyrillic/Greek letters visually identical to
+# ASCII. A Cyrillic ge in `git push --force` reads normally and matched
+# nothing. Only genuinely indistinguishable confusables are folded -- this is
+# a screen, not a transliterator.
+_CONFUSABLES = str.maketrans({
+    "\u0430": "a", "\u0435": "e", "\u043e": "o", "\u0440": "p", "\u0441": "c",
+    "\u0445": "x", "\u0443": "y", "\u0456": "i", "\u0455": "s", "\u0458": "j",
+    "\u04bb": "h", "\u0433": "g", "\u043a": "k", "\u043c": "m", "\u0442": "t",
+    "\u0432": "b", "\u043d": "h", "\u0410": "a", "\u0415": "e", "\u041e": "o",
+    "\u0420": "p", "\u0421": "c", "\u0425": "x", "\u03bf": "o", "\u03b1": "a",
+    "\u03b5": "e", "\u03c1": "p", "\u03bd": "v", "\u03ba": "k", "\u03c4": "t",
+    "\u0392": "b", "\u039f": "o", "\u0391": "a", "\u2010": "-", "\u2011": "-",
+    "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-", "\u2044": "/",
+    "\u2215": "/",
+})
+
+
+def _normalize_for_screen(blob: str) -> str:
+    """Fold a blob to the one spelling the patterns are written against.
+
+    A deny-list screen matches literal text, so every cheap way of writing
+    the same string differently is a bypass. Four are closed here, in order:
+    compatibility normalization (NFKC -- fullwidth and ligature forms),
+    invisible characters, homoglyphs, then whitespace runs. Casefold comes
+    last so it also lowercases whatever the substitutions produced.
+
+    What this does NOT close, stated plainly so nobody mistakes the screen for
+    a boundary: the patterns are English, so the same instruction phrased in
+    another language passes untouched, and no amount of normalization changes
+    that. Full UTS-39 confusables folding needs a ~6.5k-entry table that is not
+    in the stdlib, so only the unambiguous Latin lookalikes are folded here.
+    This is an acute red-flag screen in a defence-in-depth stack (the budget
+    cap, the human veto and the dry run are the other layers) -- it is not the
+    thing standing between the agent and a determined adversary.
+    """
+    b = unicodedata.normalize("NFKC", blob or "")
+    b = b.translate(_INVISIBLE).translate(_CONFUSABLES)
+    return re.sub(r"\s+", " ", b).casefold()
 
 
 def screen_intent(intent: dict) -> str | None:
@@ -103,7 +186,7 @@ def screen_intent(intent: dict) -> str | None:
             parts.append(v)
         elif v is not None:
             parts.append(json.dumps(v, default=str))
-    blob = " ".join(parts).lower()
+    blob = _normalize_for_screen(" ".join(parts))
     if not blob.strip():
         return None
     for pat, label in _SHIELD_BLOCK_PATTERNS:
@@ -151,7 +234,14 @@ def _resolve_ollama_caller():
 # --- Helpers -----------------------------------------------------------------
 
 def _intent_hash(intent: dict) -> str:
-    keys = ("kind", "summary", "context", "max_tokens", "system", "tier")
+    # `caller` is part of the key: an idempotency key scoped to the payload
+    # alone lets two DIFFERENT callers issuing textually identical intents
+    # inside the window share one cached response, so the second silently
+    # receives an answer produced for the first. The standard rule is to scope
+    # the key by tenant, never the key on its own (Stripe's idempotency
+    # design); `caller` is this gate's tenant. Added 2026-08-29.
+    keys = ("kind", "summary", "context", "max_tokens", "system", "tier",
+            "caller")
     keyed = {k: intent.get(k) for k in keys if k in intent}
     return hashlib.sha256(
         json.dumps(keyed, sort_keys=True, default=str).encode()
@@ -170,7 +260,158 @@ def _idempotency_lookup(intent: dict) -> dict | None:
 
 
 def _idempotency_store(intent: dict, response: dict) -> None:
-    _idempotency_cache[_intent_hash(intent)] = (time.monotonic(), response)
+    now = time.monotonic()
+    _idempotency_cache[_intent_hash(intent)] = (now, response)
+    if len(_idempotency_cache) <= _IDEMPOTENCY_MAX_ENTRIES:
+        return
+    # Nothing else evicts: a lookup only drops the key it was asked about, so a
+    # daemon that never repeats an intent grew this forever. Drop what has
+    # expired first -- those can never be served again -- and only if that is
+    # still not enough, drop oldest-first down to the cap.
+    for key in [k for k, (ts, _) in _idempotency_cache.items()
+                if (now - ts) >= _IDEMPOTENCY_WINDOW_S]:
+        _idempotency_cache.pop(key, None)
+    if len(_idempotency_cache) > _IDEMPOTENCY_MAX_ENTRIES:
+        for key in sorted(_idempotency_cache, key=lambda k: _idempotency_cache[k][0])[
+            : len(_idempotency_cache) - _IDEMPOTENCY_MAX_ENTRIES
+        ]:
+            _idempotency_cache.pop(key, None)
+
+
+def _circuit_seconds_left(caller: str, *, now: float | None = None) -> float:
+    """Seconds until `caller`'s circuit closes again (0.0 when it is closed)."""
+    opened_until = _circuit_open_until.get(caller)
+    if opened_until is None:
+        return 0.0
+    left = opened_until - (time.monotonic() if now is None else now)
+    if left <= 0.0:
+        # Expired: clear both halves so the next failure starts a fresh count
+        # rather than instantly re-opening on the stale tally.
+        _circuit_open_until.pop(caller, None)
+        _circuit_failures.pop(caller, None)
+        return 0.0
+    return left
+
+
+def _circuit_record_failure(caller: str, tier: str, reason: str) -> None:
+    n = _circuit_failures.get(caller, 0) + 1
+    _circuit_failures[caller] = n
+    if n < _CIRCUIT_FAIL_THRESHOLD or caller in _circuit_open_until:
+        return
+    _circuit_open_until[caller] = time.monotonic() + _CIRCUIT_COOLDOWN_S
+    logger.error(
+        "action_gate: circuit OPEN for caller=%s after %d consecutive provider "
+        "failures (last: %s) — refusing for %.0fs",
+        caller, n, reason, _CIRCUIT_COOLDOWN_S,
+    )
+    _journal_gate_event("gate_circuit_open", {
+        "caller": caller, "tier": tier, "failures": n,
+        "cooldown_s": _CIRCUIT_COOLDOWN_S, "last_reason": reason,
+    })
+
+
+def _circuit_record_success(caller: str) -> None:
+    _circuit_failures.pop(caller, None)
+    _circuit_open_until.pop(caller, None)
+
+
+def _journal_gate_event(kind: str, payload: dict) -> None:
+    """Best-effort structured trail. The journal is an independent file with
+    independent writes, so it survives a wedged budget.json -- and it must
+    never raise into the gate, which is why even the import is guarded."""
+    try:
+        from continuity import journal  # noqa: WPS433 — lazy, like the other helpers
+        journal.append_event(kind, payload)
+    except Exception as exc:  # noqa: BLE001 — the trail is best-effort by contract
+        logger.warning("action_gate: journaling %s failed: %s", kind, exc)
+
+
+def _tier_estimate(tier: str) -> float:
+    """The flat per-tier cost can_spend() gated on. 0.0 if unresolvable."""
+    try:
+        from foundation.config import HAIKU_COST, OPUS_COST, SONNET_COST  # noqa: WPS433
+        return {"haiku": HAIKU_COST, "sonnet": SONNET_COST,
+                "opus": OPUS_COST}.get(tier, 0.0)
+    except Exception:  # noqa: BLE001 — an estimate is a nicety, never a blocker
+        return 0.0
+
+
+def _real_cost(usage_meta: dict | None) -> float | None:
+    """The provider's own USD figure, when the call actually reached it."""
+    cost = usage_meta.get("cost_usd") if isinstance(usage_meta, dict) else None
+    if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+        return float(cost)
+    return None
+
+
+def _persist_spend(record_spend, budget: dict, tier: str, usage_meta: dict,
+                   caller: str) -> tuple[dict, float, "Exception | None"]:
+    """Write an ALREADY-INCURRED spend to the ledger.
+
+    Returns (new_budget, cost, persist_exc). Real money is gone at the
+    provider's end before this runs, so failure here is never a reason to
+    discard anything -- it is a reason to be loud. record_spend() persists the
+    fact to budget.json so the NEXT call's can_spend() sees it; every call
+    reloads budget.json fresh, so a single silently-failed write under-counts
+    the monthly cap for the REST OF THE MONTH (the ledger is month-keyed;
+    there is no daily reset), with no concurrency race required. One retry
+    absorbs a transient I/O blip; past that we report loudly and leave a
+    structured trail so reconciliation is mechanical: sum the
+    `budget_persist_failed` events and fold them into `spent`.
+    """
+    spent_before = float(budget.get("spent", 0.0))
+    new_budget = budget
+    persist_exc: "Exception | None" = None
+    for attempt in range(2):
+        try:
+            real = _real_cost(usage_meta)
+            if real is not None:
+                new_budget = record_spend(budget, tier, cost=real)
+            else:
+                new_budget = record_spend(budget, tier)  # flat per-tier estimate
+            persist_exc = None
+            break
+        except Exception as exc:  # noqa: BLE001 — retried once, then surfaced below
+            persist_exc = exc
+            logger.warning(
+                "action_gate: record_spend attempt %d/2 failed (tier=%s): %s",
+                attempt + 1, tier, exc,
+            )
+
+    if persist_exc is None:
+        cost = float(new_budget.get("spent", spent_before)) - spent_before
+        return new_budget, cost, None
+
+    logger.error(
+        "action_gate: record_spend failed twice — spend already happened "
+        "(tier=%s) but budget.json was NOT updated; the monthly cap will "
+        "under-count for the REST OF THE MONTH — reconcile budget.json "
+        "manually or accept the drift: %s",
+        tier, persist_exc,
+    )
+    estimated = _tier_estimate(tier)
+    try:
+        from foundation.failure_reason import normalize  # noqa: WPS433
+        # Unlike the ok:True `budget_not_persisted:<exc>` reason on the returned
+        # result (excluded — success rows stay NULL), this JOURNAL event IS
+        # failure-shaped: a write genuinely failed. Direct literal mapping (not
+        # map_local_slug's local-vocabulary table) per Buga's ruling.
+        failure_reason = normalize(
+            f"infrastructure: budget persist failed: {persist_exc}")
+    except Exception:  # noqa: BLE001
+        failure_reason = None
+    _journal_gate_event("budget_persist_failed", {
+        "tier": tier,
+        "estimated_cost": estimated,
+        "caller": caller,
+        "error": str(persist_exc),
+        "failure_reason": failure_reason,
+    })
+    # The money left the account even though the ledger did not record it.
+    # Reporting 0.0 here made a failed persist look FREE to every caller that
+    # sums `cost` — report the best figure available instead (audit 2026-08-29).
+    real = _real_cost(usage_meta)
+    return new_budget, (real if real is not None else estimated), persist_exc
 
 
 # Hard ceiling on the serialized context that rides into a paid model call.
@@ -229,8 +470,15 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     intent_d: dict[str, Any] = dict(intent)
     kind = intent_d.get("kind", "other")
     caller = intent_d.get("caller", f"action_gate.{kind}")
+    # Write the RESOLVED caller back so _intent_hash keys on the same value the
+    # result reports, rather than on a key that may not be in the intent.
+    intent_d["caller"] = caller
 
-    cached = _idempotency_lookup(intent_d)
+    # `dry_run` is a call argument, not part of the intent, so it is not in
+    # the hash — a dry run within the window used to be served the cached
+    # response of a REAL call, reporting a paid answer and a cost it never
+    # incurred (audit 2026-08-29). A dry run neither reads nor writes it.
+    cached = None if dry_run else _idempotency_lookup(intent_d)
     if cached is not None:
         logger.info("action_gate: idempotent hit kind=%s caller=%s", kind, caller)
         return {**cached, "from_cache": True}
@@ -240,6 +488,10 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     # actual notification (Discord/Slack/email) onto this is left to the
     # deployer; the OSS core just guarantees the refusal.
     if intent_d.get("requires_human"):
+        _journal_gate_event("gate_refused", {
+            "reason": "requires_human_review", "caller": caller, "kind": kind,
+            "summary": str(intent_d.get("summary", ""))[:200],
+        })
         result = {
             "ok": False,
             "response": None,
@@ -266,6 +518,14 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     shield_reason = shield(intent_d)
     if shield_reason:
         blocked_reason = f"shield_refused:{shield_reason}"
+        # Only the SAFETY refusals are journaled, not budget/plumbing ones:
+        # those are the caller's business (the runner already journals its own
+        # skip) and are high-frequency once the cap is hit. A refusal to act on
+        # dangerous content is the one the audit trail exists for.
+        _journal_gate_event("gate_refused", {
+            "reason": blocked_reason, "caller": caller, "kind": kind,
+            "tier": tier, "summary": str(intent_d.get("summary", ""))[:200],
+        })
         return {
             "ok": False,
             "response": None,
@@ -300,6 +560,22 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "cost": 0.0,
             "model": model_id,
             "reason": "dry_run",
+            "tier": tier,
+            "caller": caller,
+        }
+
+    circuit_left = _circuit_seconds_left(caller)
+    if circuit_left > 0.0:
+        circuit_reason = f"circuit_open:{int(circuit_left)}s"
+        logger.warning("action_gate: refusing (circuit open %.0fs, caller=%s)",
+                       circuit_left, caller)
+        return {
+            "ok": False,
+            "response": None,
+            "cost": 0.0,
+            "model": "none",
+            "reason": circuit_reason,
+            "failure_reason": map_local_slug(circuit_reason),
             "tier": tier,
             "caller": caller,
         }
@@ -352,6 +628,13 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     try:
         prompt = _build_prompt(intent_d)
         max_tokens = int(intent_d.get("max_tokens", 500))
+        if max_tokens > _MAX_TOKENS_CEILING:
+            logger.warning(
+                "action_gate: max_tokens=%d exceeds the ceiling (%d) the budget "
+                "check was computed against — clamping (caller=%s)",
+                max_tokens, _MAX_TOKENS_CEILING, caller,
+            )
+            max_tokens = _MAX_TOKENS_CEILING
         system = str(intent_d.get("system", ""))
         if tier == "local":
             ollama_query = _resolve_ollama_caller()
@@ -364,6 +647,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
     except Exception as exc:
         logger.warning("action_gate: api_error kind=%s: %s", kind, exc)
         api_error_reason = f"api_error:{exc}"
+        _circuit_record_failure(caller, tier, api_error_reason)
         return {
             "ok": False,
             "response": None,
@@ -379,10 +663,25 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
         # An EMPTY answer is a failed call, not a decision with an empty
         # payload (a malformed-but-200 Ollama body used to come back as ""
         # and pass this check as ok=True — audit 2026-08-28).
+        #
+        # Failed for US; not free from the PROVIDER. cognition.models.claude
+        # fills usage_out and THEN returns None on two real, billed outcomes:
+        # a `refusal` stop_reason, and a 200 carrying no text block. Both were
+        # landing here recording nothing, so an endpoint refusing in a loop was
+        # invisible to the monthly cap (audit 2026-08-29). A cost in usage_meta
+        # is proof the provider answered — that, and only that, is what
+        # separates "billed and empty" from "never reached the provider", so
+        # the ledger write is conditioned on it and an unreached call still
+        # records nothing.
+        _circuit_record_failure(caller, tier, "api_error:empty")
+        empty_cost = 0.0
+        if _real_cost(usage_meta) is not None:
+            _, empty_cost, _ = _persist_spend(
+                record_spend, budget, tier, usage_meta, caller)
         return {
             "ok": False,
             "response": None,
-            "cost": 0.0,
+            "cost": empty_cost,
             "model": model_id,
             "reason": "api_error",
             "failure_reason": map_local_slug("api_error"),
@@ -390,75 +689,10 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
             "caller": caller,
         }
 
-    # The model call above already succeeded — real money is already spent on
-    # the provider's side. record_spend() persists that fact to budget.json so
-    # the NEXT call's can_spend() check sees it. If that persist silently
-    # failed and we just shrugged, the on-disk balance would never reflect
-    # this spend: every subsequent call reloads budget.json fresh (see
-    # load_budget() above), so a single failed write here quietly and
-    # invisibly under-counts the monthly cap for the rest of the MONTH
-    # (there is no daily reset — the ledger is month-keyed), no
-    # concurrency race required. One retry absorbs a transient I/O blip;
-    # if it still fails we keep the (already-succeeded) response — discarding
-    # a paid-for answer would be wasteful, not "safer" — but we report the
-    # persistence failure loudly instead of pretending nothing happened.
-    spent_before = float(budget.get("spent", 0.0))
-    new_budget = budget
-    persist_exc: Exception | None = None
-    for attempt in range(2):
-        try:
-            real_cost = usage_meta.get("cost_usd") if isinstance(usage_meta, dict) else None
-            if isinstance(real_cost, (int, float)) and not isinstance(real_cost, bool):
-                new_budget = record_spend(budget, tier, cost=float(real_cost))
-            else:
-                new_budget = record_spend(budget, tier)  # flat per-tier estimate
-            persist_exc = None
-            break
-        except Exception as exc:  # noqa: BLE001 — retried once, then surfaced below
-            persist_exc = exc
-            logger.warning(
-                "action_gate: record_spend attempt %d/2 failed (tier=%s): %s",
-                attempt + 1, tier, exc,
-            )
-
+    _circuit_record_success(caller)
+    new_budget, cost, persist_exc = _persist_spend(
+        record_spend, budget, tier, usage_meta, caller)
     budget_persisted = persist_exc is None
-    if not budget_persisted:
-        logger.error(
-            "action_gate: record_spend failed twice — spend already happened "
-            "(tier=%s) but budget.json was NOT updated; the monthly cap will "
-            "under-count for the REST OF THE MONTH — reconcile budget.json "
-            "manually or accept the drift: %s",
-            tier, persist_exc,
-        )
-        # Leave a STRUCTURED trail, not just log text (#6): the journal is an
-        # independent file with independent writes — a wedged budget.json does
-        # not imply a wedged journal. Reconciliation becomes mechanical: sum
-        # `budget_persist_failed` events, fold into `spent`. append_event is
-        # already best-effort (never raises), and the extra try/except keeps
-        # even an unexpected import failure from turning the fail-loud path
-        # into a crash.
-        try:
-            from continuity import journal  # noqa: WPS433 — lazy, like the other helpers
-            from foundation.config import HAIKU_COST, SONNET_COST, OPUS_COST  # noqa: WPS433
-            from foundation.failure_reason import normalize  # noqa: WPS433
-            estimated = {"haiku": HAIKU_COST, "sonnet": SONNET_COST,
-                         "opus": OPUS_COST}.get(tier, 0.0)
-            # Unlike the ok:True `budget_not_persisted:<exc>` reason on the
-            # returned result (excluded — success rows stay NULL), this
-            # JOURNAL event IS failure-shaped: a write genuinely failed.
-            # Direct literal mapping (not map_local_slug's local-vocabulary
-            # table) per Buga's ruling.
-            journal.append_event("budget_persist_failed", {
-                "tier": tier,
-                "estimated_cost": estimated,
-                "caller": caller,
-                "error": str(persist_exc),
-                "failure_reason": normalize(f"infrastructure: budget persist failed: {persist_exc}"),
-            })
-        except Exception as exc:  # noqa: BLE001 — trail is best-effort by contract
-            logger.warning("action_gate: budget_persist_failed journaling failed: %s", exc)
-
-    cost = float(new_budget.get("spent", spent_before)) - spent_before
 
     result = {
         "ok": True,

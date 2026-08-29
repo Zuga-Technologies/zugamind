@@ -15,9 +15,13 @@ agent on its own malfunction.
 from __future__ import annotations
 
 import logging
+import os
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Seconds the judge may block an outbound post. Short by design — see judge_post.
+_JUDGE_TIMEOUT_S = int(os.environ.get("ZUGAMIND_JUDGE_TIMEOUT_S", "20"))
 
 _SYSTEM = (
     "You are a strict fact-checker for an AI agent's self-reports. You are given "
@@ -45,9 +49,18 @@ def judge_post(text: str, commits: Optional[List[str]] = None,
 
         if commits is None:
             try:
-                from gates.work_claim import _recent_commits, _repo_root
-                root = _repo_root()
-                commits = _recent_commits(window_minutes, root) if root else []
+                # _resolve_repo_root, not _repo_root: a harness working in
+                # another repo has its own `work_claim_repo` /
+                # ZUGAMIND_WORK_CLAIM_REPO, and calling the raw finder meant
+                # this judge weighed the post against zugamind-src's history
+                # while work_claim weighed it against the right one. The
+                # 2026-08-29 fix landed next door and never reached here.
+                from gates.work_claim import _recent_commits, _resolve_repo_root
+                root = _resolve_repo_root()
+                # None means the probe could not run at all (no git, not a
+                # repo) — distinct from "no commits", and the judge must not
+                # read an unanswerable probe as evidence of fabrication.
+                commits = (_recent_commits(window_minutes, root) or []) if root else []
             except Exception:
                 commits = []
 
@@ -60,7 +73,13 @@ def judge_post(text: str, commits: Optional[List[str]] = None,
         )
 
         from cognition.models.ollama import ollama_query
-        resp = ollama_query(prompt, max_tokens=120, system=_SYSTEM)
+        # A bounded timeout, explicitly: this is a backstop on an outbound
+        # post, and ollama_query's default (SENTINEL_TIMEOUT) is sized for the
+        # deliberate reasoning call, not for a one-word ALLOW/SUPPRESS. The
+        # value_gate had exactly this shape blocking a wake for 90 s
+        # (audit 2026-08-29). Fail-open still applies if it expires.
+        resp = ollama_query(prompt, max_tokens=120, system=_SYSTEM,
+                            timeout=_JUDGE_TIMEOUT_S)
         if not resp:
             return {"verdict": "ALLOW", "reason": "judge_unavailable"}
 

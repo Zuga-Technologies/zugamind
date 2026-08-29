@@ -35,12 +35,31 @@ from datetime import datetime
 # a port in THIS map can ever be used to contradict a prior — we never call a
 # claim stale about something we didn't actually probe.
 #
-# Illustrative example only — a deployer should populate this with their own
-# service map (mirrors foundation.config's empty LOCAL_SERVICES).
-_KNOWN_PORTS = {
-    8000: "example-api",
-    8001: "example-web",
-}
+# Sourced from the deployer's own service map, foundation.config.LOCAL_SERVICES,
+# which is empty by design in the OSS release. It used to be a hardcoded
+# {8000: "example-api", 8001: "example-web"} placeholder — on any real box that
+# printed a confident "VERIFIED LIVE STATE: example-api(:8000) DOWN" into the
+# reflection prompt for a service that does not exist, which is precisely the
+# confabulation this module was written to prevent (audit 2026-08-29). Empty is
+# the honest default: format_block() then returns "" and no prior can be
+# contradicted on a port we never probed.
+def _known_ports() -> dict:
+    """{port:int -> name:str} from config.LOCAL_SERVICES. Accepts either
+    orientation ({port: name} or {name: port}) since the map is the deployer's
+    own; anything unparseable is skipped rather than guessed at."""
+    try:
+        from foundation.config import LOCAL_SERVICES
+    except Exception:  # noqa: BLE001 — no config, no claims
+        return {}
+    out: dict = {}
+    for key, val in (LOCAL_SERVICES or {}).items():
+        if isinstance(key, int) and not isinstance(key, bool):
+            out[key] = str(val)
+        elif isinstance(val, int) and not isinstance(val, bool):
+            out[val] = str(key)
+        elif isinstance(val, dict) and isinstance(val.get("port"), int):
+            out[val["port"]] = str(val.get("name") or key)
+    return out
 
 _DOWN_WORDS = (
     "down", "offline", "unavailable", "not responding", "unreachable",
@@ -68,7 +87,7 @@ def snapshot(force: bool = False) -> dict:
         return _cache
     ports: dict[int, bool] = {}
     try:
-        for p in _KNOWN_PORTS:
+        for p in _known_ports():
             ports[p] = _port_up(p)
     except Exception:
         pass
@@ -86,8 +105,9 @@ def format_block(snap: dict | None = None) -> str:
     ports = snap.get("ports") or {}
     if not ports:
         return ""
-    up = [f"{_KNOWN_PORTS.get(p, '?')}(:{p})" for p, ok in sorted(ports.items()) if ok]
-    down = [f"{_KNOWN_PORTS.get(p, '?')}(:{p})" for p, ok in sorted(ports.items()) if not ok]
+    names = _known_ports()
+    up = [f"{names.get(p, '?')}(:{p})" for p, ok in sorted(ports.items()) if ok]
+    down = [f"{names.get(p, '?')}(:{p})" for p, ok in sorted(ports.items()) if not ok]
     lines = [f"VERIFIED LIVE STATE (probed now, {snap.get('ts', '?')}):"]
     lines.append(f"  services UP: {', '.join(up) if up else '(none)'}")
     if down:

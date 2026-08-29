@@ -30,20 +30,58 @@ import json
 import logging
 import os
 import sqlite3
+from contextlib import closing
 from typing import Optional
 
 logger = logging.getLogger("zugamind.value_gate")
 
+def _knob(name: str, default: str, cast=float):
+    """Read one tuning knob from the environment, at CALL time.
+
+    These were module-level constants, which cost two things. A typo'd value
+    (`ZUGAMIND_VALUE_FLOOR=oh`) raised ValueError during import of this module
+    -- and the runner imports it at module scope, so a typo in one tuning knob
+    took the whole daemon down before it ran a cycle, with a traceback naming
+    only float(). And an operator changing a knob had to restart the daemon for
+    it to mean anything, unlike ZUGAMIND_VALUE_GATE_ENABLED right below, which
+    was always read live. Both fixed by reading here: a bad value is logged and
+    falls back to the default (a mistyped tuning knob is not worth an outage).
+    """
+    raw = os.environ.get(name, default)
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        logger.warning("value_gate: %s=%r is not a valid %s — using %s",
+                       name, raw, cast.__name__, default)
+        return cast(default)
+
+
 # Rolling window of recent scores per (module, trigger_type) used for the rate.
-_WINDOW = int(os.environ.get("ZUGAMIND_VALUE_WINDOW", "50"))
+def _window() -> int:
+    return _knob("ZUGAMIND_VALUE_WINDOW", "50", int)
+
+
 # Below this rate a type is dampened; the multiplier is the rate itself,
 # floored so a chronically-useless type is quieted, never fully silenced.
-_DAMPEN_BELOW = float(os.environ.get("ZUGAMIND_VALUE_DAMPEN_BELOW", "0.3"))
-_VALUE_FLOOR = float(os.environ.get("ZUGAMIND_VALUE_FLOOR", "0.1"))
-_VALUE_BOOST = float(os.environ.get("ZUGAMIND_VALUE_BOOST", "1.1"))
-_BOOST_ABOVE = float(os.environ.get("ZUGAMIND_VALUE_BOOST_ABOVE", "0.7"))
+def _dampen_below() -> float:
+    return _knob("ZUGAMIND_VALUE_DAMPEN_BELOW", "0.3")
+
+
+def _value_floor() -> float:
+    return _knob("ZUGAMIND_VALUE_FLOOR", "0.1")
+
+
+def _value_boost() -> float:
+    return _knob("ZUGAMIND_VALUE_BOOST", "1.1")
+
+
+def _boost_above() -> float:
+    return _knob("ZUGAMIND_VALUE_BOOST_ABOVE", "0.7")
+
+
 # Need at least this many samples before a rate is trusted to re-weight.
-_MIN_SAMPLES = int(os.environ.get("ZUGAMIND_VALUE_MIN_SAMPLES", "5"))
+def _min_samples() -> int:
+    return _knob("ZUGAMIND_VALUE_MIN_SAMPLES", "5", int)
 
 # Action classes. deliverable + research sets are single-sourced from the
 # contract's canonical definitions (decision_contract.py) so the call sites
@@ -100,7 +138,12 @@ def _recorded_outcome(corr_id: str, db_path: Optional[str] = None) -> Optional[i
     if not corr_id:
         return None
     try:
-        with sqlite3.connect(_db_path() if db_path is None else db_path, timeout=2.0) as conn:
+        # `with sqlite3.connect(...)` commits, but does NOT close -- the
+        # connection (and its file handle) leaks for the life of the process,
+        # once per scored action, forever in a daemon. closing() is the half
+        # that was missing; the inner `conn` context keeps the commit.
+        with closing(sqlite3.connect(_db_path() if db_path is None else db_path,
+                                     timeout=2.0)) as conn, conn:
             _ensure_table(conn)
             row = conn.execute(
                 "SELECT value FROM value_scores WHERE corr_id=? AND status='final' "
@@ -142,6 +185,16 @@ def _judge_value(
         return None, "deliverable: deferred -- awaiting performance outcome"
     if a in _RESEARCH_ACTIONS:
         # Spends, but soft check: artifact produced = provisional credit, never auto-zero.
+        #
+        # Known sharp edge, named rather than quietly changed (audit
+        # 2026-08-29): `summary` is non-empty at every real call site, so this
+        # branch returns 1 essentially always. Research therefore earns credit
+        # for having RUN, not for having paid off, and the one action class
+        # that reliably spends is the one the value prior can never starve.
+        # That is the documented "provisional credit" design and the tests
+        # encode it on purpose -- raising the bar (a minimum artifact size, or
+        # requiring a reconciled outcome the way a deliverable does) is a
+        # policy decision about how research earns its keep, not a defect fix.
         if (summary or "").strip():
             return 1, "research: provisional credit (artifact present)"
         return 0, "research: no artifact yet (floored by prior)"
@@ -192,7 +245,8 @@ def record_outcome(
     if not _enabled() or not corr_id:
         return None
     try:
-        with sqlite3.connect(_db_path() if db_path is None else db_path, timeout=5.0) as conn:
+        with closing(sqlite3.connect(_db_path() if db_path is None else db_path,
+                                     timeout=5.0)) as conn, conn:
             _ensure_table(conn)
             row = conn.execute(
                 "SELECT id, status FROM value_scores WHERE corr_id=? "
@@ -239,7 +293,8 @@ def score_action(
     if not _enabled():
         return None
     try:
-        with sqlite3.connect(_db_path() if db_path is None else db_path, timeout=5.0) as conn:
+        with closing(sqlite3.connect(_db_path() if db_path is None else db_path,
+                                     timeout=5.0)) as conn, conn:
             _ensure_table(conn)
             conn.execute(
                 "INSERT INTO value_scores (source_module, trigger_type, action, value, reason, "
@@ -256,24 +311,25 @@ def score_action(
 def value_rate(
     source_module: str, trigger_type: str = "", db_path: Optional[str] = None,
 ) -> Optional[tuple[float, int]]:
-    """Rolling (rate, sample_count) over the last _WINDOW scores for this key,
+    """Rolling (rate, sample_count) over the last _window() scores for this key,
     or None if disabled / unavailable. trigger_type='' aggregates the module."""
     if not _enabled():
         return None
     try:
-        with sqlite3.connect(_db_path() if db_path is None else db_path, timeout=2.0) as conn:
+        with closing(sqlite3.connect(_db_path() if db_path is None else db_path,
+                                     timeout=2.0)) as conn, conn:
             _ensure_table(conn)
             if trigger_type:
                 rows = conn.execute(
                     "SELECT value FROM value_scores WHERE source_module=? AND trigger_type=? "
                     "AND value IS NOT NULL AND status='final' "
-                    "ORDER BY id DESC LIMIT ?", (source_module, trigger_type, _WINDOW),
+                    "ORDER BY id DESC LIMIT ?", (source_module, trigger_type, _window()),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     "SELECT value FROM value_scores WHERE source_module=? "
                     "AND value IS NOT NULL AND status='final' "
-                    "ORDER BY id DESC LIMIT ?", (source_module, _WINDOW),
+                    "ORDER BY id DESC LIMIT ?", (source_module, _window()),
                 ).fetchall()
     except Exception as exc:
         logger.debug("value_rate read failed: %s", exc)
@@ -287,9 +343,12 @@ def value_rate(
 def _apply_value_prior(bids: list, db_path: Optional[str] = None) -> tuple[list, Optional[list]]:
     """Re-weight bids by their type's rolling value-rate. No-op + None snapshot
     when disabled. Mirrors _apply_control_prior (in-place, floored, telemetry).
-    Only re-weights a key once it has >= _MIN_SAMPLES history."""
+    Only re-weights a key once it has >= _min_samples() history."""
     if not _enabled():
         return bids, None
+    dampen_below, floor = _dampen_below(), _value_floor()
+    boost_above, boost = _boost_above(), _value_boost()
+    min_samples = _min_samples()
     snapshot = []
     for bid in bids:
         module = getattr(bid, "source_module", "") or ""
@@ -302,19 +361,19 @@ def _apply_value_prior(bids: list, db_path: Optional[str] = None) -> tuple[list,
         if rr is None:
             continue
         rate, n = rr
-        if n < _MIN_SAMPLES:
+        if n < min_samples:
             continue
         s0 = bid.salience
-        if rate < _DAMPEN_BELOW:
+        if rate < dampen_below:
             # Floor the MULTIPLIER, not the resulting salience -- an absolute
             # floor here (max(_VALUE_FLOOR, ...)) collapsed every dampened bid
             # to the exact same value regardless of its original strength,
             # erasing all relative signal between them. A bid with a stronger
             # prior should still out-rank a weaker one even after both get
             # dampened for a 0-rate history.
-            bid.salience = bid.salience * max(rate, _VALUE_FLOOR)
-        elif rate >= _BOOST_ABOVE:
-            bid.salience = min(1.0, bid.salience * _VALUE_BOOST)
+            bid.salience = bid.salience * max(rate, floor)
+        elif rate >= boost_above:
+            bid.salience = min(1.0, bid.salience * boost)
         if abs(bid.salience - s0) > 1e-9:
             snapshot.append({"m": module, "t": ttype, "rate": round(rate, 3),
                              "n": n, "from": round(s0, 4), "to": round(bid.salience, 4)})

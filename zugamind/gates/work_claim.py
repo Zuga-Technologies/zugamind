@@ -82,30 +82,55 @@ def _resolve_repo_root(explicit: "str | None" = None) -> "str | None":
     2026-08-29 — every "I fixed X" from a harness working in another repo
     was checked against zugamind-src's history and flagged unbacked."""
     for cand in (explicit, os.environ.get("ZUGAMIND_WORK_CLAIM_REPO")):
-        if cand and os.path.isdir(os.path.join(str(cand), ".git")):
+        if not cand:
+            continue
+        if os.path.isdir(os.path.join(str(cand), ".git")):
             return str(cand)
+        # Falling through SILENTLY is how the 2026-08-29 bug felt correct from
+        # the outside: a harness names its repo, the path is wrong, and every
+        # claim gets checked against zugamind's own history instead. Same
+        # fallback, but it says so.
+        logger.warning(
+            "work_claim: configured repo %r is not a git checkout — falling "
+            "back, so claims will be checked against the WRONG history", cand,
+        )
     return _repo_root()
 
 
-def _recent_commits(window_minutes: int, root: str) -> List[str]:
+def _recent_commits(window_minutes: int, root: str) -> "List[str] | None":
     """Commit subjects across ALL branches in the window (autonomous work may
-    land on a non-checked-out branch)."""
+    land on a non-checked-out branch).
+
+    Returns None when the probe COULD NOT RUN (no git, not a repo, timeout) --
+    which is a different fact from an empty list, and the difference decides
+    the gate's whole verdict. An empty list means "git answered: nothing landed"
+    and a work claim over it is genuinely unbacked. None means we know nothing,
+    and this module's contract is fail-OPEN. Both used to return [], so a box
+    without git on PATH flagged EVERY claim as confabulation -- the one branch
+    where the file's stated contract was inverted (audit 2026-08-29).
+    """
     try:
         out = subprocess.run(
             ["git", "log", "--all", f"--since={window_minutes} minutes ago", "--pretty=%s"],
             cwd=root, capture_output=True, text=True, timeout=10,
         )
         if out.returncode != 0:
-            return []
+            logger.debug("work_claim git log rc=%s in %s: %s",
+                         out.returncode, root, (out.stderr or "")[:200])
+            return None
         return [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
     except Exception as e:
         logger.debug("work_claim git log failed: %s", e)
-        return []
+        return None
 
 
 def _split_sentences(text: str) -> List[str]:
     parts = re.split(r"(?<=[.!?\n])\s+", (text or "").strip())
     return [p.strip() for p in parts if p.strip()]
+
+
+# Ceiling on the diff corpus a claim is matched against.
+_CORPUS_MAX_CHARS = 2_000_000
 
 
 def _recent_commit_corpus(window_minutes: int, root: str) -> str:
@@ -119,7 +144,9 @@ def _recent_commit_corpus(window_minutes: int, root: str) -> str:
              "--pretty=format:%s", "-p", "--unified=0"],
             cwd=root, capture_output=True, text=True, timeout=15,
         )
-        return out.stdout.lower() if out.returncode == 0 else ""
+        # One vendored-dependency commit in the window can make this tens of
+        # MB, and every claim token is substring-searched against it.
+        return out.stdout[:_CORPUS_MAX_CHARS].lower() if out.returncode == 0 else ""
     except Exception as e:  # noqa: BLE001
         logger.debug("_recent_commit_corpus failed: %s", e)
         return ""
@@ -151,7 +178,13 @@ def check_work_claim(text: str, window_minutes: int = 30, commits: List[str] | N
 
         if commits is None:
             root = _resolve_repo_root(repo_root)
-            commits = _recent_commits(window_minutes, root) if root else []
+            probed = _recent_commits(window_minutes, root) if root else None
+            if probed is None:
+                # Could not ask git. Fail OPEN -- see _recent_commits: an
+                # unanswerable probe must never read as proof of fabrication.
+                return {"backed": True, "unbacked": [],
+                        "reason": "probe_unavailable", "commits": 0}
+            commits = probed
             corpus = _recent_commit_corpus(window_minutes, root) if root else ""
         else:
             corpus = " ".join(commits).lower()  # injected (tests): no diff available
@@ -249,17 +282,44 @@ def _common_words() -> frozenset:
     return frozenset()
 
 
+def _has_name_shape(token: str) -> bool:
+    """True when the token looks like a NAME rather than an ordinary word that
+    happens to start a sentence: an internal capital (ClickHouse, PostgreSQL),
+    a digit (S3, Qwen2), or a dotted suffix (numpy.linalg)."""
+    return (any(c.isupper() for c in token[1:])
+            or any(c.isdigit() for c in token)
+            or "." in token)
+
+
 def _extract_entities(text: str) -> List[str]:
+    """Named entities asserted in `text`, sentence by sentence.
+
+    Sentence position matters, and only because of what is missing: the
+    dictionary filter below reads /usr/share/dict/words, which does not exist
+    on Windows, so `_common_words()` is empty on every Windows box and the
+    curated stoplist is the ONLY thing separating a name from an ordinary word.
+    That list cannot cover English -- "Currently", "However", "Meanwhile" all
+    parsed as entities, resolved as absent from the repo, and suppressed the
+    whole post (audit 2026-08-29). With no dictionary, a capitalized word in
+    sentence-INITIAL position is capitalized by grammar unless it also carries
+    name shape. Costs some real sentence-initial names ("Postgres is in the
+    stack") -- the right direction to miss in, for a gate whose action is
+    SUPPRESS.
+    """
     common = _common_words()
     out, seen = [], set()
-    for m in _ENTITY_RE.finditer(text or ""):
-        e = m.group(1)
-        el = e.lower()
-        if el in _ENTITY_STOPWORDS or el in common:
-            continue  # ordinary word, not a name
-        if el not in seen:
-            seen.add(el)
-            out.append(e)
+    for sentence in _split_sentences(text):
+        for m in _ENTITY_RE.finditer(sentence):
+            e = m.group(1)
+            el = e.lower()
+            if el in _ENTITY_STOPWORDS or el in common:
+                continue  # ordinary word, not a name
+            # <=2 leaves room for an opening quote or bracket.
+            if not common and m.start() <= 2 and not _has_name_shape(e):
+                continue
+            if el not in seen:
+                seen.add(el)
+                out.append(e)
     return out
 
 
@@ -268,9 +328,15 @@ _DEP_FILES = ("*requirements*.txt", "pyproject.toml", "*package.json",
               "Brewfile", "*.cfg", "*.toml", "*.lock")
 
 
-@functools.lru_cache(maxsize=512)
-def _entity_in_repo(entity_lower: str, root: str) -> bool:
-    """True iff the entity is actually INTEGRATED, not merely mentioned.
+# Entities PROVEN present, per (entity, repo). Only positives are remembered —
+# see _entity_in_repo for why a remembered negative is a bug.
+_ENTITY_GROUNDED: set = set()
+
+
+def _entity_probe(entity_lower: str, root: str) -> "bool | None":
+    """True = integrated, False = absent, None = could not check (fail-open).
+
+    True iff the entity is actually INTEGRATED, not merely mentioned.
 
     A prose mention (comment, diary, docstring, an example in this gate) is NOT
     grounding — that is how full-text grep would false-ground 'ClickHouse'. Real
@@ -291,7 +357,28 @@ def _entity_in_repo(entity_lower: str, root: str) -> bool:
             return True
         return False
     except Exception:
-        return True  # fail-open: can't check -> don't flag
+        return None  # can't check — the caller fails open, and caches nothing
+
+
+def _entity_in_repo(entity_lower: str, root: str) -> bool:
+    """Cached-positive wrapper around _entity_probe.
+
+    The whole result used to be memoized for the life of the process. Caching a
+    POSITIVE is free: once a name is really in the repo, it stays in the repo.
+    Caching a NEGATIVE is a bug in a daemon that runs for days — add the
+    dependency the agent said it added, and this gate goes on suppressing every
+    post that names it until someone restarts the process (audit 2026-08-29).
+    A fail-open None is cached as neither.
+    """
+    key = (entity_lower, root)
+    if key in _ENTITY_GROUNDED:
+        return True
+    probed = _entity_probe(entity_lower, root)
+    if probed is None:
+        return True
+    if probed:
+        _ENTITY_GROUNDED.add(key)
+    return probed
 
 
 # External-reference markers. An entity in a sentence with one of these is being
@@ -311,11 +398,16 @@ def _is_mention(sentence_lower: str) -> bool:
     return any(m in sentence_lower for m in _MENTION_MARKERS)
 
 
-def check_entity_grounding(text: str, commits: List[str] | None = None) -> dict:
+def check_entity_grounding(text: str, commits: List[str] | None = None,
+                           repo_root: "str | None" = None) -> dict:
     """Flag named entities that are used nowhere in the real codebase.
 
     `commits` is accepted for signature parity but intentionally NOT used as a
     grounding source — a commit message describing a confab must not ground it.
+    `repo_root` names the repo the harness worked in, resolved exactly as
+    check_work_claim resolves it: grounding a claim against the wrong codebase
+    is the same defect there and here, and this function used to hardcode
+    zugamind's own checkout.
     Returns {"grounded": bool, "ungrounded": [names], "reason": str}. Fail-open.
     """
     try:
@@ -325,7 +417,10 @@ def check_entity_grounding(text: str, commits: List[str] | None = None) -> dict:
         # Keep only CLAIM sentences: drop hedged/forward-looking ones AND
         # mention sentences (external references). Entities are gated only when
         # asserted as the agent's own, not when merely discussed.
-        asserted = " ".join(
+        # Joined with a newline, not a space: _extract_entities re-splits into
+        # sentences to judge position, and a space would fuse two sentences
+        # into one whose second half is no longer sentence-initial.
+        asserted = "\n".join(
             s for s in _split_sentences(text)
             if not any(h in s.lower() for h in WORK_HEDGE_WORDS)
             and not _is_mention(s.lower())
@@ -334,7 +429,7 @@ def check_entity_grounding(text: str, commits: List[str] | None = None) -> dict:
         if not entities:
             return {"grounded": True, "ungrounded": [], "reason": "no_entities"}
 
-        root = _repo_root()
+        root = _resolve_repo_root(repo_root)
         if not root:
             return {"grounded": True, "ungrounded": [], "reason": "no_repo"}
 
@@ -356,7 +451,7 @@ def check_entity_grounding(text: str, commits: List[str] | None = None) -> dict:
         return {"grounded": True, "ungrounded": [], "reason": "gate_error"}
 
 
-def gate_human_claim(text: str) -> tuple:
+def gate_human_claim(text: str, repo_root: "str | None" = None) -> tuple:
     """Reusable backstop for HUMAN-facing channels (chatroom/DM/inbox) — the
     paths a central send-message chokepoint does NOT cover. Returns
     (allowed, reason). Suppresses an unbacked work-claim or an ungrounded
@@ -365,10 +460,10 @@ def gate_human_claim(text: str) -> tuple:
     try:
         t = text or ""
         if any(v in t.lower() for v in WORK_CLAIM_VERBS):
-            wc = check_work_claim(t)
+            wc = check_work_claim(t, repo_root=repo_root)
             if not wc.get("backed", True):
                 return False, "unbacked work-claim: " + str(wc.get("reason", ""))
-        eg = check_entity_grounding(t)
+        eg = check_entity_grounding(t, repo_root=repo_root)
         if not eg.get("grounded", True):
             return False, "ungrounded entity: " + ", ".join(eg.get("ungrounded", []))
         return True, "ok"
