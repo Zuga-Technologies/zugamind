@@ -270,12 +270,44 @@ def cmd_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def _stop_grace_sec() -> float:
+    try:
+        return max(1.0, float(os.environ.get("ZUGAMIND_STOP_GRACE_SEC", "15")))
+    except ValueError:
+        return 15.0
+
+
 def cmd_stop(args: argparse.Namespace) -> int:
     pid = _running_pid()
     if not pid:
         print("not running")
         PID_FILE.unlink(missing_ok=True)
         return 0
+    # Ask first: write the stop request the daemon loop polls every second
+    # (stream.runner.run_daemon). On Windows this is the ONLY graceful path —
+    # taskkill and os.kill are TerminateProcess, a signal handler never runs
+    # (proved 2026-08-29) — so "stop" used to mean "kill mid-cycle, no
+    # shutdown event, ever". A cycle in a long harness call can take minutes;
+    # ZUGAMIND_STOP_GRACE_SEC (default 15) bounds the wait before forcing.
+    stop_file = foundation_config.STOP_FILE
+    try:
+        stop_file.parent.mkdir(parents=True, exist_ok=True)
+        stop_file.write_text(str(int(time.time())), encoding="utf-8")
+    except OSError as e:
+        print(f"{YELLOW}could not write {stop_file} ({e}); forcing{RESET}")
+    else:
+        deadline = time.time() + _stop_grace_sec()
+        while time.time() < deadline:
+            if not _pid_alive(pid):
+                PID_FILE.unlink(missing_ok=True)
+                print(f"stopped gracefully (was PID {pid}) — finished its cycle and journaled shutdown")
+                return 0
+            time.sleep(0.5)
+        print(f"{YELLOW}no graceful exit within {_stop_grace_sec():.0f}s (mid-cycle?) — forcing{RESET}")
+        try:
+            stop_file.unlink(missing_ok=True)
+        except OSError:
+            pass
     if os.name == "nt":
         # /F is required: without it taskkill sends WM_CLOSE, which a hidden
         # console-less daemon has no message pump to receive -- the request
@@ -334,6 +366,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     pid = _running_pid()
     print(f"daemon: {GREEN + 'running' + RESET if pid else RED + 'not running' + RESET}"
           + (f" (PID {pid})" if pid else ""))
+    if foundation_config.PAUSE_FILE.exists():
+        print(f"{YELLOW}PAUSED{RESET} — {foundation_config.PAUSE_FILE} exists: perception halted, "
+              f"nothing is scanned or journaled. Delete it to resume (no restart needed).")
 
     state_file = foundation_config.STATE_FILE
     if state_file.exists():

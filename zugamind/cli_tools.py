@@ -44,7 +44,8 @@ _EVENT_KINDS = (
     "cycle", "wake_filtered", "harness_skip", "harness_invocation", "harness_rate_limited",
     "harness_rate_limit_indeterminate", "alarm", "quiet_hours_deferred", "cycle_error",
     "floor_calibrated", "floor_basis_switched", "floor_drifted", "budget_persist_failed",
-    "paused", "resumed", "daemon_restarted", "work_claim", "handoff", "handoff_done",
+    "paused", "resumed", "daemon_started", "daemon_restarted", "shutdown", "last_wake_in_future",
+    "state_persist_failed", "work_claim", "handoff", "handoff_done",
 )
 
 _REL_RE = re.compile(r"^(\d+)([smhd])$")
@@ -96,6 +97,10 @@ def summarize_event(ev: Dict[str, Any]) -> str:
     if kind == "wake_filtered":
         sal = ev.get("salience")
         sal_s = f" {sal:.3f}" if isinstance(sal, (int, float)) else ""
+        filters = ev.get("filters") or []
+        if filters:
+            why = "; ".join(f"{f.get('harness')}: {f.get('reason')}" for f in filters if isinstance(f, dict))
+            return f"filtered: {ev.get('winner_module', '?')}{sal_s} — {why[:160]}"
         return (f"filtered: {ev.get('winner_module', ev.get('module', '?'))}{sal_s} — no enabled harness "
                 f"accepted it (module filter or wake floor; `zugamind explain` shows which)")
     if kind == "harness_skip":
@@ -112,7 +117,15 @@ def summarize_event(ev: Dict[str, Any]) -> str:
         return (f"{kind}: {ev.get('harness', '?')} floor={ev.get('floor', ev.get('to', ev.get('raw_floor')))}"
                 f"{' AT CEILING' if ev.get('at_ceiling') else ''}")
     if kind == "cycle_error":
-        return f"CYCLE ERROR: {str(ev.get('error', ''))[:120]}"
+        phase = f" [{ev['phase']}]" if ev.get("phase") else ""
+        return f"CYCLE ERROR{phase}: {str(ev.get('error', ''))[:120]}"
+    if kind == "daemon_restarted":
+        return (f"daemon RESTARTED (pid {ev.get('pid')}) — previous run ended without a shutdown event; "
+                f"last seen {ev.get('last_event_kind')} @ {_short_ts(ev.get('last_event_ts'))}")
+    if kind == "daemon_started":
+        return f"daemon started (pid {ev.get('pid')}{', dry-run' if ev.get('dry_run') else ''})"
+    if kind == "shutdown":
+        return f"daemon shutdown ({ev.get('reason', '?')})"
     if kind in ("handoff", "handoff_done"):
         return f"{kind}: {ev.get('id', '?')} {str(ev.get('detail', ''))[:80]}"
     extra = {k: v for k, v in ev.items() if k not in ("ts", "kind")}
@@ -266,6 +279,12 @@ def run_doctor(fix: bool = False, ollama: Optional[Callable[[], Tuple[bool, str]
     # 2. keys (presence only — never the value)
     add(("OK" if os.environ.get("ANTHROPIC_API_KEY") else "WARN", "ANTHROPIC_API_KEY",
          "set" if os.environ.get("ANTHROPIC_API_KEY") else "not set — paid tiers (haiku/sonnet/opus) will return None"))
+
+    tier = os.environ.get("ZUGAMIND_WAKE_TIER", "").strip()
+    if tier and tier not in ("local", "haiku", "sonnet", "opus"):
+        add(("FAIL", "ZUGAMIND_WAKE_TIER", f"{tier!r} is not a tier (local/haiku/sonnet/opus) — every wake is refused until fixed"))
+    elif tier:
+        add(("OK", "ZUGAMIND_WAKE_TIER", f"{tier} (the wake decision runs there)"))
 
     # 3. local model
     ok, detail = ollama()

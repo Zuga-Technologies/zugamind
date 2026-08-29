@@ -190,3 +190,40 @@ def test_demo_never_spends_without_an_explicit_live_flag(monkeypatch, capsys):
     capsys.readouterr()
     demo.run_demo(cycles=4, seed=7, live=True)      # explicit opt-in
     assert seen["dry_run"] is False
+
+
+# --- the 2026-08-29 lifecycle audit (cli side) ------------------------------------------------
+
+def test_stop_asks_first_and_reports_a_graceful_exit(data_dir, monkeypatch, capsys):
+    monkeypatch.setattr(config, "STOP_FILE", data_dir / "stop.request")
+    (data_dir / "daemon.pid").write_text("4242", encoding="utf-8")
+    monkeypatch.setattr(cli, "_running_pid", lambda: 4242)
+    # alive until the stop request exists, then gone: the daemon honoured it
+    monkeypatch.setattr(cli, "_pid_alive", lambda pid: not (data_dir / "stop.request").exists())
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("taskkill must not run")))
+    monkeypatch.setattr(cli.os, "kill", lambda *a: (_ for _ in ()).throw(AssertionError("kill must not run")))
+    assert cli.cmd_stop(argparse.Namespace()) == 0
+    out = capsys.readouterr().out
+    assert "stopped gracefully" in out and not (data_dir / "daemon.pid").exists()
+
+
+def test_stop_forces_after_the_grace_period(data_dir, monkeypatch, capsys):
+    monkeypatch.setattr(config, "STOP_FILE", data_dir / "stop.request")
+    monkeypatch.setenv("ZUGAMIND_STOP_GRACE_SEC", "1")
+    monkeypatch.setattr(cli, "_running_pid", lambda: 4242)
+    monkeypatch.setattr(cli, "_pid_alive", lambda pid: True)
+    forced = {}
+    if os.name == "nt":
+        monkeypatch.setattr(cli.subprocess, "run", lambda cmd, **kw: (forced.setdefault("cmd", cmd), type("R", (), {"returncode": 0})())[1])
+    else:
+        monkeypatch.setattr(cli.os, "kill", lambda pid, sig: forced.setdefault("cmd", [pid, sig]))
+    assert cli.cmd_stop(argparse.Namespace()) == 0
+    out = capsys.readouterr().out
+    assert "forcing" in out and forced and not (data_dir / "stop.request").exists()
+
+
+def test_status_shows_paused_when_the_pause_file_exists(data_dir, monkeypatch, capsys):
+    monkeypatch.setattr(config, "PAUSE_FILE", data_dir / "PAUSE")
+    (data_dir / "PAUSE").write_text("", encoding="utf-8")
+    cli.cmd_status(None)
+    assert "PAUSED" in capsys.readouterr().out

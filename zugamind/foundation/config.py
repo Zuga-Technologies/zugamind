@@ -42,6 +42,10 @@ TRIGGERS_FILE = ENGINE_DIR / "triggers.json"
 # package root (not under ENGINE_DIR) so it's easy to find and touch/remove
 # by hand — `touch PAUSE` / `rm PAUSE`.
 PAUSE_FILE = ZUGAMIND_DIR / "PAUSE"
+# Cooperative stop request. On Windows every external stop is TerminateProcess
+# (taskkill /F, os.kill): a Python signal handler never runs, so `zugamind stop`
+# writes this file and the daemon loop polls it once a second (2026-08-29).
+STOP_FILE = ENGINE_DIR / "stop.request"
 
 # --- Local model endpoint (Ollama) -------------------------------------------
 

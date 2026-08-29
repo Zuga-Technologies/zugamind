@@ -42,7 +42,10 @@ __all__ = ["scan_hackernews", "scan_reddit_ai", "scan_ai_labs",
 # canary trigger every retry cycle and must not be damped.
 import hashlib as _hashlib
 import json as _json
+import logging as _logging
 import time as _time
+
+_logger = _logging.getLogger("zugamind.scanners")
 
 _BYPASS_COOLDOWN_SEC = 3600
 
@@ -50,7 +53,7 @@ _BYPASS_COOLDOWN_SEC = 3600
 def _trigger_key(trigger: dict) -> str:
     """Stable identity for a trigger: prefer an explicit id, fall back to a
     hash of the detail text."""
-    for k in ("story_id", "id", "url"):
+    for k in ("story_id", "id", "url", "link"):  # ai_labs emits "link" — it fell to the text hash
         v = trigger.get(k)
         if v:
             return f"{trigger.get('type', '?')}:{v}"
@@ -173,9 +176,11 @@ def discover_dynamic_scanners() -> dict:
         module_name = f"{__name__}." + ".".join(rel.parts)
         try:
             mod = _importlib.import_module(module_name)
-        except Exception:
-            # Fail-silent: a broken dynamic scanner must not break the
-            # cycle. cognitive_stream wraps each call in try/except too.
+        except Exception as e:  # noqa: BLE001
+            # Fail-OPEN, not fail-silent: a broken dynamic scanner must not
+            # break the cycle, but "my scanner never runs" needs one line an
+            # operator can find. It used to log nothing at any level.
+            _logger.warning("dynamic scanner %s failed to import (skipped): %s", module_name, e)
             continue
         for attr_name, attr in _inspect.getmembers(mod, _inspect.isfunction):
             if not attr_name.startswith("scan_"):

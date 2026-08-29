@@ -148,9 +148,11 @@ def _judge_value(
     if a in _COGNITION_ACTIONS:
         return 0, "cognition: think-only (floored by prior, never silenced)"
     # Ambiguous (e.g. 'alert'): valuable only if it flagged something real.
+    # Only ask the local model when the gate is ON — "ships dark" promised a
+    # no-op, and this branch was a 90 s Ollama call per real wake (2026-08-29).
     try:
         from cognition.models.ollama import ollama_available, ollama_query
-        if ollama_available():
+        if _enabled() and ollama_available():
             q = (
                 "Did this autonomous action change real state or surface a REAL, "
                 "actionable problem (answer 1), or was it narration / re-noting a "

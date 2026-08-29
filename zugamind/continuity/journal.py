@@ -561,6 +561,14 @@ def build_briefing(
             salience = winner.get("salience")
             sal_str = f"{salience:.2f}" if isinstance(salience, (int, float)) else "?"
             winner_lines.append(f"- **{module}** (salience {sal_str}): {content}")
+            if (winner.get("context") or {}).get("alarm_lane"):
+                # The salience above is the module's dampened chatter score;
+                # the lane chose this bid because a trigger carried urgency
+                # >= 0.9. Without this line the woken session saw a 0.15
+                # "routine" winner and no alarm anywhere.
+                winner_lines.append("  ALARM-LANE CRITICAL: selected by the alarm lane, not the lottery. "
+                                    "The salience number is dampened module chatter, not the alert's "
+                                    "urgency — treat as urgent.")
             # Was this wake EARNED, or did the attention schema's
             # monopoly-breaking multipliers carry it over the bar? Those
             # multipliers exist to share attention INSIDE the mind; the

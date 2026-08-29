@@ -431,6 +431,9 @@ def test_work_claim_runs_on_real_harness_reply_and_journals(tmp_path, monkeypatc
     scored = {}
     monkeypatch.setattr(runner_mod, "score_action",
                         lambda **kw: scored.update(kw))
+    # Scoring only runs once the operator opts in (audit 2026-08-29: with the
+    # gate off it was a 90 s local-model call per real wake).
+    monkeypatch.setenv("ZUGAMIND_VALUE_GATE_ENABLED", "true")
 
     runner = StreamRunner(dry_run=True, include_default_scanners=False)
     runner._post_action_integrity(_winner(), [

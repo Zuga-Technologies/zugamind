@@ -75,6 +75,18 @@ def _repo_root() -> str | None:
     return None
 
 
+def _resolve_repo_root(explicit: "str | None" = None) -> "str | None":
+    """The repo whose git history backs a harness's claims: the harness's
+    `work_claim_repo`, else ZUGAMIND_WORK_CLAIM_REPO, else this package's
+    own checkout. That last default was the ONLY behaviour before
+    2026-08-29 — every "I fixed X" from a harness working in another repo
+    was checked against zugamind-src's history and flagged unbacked."""
+    for cand in (explicit, os.environ.get("ZUGAMIND_WORK_CLAIM_REPO")):
+        if cand and os.path.isdir(os.path.join(str(cand), ".git")):
+            return str(cand)
+    return _repo_root()
+
+
 def _recent_commits(window_minutes: int, root: str) -> List[str]:
     """Commit subjects across ALL branches in the window (autonomous work may
     land on a non-checked-out branch)."""
@@ -113,7 +125,8 @@ def _recent_commit_corpus(window_minutes: int, root: str) -> str:
         return ""
 
 
-def check_work_claim(text: str, window_minutes: int = 30, commits: List[str] | None = None) -> dict:
+def check_work_claim(text: str, window_minutes: int = 30, commits: List[str] | None = None,
+                     repo_root: "str | None" = None) -> dict:
     """Verify accomplishment claims in `text` against real artifacts.
 
     Returns {"backed": bool, "unbacked": [sentences], "reason": str,
@@ -121,6 +134,7 @@ def check_work_claim(text: str, window_minutes: int = 30, commits: List[str] | N
     (either no claims at all, or a commit exists in the window). Fail-open.
 
     `commits` may be injected (tests) to skip the live git probe.
+    `repo_root` names the repo the harness worked in (see _resolve_repo_root).
     """
     try:
         sentences = _split_sentences(text)
@@ -136,7 +150,7 @@ def check_work_claim(text: str, window_minutes: int = 30, commits: List[str] | N
             return {"backed": True, "unbacked": [], "reason": "no_work_claim", "commits": 0}
 
         if commits is None:
-            root = _repo_root()
+            root = _resolve_repo_root(repo_root)
             commits = _recent_commits(window_minutes, root) if root else []
             corpus = _recent_commit_corpus(window_minutes, root) if root else ""
         else:

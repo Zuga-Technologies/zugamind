@@ -669,6 +669,13 @@ class Workspace:
         if not bids:
             return None
         self._selection_cycle += 1
+        # Only the lane may set alarm_lane: downstream it bypasses every wake
+        # floor (stream.runner._harness_filter_reason), so a module that
+        # stamped its own bid would buy itself a session. Strip it here; the
+        # lane re-stamps the one bid it actually chose.
+        for b in bids:
+            if isinstance(b.context, dict):
+                b.context.pop("alarm_lane", None)
         criticals = [
             b for b in bids
             if self._is_critical(b) and self._alarm_unserved(b)

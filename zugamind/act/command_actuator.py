@@ -203,6 +203,9 @@ def load_harness_configs(path: Optional[Path] = None) -> List[Dict[str, Any]]:
             wake_modules = entry.get("wake_modules")
             if isinstance(wake_modules, list) and wake_modules:
                 cfg["wake_modules"] = [str(m) for m in wake_modules]
+            repo = entry.get("work_claim_repo")
+            if isinstance(repo, str) and repo.strip():
+                cfg["work_claim_repo"] = repo.strip()  # consumed by stream.runner's post-wake integrity check
             floor = entry.get("wake_min_salience")
             if floor is None:
                 pass

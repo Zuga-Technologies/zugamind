@@ -66,6 +66,15 @@ canary run has not been repeated since. If you copy one, run
   salience floor. Without a filter a harness wakes for **every** gated
   winner — including ambient ones — which is the heartbeat-spam failure
   mode this sidecar exists to avoid. Set one before running unattended.
+  **A hand-set number judges the post-modulation salience only.** The
+  attention schema's monopoly-breaking boosts can carry a 0.52 bid over a
+  0.65 floor (measured 2026-08-17); only `"calibrate"` judges
+  `min(bid, modulated)`. If you hand-set a floor, set it against the boosted
+  numbers you see in `zugamind logs`, or use `"calibrate"`.
+- `"work_claim_repo": "/path/to/repo"` names the git repo the post-wake
+  integrity check verifies the harness's "I fixed X" claims against. Default
+  is this package's own checkout — wrong whenever the harness works
+  elsewhere. `ZUGAMIND_WORK_CLAIM_REPO` sets it for every harness.
 - `"wake_min_salience": "calibrate"` (a string, not a number) opts into a
   **self-calibrating floor** instead of a fixed number — EXP-004t measured
   that a floor learned from the live ambient wake stream (max observed
