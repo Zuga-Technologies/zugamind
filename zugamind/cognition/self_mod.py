@@ -168,10 +168,32 @@ def _armed_seconds_left(now: float) -> float:
         return 0.0
 
 
+# Who is asking. The distinction is the whole point of the two guards: the
+# 24h lock and the arming window exist to bound an AUTONOMOUS loop rewriting
+# the agent's own system prompt. Neither is a reason to stop the operator
+# correcting it -- and until 2026-08-29 they did exactly that, because one
+# lock served both. An agent proposal, armed or not, took the lock (that is
+# the documented "off, a proposal still starts the cooldown"), which left a
+# human unable to write a correction for 24h without deleting a sqlite file.
+# Incident response should not require knowing that.
+ACTOR_HUMAN = "human"
+ACTOR_AGENT = "agent"
+
+
 def propose(facet: str, text: str, *, why: str, evidence: str = "",
             cooldown: Optional[SelfModCooldown] = None,
+            actor: str = ACTOR_AGENT,
             now: Optional[float] = None) -> dict[str, Any]:
     """Propose -- and, when enabled, apply -- a new override for `facet`.
+
+    `actor` decides which guards apply. ACTOR_AGENT (the default, and what
+    cognition/proposer.py passes) is bound by both the 24h cooldown and the
+    arming window. ACTOR_HUMAN -- only `zugamind self-mod`, a person at a
+    terminal -- is exempt from both: the invocation IS the human moment, so
+    an arming window in front of it is ceremony, and a lock the agent just
+    burned must never be what stops the operator undoing it. The audit log
+    and the undo record are written identically for both, and the actor is
+    recorded, so "who changed this" stays answerable.
 
     Returns {"applied": bool, "reason": str, "remaining_seconds": float,
              "facet": str, "path": str}. reason is one of:
@@ -191,35 +213,47 @@ def propose(facet: str, text: str, *, why: str, evidence: str = "",
 
         path = override_path(facet)
         key = str(path)
-        try:
-            cool = cooldown if cooldown is not None else SelfModCooldown()
-            # try_claim, not remaining_seconds. The old pair was a
-            # check-then-act with the audit write AND the file write inside
-            # the window, and that window is the only rate limit on an agent
-            # rewriting its own system prompt. Measured 2026-08-29: eight
-            # threads against one 24h lock applied up to 8 of 8, and six
-            # separate processes breached it in five runs of twelve. The claim
-            # is one conditional UPSERT -- see gates/self_mod_cooldown.try_claim.
-            remaining = float(cool.try_claim(key, now=ts))
-        except Exception as exc:  # noqa: BLE001 — fail-closed: no lock, no edit
-            return _refuse(facet, f"cooldown_error:{type(exc).__name__}:{exc}"[:160], why)
-        if remaining > 0:
-            journal.append_event("cognition_mod_refused", {
-                "facet": facet, "path": key, "reason": "cooling",
-                "remaining_seconds": remaining, "why": (why or "")[:200],
-            })
-            return {"applied": False, "reason": "cooling", "remaining_seconds": remaining,
-                    "facet": facet, "path": key}
+        is_human = (actor or "").strip().lower() == ACTOR_HUMAN
+        if is_human:
+            # No cooldown claim at all: taking it here would let one operator
+            # edit lock out the next, and would burn the agent's window as a
+            # side effect of a human fix.
+            remaining = 0.0
+            # And armed by definition. A person at a terminal IS the human
+            # moment; requiring them to arm a window before their own explicit
+            # command is ceremony, not a control -- the window exists to bound
+            # the AUTONOMOUS path.
+            armed_for = ARM_WINDOW_SEC
+        else:
+            try:
+                cool = cooldown if cooldown is not None else SelfModCooldown()
+                # try_claim, not remaining_seconds. The old pair was a
+                # check-then-act with the audit write AND the file write inside
+                # the window, and that window is the only rate limit on an agent
+                # rewriting its own system prompt. Measured 2026-08-29: eight
+                # threads against one 24h lock applied up to 8 of 8, and six
+                # separate processes breached it in five runs of twelve. The claim
+                # is one conditional UPSERT -- see gates/self_mod_cooldown.try_claim.
+                remaining = float(cool.try_claim(key, now=ts))
+            except Exception as exc:  # noqa: BLE001 — fail-closed: no lock, no edit
+                return _refuse(facet, f"cooldown_error:{type(exc).__name__}:{exc}"[:160], why)
+            if remaining > 0:
+                journal.append_event("cognition_mod_refused", {
+                    "facet": facet, "path": key, "reason": "cooling",
+                    "remaining_seconds": remaining, "why": (why or "")[:200],
+                })
+                return {"applied": False, "reason": "cooling", "remaining_seconds": remaining,
+                        "facet": facet, "path": key}
 
-        # Two conditions, not one: the standing switch AND a live human
-        # arming window. See ARMING in the module docstring.
-        armed_for = _armed_seconds_left(ts)
+            # Two conditions, not one: the standing switch AND a live human
+            # arming window. See ARMING in the module docstring.
+            armed_for = _armed_seconds_left(ts)
         enabled = _enabled() and armed_for > 0
         before = path.read_text(encoding="utf-8") if path.is_file() else ""
         # The undo record exists BEFORE the file is touched: a crash between
         # the two leaves a recoverable override, never an unrecorded one.
         try:
-            _audit({"ts": ts, "facet": facet, "path": key, "why": why,
+            _audit({"ts": ts, "facet": facet, "path": key, "why": why, "actor": actor,
                     "evidence": evidence, "before": before, "after": text,
                     "applied": enabled, "enabled": enabled})
         except Exception as exc:  # noqa: BLE001 — fail-closed: no undo record, no edit
@@ -241,7 +275,10 @@ def propose(facet: str, text: str, *, why: str, evidence: str = "",
             "evidence": (evidence or "")[:200], "enabled": enabled,
             "bytes_before": len(before.encode("utf-8")),
             "bytes_after": len(text.encode("utf-8")),
-            "cooldown_seconds": cool.cooldown_seconds, "audit": str(audit_path()),
+            # None on the human path: a person is not cooled, and reporting a
+            # cooldown they are not subject to would misread the record.
+            "cooldown_seconds": None if is_human else cool.cooldown_seconds,
+            "actor": actor, "audit": str(audit_path()),
         })
         # Distinguish the two ways a write can be withheld: the standing
         # switch is off, or nobody has armed a window. They call for

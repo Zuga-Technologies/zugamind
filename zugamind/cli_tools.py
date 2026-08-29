@@ -558,7 +558,8 @@ def cmd_self_mod(args: argparse.Namespace) -> int:
     """First caller of cognition.self_mod.propose. Applies only when
     ZUGAMIND_SELF_MOD_ENABLED is on; otherwise records the proposal. Exit 1
     on any refusal (cooling, unknown facet, empty text, cannot lock)."""
-    from cognition.self_mod import ARM_WINDOW_SEC, FACETS, arm, disarm, propose
+    from cognition.self_mod import (ARM_WINDOW_SEC, ACTOR_HUMAN, FACETS, arm,
+                                    disarm, propose)
 
     # --arm is the human moment the flag alone never provided: it opens a
     # window, it expires, and the agent can only write inside it.
@@ -584,7 +585,13 @@ def cmd_self_mod(args: argparse.Namespace) -> int:
     except OSError as exc:
         print(f"cannot read {args.text_file}: {exc}")
         return 1
-    v = propose(args.facet, text, why=args.why, evidence=getattr(args, "evidence", "") or "")
+    # ACTOR_HUMAN: this is a person at a terminal, so neither the agent's 24h
+    # cooldown nor the arming window applies. The invocation IS the human
+    # moment, and a lock the agent just burned must never be the thing that
+    # stops the operator undoing it.
+    v = propose(args.facet, text, why=args.why,
+                evidence=getattr(args, "evidence", "") or "",
+                actor=ACTOR_HUMAN)
     if v["applied"]:
         print(f"applied: {v['facet']} override rewritten -> {v['path']}")
         print("  cooling 24h; the previous text is in the audit log; `rm` the file to revert fully")

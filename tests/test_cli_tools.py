@@ -96,12 +96,19 @@ def test_report_with_an_empty_window_says_so(data_dir, capsys):
 
 # --- self-mod: the agent's own override file, under cooldown -------------------------
 
-def test_self_mod_applies_once_then_refuses_and_says_how_long(data_dir, monkeypatch, capsys):
+def test_a_human_at_the_cli_is_not_blocked_by_the_agents_cooldown(
+        data_dir, monkeypatch, capsys):
+    """The operator can always correct the agent.
+
+    This used to refuse the second write with "cooling". One lock was doing
+    two jobs -- bounding an autonomous loop that rewrites the agent's own
+    system prompt, AND bounding the human fixing it -- so an agent proposal
+    could leave a person unable to write a correction for 24h without
+    deleting a sqlite file. Incident response should not require knowing
+    that (Buga's ruling, 2026-08-29). The CLI passes ACTOR_HUMAN; the
+    cooldown and the arming window now bind only the agent.
+    """
     monkeypatch.setenv("ZUGAMIND_SELF_MOD_ENABLED", "true")
-    # The flag is now only half of it: a write also needs a live human
-    # arming window (self_mod.arm), so a test that wants an APPLY has to
-    # open one the way a person would.
-    _self_mod.arm()
     from cognition import self_mod
     text_file = data_dir / "new_override.md"
     text_file.write_text("Prefer the smaller fix.", encoding="utf-8")
@@ -109,13 +116,32 @@ def test_self_mod_applies_once_then_refuses_and_says_how_long(data_dir, monkeypa
     rc1 = cli_tools.cmd_self_mod(_ns(facet="deliberative", text_file=str(text_file),
                                      why="reflection said so", evidence="reflection@1"))
     out1 = capsys.readouterr().out
+
+    text_file.write_text("No, prefer the bigger fix.", encoding="utf-8")
     rc2 = cli_tools.cmd_self_mod(_ns(facet="deliberative", text_file=str(text_file),
-                                     why="again", evidence="reflection@2"))
+                                     why="correcting myself", evidence="reflection@2"))
     out2 = capsys.readouterr().out
 
     assert rc1 == 0 and "applied" in out1
-    assert self_mod.override_path("deliberative").read_text(encoding="utf-8") == "Prefer the smaller fix."
-    assert rc2 == 1 and "cooling" in out2 and "h" in out2  # "... 23.9h left"
+    assert rc2 == 0 and "applied" in out2, "a human must never be cooled out"
+    assert self_mod.override_path("deliberative").read_text(
+        encoding="utf-8") == "No, prefer the bigger fix."
+
+
+def test_the_agent_is_still_cooled_after_a_human_write(data_dir, monkeypatch):
+    """The mirror, and the reason the split is safe: exempting the human does
+    not exempt the loop. The agent still gets one write per 24h."""
+    monkeypatch.setenv("ZUGAMIND_SELF_MOD_ENABLED", "true")
+    from cognition import self_mod
+    self_mod.arm(now=1_000.0)
+
+    first = self_mod.propose("deliberative", "agent line one", why="w",
+                             actor=self_mod.ACTOR_AGENT, now=1_000.0)
+    second = self_mod.propose("deliberative", "agent line two", why="w",
+                              actor=self_mod.ACTOR_AGENT, now=1_000.0 + 60)
+
+    assert first["applied"] is True
+    assert second["applied"] is False and second["reason"] == "cooling"
 
 
 # --- parse_when ----------------------------------------------------------------------

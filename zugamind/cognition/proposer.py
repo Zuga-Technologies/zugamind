@@ -117,6 +117,8 @@ def propose_from_reflection(result: dict[str, Any], *,
             return _skip("duplicate", question)
 
         new_text = f"{current.rstrip()}\n{line}" if current.strip() else line
+        # ACTOR_AGENT (the default, stated explicitly): this is the
+        # autonomous loop, so both the cooldown and the arming window bind it.
         verdict = self_mod.propose(
             FACET, new_text, why=f"reflection: {question[:120]}",
             evidence=str(result.get("answer") or "")[:300], cooldown=cooldown,
