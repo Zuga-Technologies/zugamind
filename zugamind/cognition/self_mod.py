@@ -31,8 +31,10 @@ consulted, or the audit record cannot be written, the agent does NOT edit
 itself. A brain edit with no lock and no undo record is the one thing this
 module exists to prevent. Never raises into the caller. Stdlib only.
 
-What this does NOT include, on purpose: a proposer. Nothing in the loop
-composes override text yet -- `zugamind self-mod` is the first caller.
+Callers: `zugamind self-mod` (a human) and cognition/proposer.py (the loop:
+a grounded SELF reflection -> one standing line, under
+ZUGAMIND_SELF_MOD_PROPOSER_ENABLED). The override this writes reaches a
+prompt only under ZUGAMIND_IDENTITY_PROMPT_ENABLED (gates/action_gate.py).
 """
 from __future__ import annotations
 
