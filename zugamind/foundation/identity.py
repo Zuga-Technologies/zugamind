@@ -22,8 +22,12 @@ Stdlib only, matching the rest of ZugaMind.
 """
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger("zugamind.identity")
 
 __all__ = ["Facet", "SENTINEL", "DELIBERATIVE", "get_system_prompt",
            "override_path", "overrides_dir", "PERSONA_DIR"]
@@ -80,12 +84,37 @@ DELIBERATIVE = Facet(
 )
 
 
-def _read_text_safe(path: Path) -> str:
-    """Read text, return '' on any error. Never raises."""
+# Hard ceiling on the local override. The override is agent-authored runtime
+# text that gets spliced into the system prompt of every paid call, and the
+# loader is the LAST place it can be bounded regardless of who wrote it.
+# cognition/proposer.py caps what the automated path appends (2000 chars), but
+# self_mod.propose() -- the public API, also reachable from `zugamind self-mod`
+# -- applies no cap at all, so a hand-written 5 MB file became a 5,247,525
+# character system prompt on every call (measured 2026-08-29).
+MAX_OVERRIDE_CHARS = int(os.environ.get("ZUGAMIND_MAX_OVERRIDE_CHARS", "4000"))
+
+
+def _read_text_safe(path: Path, limit: "int | None" = None) -> str:
+    """Read text, return '' on any error. Never raises.
+
+    A file that is ABSENT and a file that is present-but-unreadable both
+    returned '' with no log at any level, and this module had no logger at
+    all. Those are not the same event: the first is normal, the second is a
+    broken deployment running with no identity at all, silently.
+    """
     try:
-        return path.read_text(encoding="utf-8") if path.is_file() else ""
-    except (OSError, UnicodeDecodeError):
+        if not path.is_file():
+            return ""
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("identity source %s exists but could not be read (%s) — "
+                       "continuing without it", path, e)
         return ""
+    if limit is not None and len(text) > limit:
+        logger.warning("identity override %s is %d chars — truncating to %d "
+                       "before it reaches a model prompt", path, len(text), limit)
+        return text[:limit]
+    return text
 
 
 def _assemble(facet: Facet) -> str:
@@ -94,8 +123,19 @@ def _assemble(facet: Facet) -> str:
     Empty / unreadable blocks are skipped. Returns "" if nothing loaded.
     """
     blocks = [_read_text_safe(p) for p in facet.core_paths]
-    blocks.append(_read_text_safe(facet.vault_override_path))
-    return "\n\n".join(b.strip() for b in blocks if b.strip())
+    override = _read_text_safe(facet.vault_override_path,
+                               limit=MAX_OVERRIDE_CHARS).strip()
+    if override:
+        # Delimited, so the model can tell shipped charter from text the agent
+        # wrote about itself at runtime. Unmarked, it read as one continuous
+        # document with the runtime half in the most-recent position.
+        blocks.append("--- LOCAL OVERRIDE (agent-authored at runtime) ---\n"
+                      + override)
+    assembled = "\n\n".join(b.strip() for b in blocks if b.strip())
+    if not assembled and facet.core_paths:
+        logger.warning("identity for facet %r assembled to EMPTY — the agent "
+                       "is running with no persona", getattr(facet, "name", "?"))
+    return assembled
 
 
 def get_system_prompt(facet: Facet) -> str:

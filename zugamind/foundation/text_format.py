@@ -13,14 +13,35 @@ from __future__ import annotations
 def truncate_title(text: str, limit: int = 70) -> str:
     """Shorten text for display without cutting mid-word.
 
-    Cuts at the last space before `limit` and appends an ellipsis; falls
-    back to the hard limit only when there's no space to cut at (a single
-    token longer than `limit`)."""
+    `limit` is a HARD cap: len(result) <= limit, always.
+
+    It did not used to be. The ellipsis was appended AFTER slicing to `limit`,
+    so every truncated result came back at limit+1 -- and a negative limit was
+    worse, because `text[:limit]` is a suffix-STRIP rather than a cap:
+    limit=-3 on "hello world" returned six characters, and limit=0 returned
+    one (audit 2026-08-29). This is the repo's single truncation helper,
+    written to replace ad-hoc text[:N] slices, so a caller that believed the
+    number was a bound -- a column width, a byte budget, a prompt allowance --
+    was overflowing silently.
+
+    Cuts at the last space before the budget so a title does not end mid-word,
+    and falls back to a hard cut when there is no space (a single long token).
+    Counts CHARACTERS, not bytes.
+    """
+    if not isinstance(text, str):
+        # Returning a list or bytes unchanged defeats the point of having one
+        # helper: the caller gets back something longer than the limit, with
+        # no indication anything went wrong.
+        text = str(text)
+    if limit <= 0:
+        return ""
     if len(text) <= limit:
         return text
-    head = text[:limit]
+    if limit == 1:
+        return "…"
+    head = text[:limit - 1]          # leave room for the ellipsis
     cut = head.rsplit(" ", 1)[0]
-    return (cut if cut else head) + "…"
+    return (cut if cut else head).rstrip() + "…"
 
 
 # Payload compaction (2026-08-28). A workspace winner carries its triggers

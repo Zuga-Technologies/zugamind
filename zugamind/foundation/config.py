@@ -20,8 +20,12 @@ Resolution rules:
     here and restart.
 """
 
+import logging
+import math
 import os
 from pathlib import Path
+
+logger = logging.getLogger("zugamind.config")
 
 # --- Package root ------------------------------------------------------------
 
@@ -30,7 +34,24 @@ ZUGAMIND_DIR = Path(__file__).resolve().parent.parent
 
 # --- Data directory (gitignored runtime artifacts) ---------------------------
 
-DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR", str(ZUGAMIND_DIR / "data")))
+def _dir_from_env(name: str, default: Path) -> Path:
+    """A path from the environment, or the default.
+
+    An EMPTY value is treated as unset. `Path("")` is `Path(".")`, so
+    `ZUGAMIND_DATA_DIR=` in an env file silently relocated the whole runtime
+    -- including the budget ledger -- to a path relative to the current
+    working directory, which makes the monthly cap per-CWD: two shells, two
+    ledgers, twice the spend (audit 2026-08-29). expanduser so `~/zugadata`
+    means what it looks like; resolve so the answer cannot change when
+    something calls os.chdir.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default.resolve()
+    return Path(raw).expanduser().resolve()
+
+
+DATA_DIR = _dir_from_env("ZUGAMIND_DATA_DIR", ZUGAMIND_DIR / "data")
 
 ENGINE_DIR = DATA_DIR / "engine"
 EVENT_LOG = ENGINE_DIR / "events.jsonl"
@@ -71,9 +92,35 @@ REASONING_TIMEOUT = int(os.environ.get("ZUGAMIND_REASONING_TIMEOUT", "180"))
 
 # Approximate per-call costs (heuristics for the local budget ledger, not
 # billing-grade figures — actual provider invoices are the source of truth).
-HAIKU_COST = float(os.environ.get("ZUGAMIND_HAIKU_COST", "0.005"))
-SONNET_COST = float(os.environ.get("ZUGAMIND_SONNET_COST", "0.05"))
-OPUS_COST = float(os.environ.get("ZUGAMIND_OPUS_COST", "0.50"))
+def _money_from_env(name: str, default: float) -> float:
+    """A dollar amount from the environment. Never negative, never infinite.
+
+    These were bare float() calls. Three ways that went wrong (audit
+    2026-08-29): a typo raised ValueError during import and took the whole
+    package down with a traceback that never named the variable; "inf" or
+    "1e999" parsed cleanly into an INFINITE cap; and a 0 for a paid tier made
+    can_spend treat it as the free local tier and stop gating it entirely.
+    A misconfigured dial degrades to the default -- it does not disable the
+    only spending limit there is.
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number — using %s", name, raw, default)
+        return default
+    if not math.isfinite(value) or value < 0:
+        logger.warning("%s=%r is not a usable amount — using %s",
+                       name, raw, default)
+        return default
+    return value
+
+
+HAIKU_COST = _money_from_env("ZUGAMIND_HAIKU_COST", 0.005)
+SONNET_COST = _money_from_env("ZUGAMIND_SONNET_COST", 0.05)
+OPUS_COST = _money_from_env("ZUGAMIND_OPUS_COST", 0.50)
 
 # Simple, self-contained monthly cap. In the private origin repo this value
 # was read LIVE from a shared fleet-wide budget manager (a cross-repo
@@ -81,7 +128,7 @@ OPUS_COST = float(os.environ.get("ZUGAMIND_OPUS_COST", "0.50"))
 # drops that dependency: `monthly_cap()` just returns this constant.
 # Integrators with their own accounting/budget system should replace
 # `monthly_cap()` with a call into it.
-ZUGAMIND_MONTHLY_BUDGET_USD = float(os.environ.get("ZUGAMIND_MONTHLY_BUDGET_USD", "10.00"))
+ZUGAMIND_MONTHLY_BUDGET_USD = _money_from_env("ZUGAMIND_MONTHLY_BUDGET_USD", 10.00)
 
 
 def monthly_cap() -> float:

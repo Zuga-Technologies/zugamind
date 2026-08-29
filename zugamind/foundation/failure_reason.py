@@ -117,7 +117,16 @@ def normalize(raw: str | None) -> str | None:
         return None
     prefix = raw.split(":", 1)[0].strip().lower()
     if ":" in raw and prefix in CATEGORIES:
-        return raw[:MAX_LEN]
+        # Rebuild from the CANONICAL prefix rather than returning `raw`
+        # verbatim. The old code lowercased the prefix only to TEST it, then
+        # emitted the original -- so "INTERNAL: boom" passed the membership
+        # check and shipped a category that is not in CATEGORIES, which is the
+        # one thing this module's docstring says cannot happen. Any fleet
+        # consumer grouping by slug.split(":")[0] got a category that fails a
+        # membership test (audit 2026-08-29). Normalising here also fixes the
+        # shape for "internal:noSpace" and "internal   : padded".
+        detail = raw.split(":", 1)[1].strip()
+        return f"{prefix}: {detail}"[:MAX_LEN]
     return f"unknown: {raw}"[:MAX_LEN]
 
 
