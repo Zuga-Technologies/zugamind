@@ -10,6 +10,7 @@ import pytest
 import act.command_actuator as command_actuator
 import act.floor_calibration as floor_calibration
 import cli
+import cognition.self_mod as _self_mod
 import cli_tools
 import continuity.journal as journal
 import foundation.budget as budget
@@ -97,6 +98,10 @@ def test_report_with_an_empty_window_says_so(data_dir, capsys):
 
 def test_self_mod_applies_once_then_refuses_and_says_how_long(data_dir, monkeypatch, capsys):
     monkeypatch.setenv("ZUGAMIND_SELF_MOD_ENABLED", "true")
+    # The flag is now only half of it: a write also needs a live human
+    # arming window (self_mod.arm), so a test that wants an APPLY has to
+    # open one the way a person would.
+    _self_mod.arm()
     from cognition import self_mod
     text_file = data_dir / "new_override.md"
     text_file.write_text("Prefer the smaller fix.", encoding="utf-8")

@@ -30,6 +30,10 @@ def _events(kind):
 @pytest.fixture
 def enabled(monkeypatch):
     monkeypatch.setenv("ZUGAMIND_SELF_MOD_ENABLED", "true")
+    # The flag is now only half of it: a write also needs a live human
+    # arming window (self_mod.arm), so a test that wants an APPLY has to
+    # open one the way a person would.
+    self_mod.arm()
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +42,10 @@ def enabled(monkeypatch):
 
 def test_a_second_proposal_for_the_same_facet_inside_24h_is_refused_across_a_restart(enabled, tmp_path):
     db = tmp_path / "cooldown.db"
+    # This test drives a simulated clock, so the arming window has to be
+    # opened on the SAME clock -- a marker stamped later than "now" is a
+    # clock artefact and self_mod refuses it, correctly.
+    self_mod.arm(now=1_000.0)
 
     first = self_mod.propose(
         "deliberative", "Prefer the smaller fix.", why="reflection said so",

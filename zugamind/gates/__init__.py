@@ -42,7 +42,8 @@ protection (that was the state of the last three until 2026-08-29).
                          the journal only (decision 1, 2026-08-29)
                          (cognition.thoughts.consider_thought <-
                          cognition.reflection.engine)
-  DARK    self_mod_cooldown  restart-durable per-file lock consulted before
+  DARK    self_mod_cooldown  restart-durable per-file lock, taken ATOMICALLY
+                         (try_claim) before
                          every proposal to rewrite a facet's runtime
                          override (DATA_DIR/overrides/<facet>.md); the
                          proposal is recorded and cools the file either way,

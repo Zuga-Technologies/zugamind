@@ -25,6 +25,17 @@ only propose it. That makes the reachable set the whole design:
            rule). Off, a proposal is still recorded in the audit log, still
            journaled, and still starts the cooldown -- nothing is written
            to the override. On, it is applied atomically.
+  ARMING   the flag alone is not enough. A write also needs an unexpired
+           arming marker that a HUMAN creates (`zugamind self-mod --arm`),
+           default 60 minutes. Decision 2 stands -- the agent applies, not
+           merely proposes -- but it applies inside a window a person just
+           opened, rather than forever after one env var was set once. A
+           standing switch with no expiry is how a deliberate opt-in becomes
+           an unattended capability nobody remembers granting; the same
+           reasoning already governs this environment's shared-checkout
+           hatch, which expires for exactly that reason. Unarmed, the
+           behaviour is identical to flag-off: recorded, journaled, cooled,
+           nothing written.
 
 FAIL-CLOSED, unlike share_filter and llm_judge: if the cooldown cannot be
 consulted, or the audit record cannot be written, the agent does NOT edit
@@ -83,6 +94,80 @@ def audit_path() -> Path:
     return Path(os.environ.get("ZUGAMIND_COGNITION_MOD_AUDIT", default))
 
 
+# How long one arming lasts. Short on purpose: this is the window in which
+# the agent may rewrite its own system prompt, and a window nobody has to
+# renew is just a switch with extra steps.
+ARM_WINDOW_SEC = float(os.environ.get("ZUGAMIND_SELF_MOD_ARM_SEC", "3600"))
+
+
+def arm_path() -> Path:
+    """Where the human-arming marker lives.
+
+    Beside the overrides DIRECTORY, not inside it. A marker inside would make
+    arming create overrides/ as a side effect, and "the overrides dir does
+    not exist" is a thing the refusal tests legitimately assert about a
+    proposal that was rejected. The marker is not an override.
+    """
+    return override_path(FACETS[0]).parent.parent / ".self_mod_armed"
+
+
+def arm(*, now: Optional[float] = None) -> dict[str, Any]:
+    """Open the arming window. A HUMAN action -- `zugamind self-mod --arm`.
+
+    Deliberately not callable from the reflection loop: cognition/proposer.py
+    never imports it, and an agent that could arm itself would make the
+    window meaningless.
+    """
+    ts = time.time() if now is None else float(now)
+    path = arm_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_text(path, json.dumps({"armed_at": ts}))
+    except Exception as exc:  # noqa: BLE001 — fail-closed: no marker, no write
+        return {"armed": False, "reason": f"arm_error:{type(exc).__name__}:{exc}"[:160]}
+    journal.append_event("cognition_mod_armed",
+                         {"path": str(path), "window_sec": ARM_WINDOW_SEC})
+    return {"armed": True, "reason": "armed", "seconds": ARM_WINDOW_SEC,
+            "path": str(path)}
+
+
+def disarm() -> dict[str, Any]:
+    """Close the window early. Always safe to call."""
+    try:
+        arm_path().unlink(missing_ok=True)
+    except OSError as exc:
+        return {"armed": False, "reason": f"disarm_error:{exc}"[:160]}
+    journal.append_event("cognition_mod_disarmed", {})
+    return {"armed": False, "reason": "disarmed"}
+
+
+def _armed_seconds_left(now: float) -> float:
+    """Seconds left on the human arming window; 0.0 when unarmed or expired.
+
+    Fail-closed on every error path: an unreadable or malformed marker is
+    NOT an arming. The whole point is that a person did something recently
+    and deliberately, so anything we cannot confirm is a no.
+    """
+    try:
+        path = arm_path()
+        if not path.is_file():
+            return 0.0
+        armed_at = json.loads(path.read_text(encoding="utf-8")).get("armed_at")
+        if not isinstance(armed_at, (int, float)) or isinstance(armed_at, bool):
+            return 0.0
+        left = ARM_WINDOW_SEC - (now - float(armed_at))
+        # A marker stamped in the FUTURE is a clock artefact or a forgery,
+        # never a legitimate arming.
+        if left > ARM_WINDOW_SEC:
+            logger.warning("self_mod: arming marker is stamped in the future — "
+                           "treating as unarmed")
+            return 0.0
+        return max(0.0, left)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("self_mod: arming marker unreadable (%s) — unarmed", exc)
+        return 0.0
+
+
 def propose(facet: str, text: str, *, why: str, evidence: str = "",
             cooldown: Optional[SelfModCooldown] = None,
             now: Optional[float] = None) -> dict[str, Any]:
@@ -90,7 +175,7 @@ def propose(facet: str, text: str, *, why: str, evidence: str = "",
 
     Returns {"applied": bool, "reason": str, "remaining_seconds": float,
              "facet": str, "path": str}. reason is one of:
-      applied | disabled | cooling | unknown_facet | empty_text |
+      applied | disabled | not_armed | cooling | unknown_facet | empty_text |
       cooldown_error:* | audit_error:* | write_error:* | error:*
     Exactly one journal event is written: cognition_mod_applied,
     cognition_mod_proposed (flag off) or cognition_mod_refused.
@@ -126,7 +211,10 @@ def propose(facet: str, text: str, *, why: str, evidence: str = "",
             return {"applied": False, "reason": "cooling", "remaining_seconds": remaining,
                     "facet": facet, "path": key}
 
-        enabled = _enabled()
+        # Two conditions, not one: the standing switch AND a live human
+        # arming window. See ARMING in the module docstring.
+        armed_for = _armed_seconds_left(ts)
+        enabled = _enabled() and armed_for > 0
         before = path.read_text(encoding="utf-8") if path.is_file() else ""
         # The undo record exists BEFORE the file is touched: a crash between
         # the two leaves a recoverable override, never an unrecorded one.
@@ -155,7 +243,16 @@ def propose(facet: str, text: str, *, why: str, evidence: str = "",
             "bytes_after": len(text.encode("utf-8")),
             "cooldown_seconds": cool.cooldown_seconds, "audit": str(audit_path()),
         })
-        return {"applied": enabled, "reason": "applied" if enabled else "disabled",
+        # Distinguish the two ways a write can be withheld: the standing
+        # switch is off, or nobody has armed a window. They call for
+        # different actions from a human, so they must not share a reason.
+        if enabled:
+            reason = "applied"
+        elif not _enabled():
+            reason = "disabled"
+        else:
+            reason = "not_armed"
+        return {"applied": enabled, "reason": reason,
                 "remaining_seconds": 0.0, "facet": facet, "path": key}
     except Exception as exc:  # noqa: BLE001 — never raises; fail-closed
         logger.warning("self_mod: unexpected failure, refusing: %s", exc)

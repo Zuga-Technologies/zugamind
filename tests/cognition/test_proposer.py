@@ -11,6 +11,7 @@ ZUGAMIND_SELF_MOD_PROPOSER_ENABLED.
 """
 from __future__ import annotations
 
+import cognition.self_mod as _self_mod
 import pytest
 
 from cognition import proposer, self_mod
@@ -66,6 +67,10 @@ def test_a_self_reflection_with_a_lesson_becomes_a_proposal_on_the_sentinel_over
 
 def test_the_line_is_appended_to_an_existing_override_not_a_replacement(on, model_says, monkeypatch):
     monkeypatch.setenv("ZUGAMIND_SELF_MOD_ENABLED", "true")
+    # The flag is now only half of it: a write also needs a live human
+    # arming window (self_mod.arm), so a test that wants an APPLY has to
+    # open one the way a person would.
+    _self_mod.arm()
     path = identity.override_path("sentinel")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("Keep it short.", encoding="utf-8")

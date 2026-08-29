@@ -558,7 +558,26 @@ def cmd_self_mod(args: argparse.Namespace) -> int:
     """First caller of cognition.self_mod.propose. Applies only when
     ZUGAMIND_SELF_MOD_ENABLED is on; otherwise records the proposal. Exit 1
     on any refusal (cooling, unknown facet, empty text, cannot lock)."""
-    from cognition.self_mod import FACETS, propose
+    from cognition.self_mod import ARM_WINDOW_SEC, FACETS, arm, disarm, propose
+
+    # --arm is the human moment the flag alone never provided: it opens a
+    # window, it expires, and the agent can only write inside it.
+    if getattr(args, "disarm", False):
+        print("self-mod DISARMED — proposals will be recorded, not applied")
+        disarm()
+        return 0
+    if getattr(args, "arm", False):
+        r = arm()
+        if not r["armed"]:
+            print(f"could not arm: {r['reason']}")
+            return 1
+        print(f"self-mod ARMED for {int(ARM_WINDOW_SEC // 60)} min — the agent "
+              f"may APPLY an override until it expires")
+        return 0
+    if not args.facet or not args.text_file or not args.why:
+        print("usage: zugamind self-mod <facet> <text_file> --why WHY   "
+              "(or --arm / --disarm)")
+        return 1
 
     try:
         text = Path(args.text_file).read_text(encoding="utf-8")
@@ -625,9 +644,15 @@ def register(sub: "argparse._SubParsersAction") -> None:
     p = sub.add_parser("self-mod", help="rewrite one facet's runtime override (data/overrides/<facet>.md) "
                                         "under the 24h per-file cooldown; applies only if "
                                         "ZUGAMIND_SELF_MOD_ENABLED, else records the proposal")
-    p.add_argument("facet", help="sentinel | deliberative")
-    p.add_argument("text_file", help="file whose contents become the new override")
-    p.add_argument("--why", required=True, help="one line: why this change")
+    p.add_argument("facet", nargs="?", help="sentinel | deliberative")
+    p.add_argument("text_file", nargs="?",
+                   help="file whose contents become the new override")
+    p.add_argument("--arm", action="store_true",
+                   help="open the human arming window (default 60 min) so the "
+                        "agent may APPLY an override; without it a proposal is "
+                        "recorded but nothing is written")
+    p.add_argument("--disarm", action="store_true", help="close the window now")
+    p.add_argument("--why", help="one line: why this change (required unless --arm/--disarm)")
     p.add_argument("--evidence", default="", help="what backs it (journal ids, a reflection, ...)")
     p.set_defaults(func=cmd_self_mod)
 
