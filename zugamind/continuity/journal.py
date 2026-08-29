@@ -12,16 +12,58 @@ object per line, oldest first). Stdlib-only (json + pathlib + datetime).
 
 Fail-closed on write: `append_event()` must never be the reason a cognitive
 cycle crashes, so any disk/serialization error is logged and swallowed.
+
+Durability (audit 2026-08-28, against a live journal of 7,576 lines):
+- Each event is ONE unbuffered write of the whole line, under a
+  cross-process advisory lock (a sidecar `journal.lock`, `msvcrt.locking`
+  on Windows / `fcntl.flock` elsewhere). Measured on this box: without
+  the lock, two appenders lost ~1% of events with NO error and NO
+  malformed line — Windows' C runtime implements "append" as seek-to-end
+  then write, so two handles land on the same offset and one silently
+  overwrites the other (POSIX O_APPEND is atomic; the CRT's is not).
+  Different-length events overwrite partially, which is exactly the
+  orphaned-tail shape the live journal carried (four of them).
+- On a process's first append (and after a rotation) the file's last byte
+  is checked: a torn tail with no newline used to glue the NEXT event onto
+  it, losing both. Only a dead process leaves a torn tail, so once per
+  process is exactly when it matters.
+- `read_events` counts what it skips and says so (once per read).
+- ROTATION: the file grew 3.9 MB in six weeks with nothing bounding it,
+  and every read (the rate limiter per wake, the briefing per wake) parses
+  the whole file. The journal is three files: the ACTIVE segment
+  (`journal.jsonl`), the PREVIOUS segment (`journal.1.jsonl`) and the
+  ARCHIVE segments (`journal.archive.<utc-stamp>.jsonl`, never deleted —
+  the journal is episodic memory). Past `ZUGAMIND_JOURNAL_MAX_BYTES`
+  (default 8 MB) the previous segment is RENAMED into the archive and the
+  active file is RENAMED to become the previous segment; the next append
+  creates a fresh active file. Every step is a rename: atomic, and either
+  happens or is deferred — no copy can be half-done or done twice. A first
+  version snapshotted-then-replaced the active file and erased any append
+  that landed in between; a second copied-then-deleted and duplicated the
+  copy when the delete was refused (both caught the same day). A writer
+  that opened the old file mid-rename keeps writing into the renamed
+  segment, which readers still parse. Readers see previous + active: at
+  least one full segment of history, weeks at today's rate, far more than
+  any reader's window (the rate limiter needs 24 h).
+- `ts` and `kind` are the journal's own; a payload cannot overwrite them.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
+
+try:  # Windows
+    import msvcrt
+except ImportError:  # POSIX
+    msvcrt = None  # type: ignore[assignment]
+    import fcntl
 
 from foundation.config import ENGINE_DIR
 from foundation.state import load_state
@@ -30,10 +72,104 @@ logger = logging.getLogger("zugamind.continuity.journal")
 
 JOURNAL_FILE: Path = ENGINE_DIR / "journal.jsonl"
 
-# How many raw journal lines build_briefing() scans to find recent notable
-# events and to resolve handoff/handoff_done pairs. Generous on purpose —
-# the journal is small and this is a local file read, not a network call.
+# Rotation: past this many bytes the active segment is renamed to the
+# previous segment (and the previous one archived). Checked every
+# _ROTATE_CHECK_EVERY appends, not every append — a stat per write is cheap
+# but pointless.
+_DEFAULT_JOURNAL_MAX_BYTES = 8 * 1024 * 1024
+_ROTATE_CHECK_EVERY = 100
+_appends_since_check = 0
+# A torn tail (a line with no trailing newline) is left only by a process that
+# died mid-write, so it is checked on THIS process's first append and after a
+# rotation — not on every write: the read-open it takes costs ~25 ms on a
+# Windows box (scan-on-open after a write) against 0.3 ms for the append.
+_tail_checked_for: Optional[Path] = None
+# On Windows an open() on the journal fails with PermissionError for the few
+# milliseconds another process is renaming it (rotation) or still holds it
+# from its own append. Retry briefly instead of dropping the event.
+_APPEND_ATTEMPTS = 60          # up to ~1.2 s of patience under pathological contention
+_APPEND_RETRY_SLEEP_S = 0.02
+# The cross-process lock: how long to wait for it before giving up on this
+# append (logged and swallowed like any other append failure).
+_LOCK_ATTEMPTS = 200
+_LOCK_RETRY_SLEEP_S = 0.01
+
+
+def lock_file() -> Path:
+    return JOURNAL_FILE.with_name(JOURNAL_FILE.stem + ".lock")
+
+
+@contextlib.contextmanager
+def _journal_lock() -> Iterator[None]:
+    """Exclusive, cross-process, advisory lock on the journal (sidecar file).
+    Serialises appends and rotation across the daemon and any hand-run CLI.
+    Raises TimeoutError if the lock cannot be taken in time."""
+    lock_file().parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_file()), os.O_RDWR | os.O_CREAT)
+    try:
+        for attempt in range(_LOCK_ATTEMPTS):
+            try:
+                if msvcrt is not None:
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                if attempt == _LOCK_ATTEMPTS - 1:
+                    raise TimeoutError("journal lock busy")
+                time.sleep(_LOCK_RETRY_SLEEP_S)
+        try:
+            yield
+        finally:
+            try:
+                if msvcrt is not None:
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        os.close(fd)
+
+
+def _journal_max_bytes() -> int:
+    try:
+        return max(64 * 1024, int(os.environ.get("ZUGAMIND_JOURNAL_MAX_BYTES", _DEFAULT_JOURNAL_MAX_BYTES)))
+    except (TypeError, ValueError):
+        return _DEFAULT_JOURNAL_MAX_BYTES
+
+
+def archive_files() -> List[Path]:
+    """Archived segments, oldest first (never deleted)."""
+    return sorted(JOURNAL_FILE.parent.glob(JOURNAL_FILE.stem + ".archive.*.jsonl"))
+
+
+def archive_file() -> Path:
+    """Back-compat: the NEWEST archive segment (or the name the next one
+    would get). Prefer `archive_files()`."""
+    files = archive_files()
+    return files[-1] if files else JOURNAL_FILE.with_name(JOURNAL_FILE.stem + ".archive.0.jsonl")
+
+
+def previous_segment() -> Path:
+    return JOURNAL_FILE.with_name(JOURNAL_FILE.stem + ".1.jsonl")
+
+# How many events a FIRST briefing (no last-wake cursor) considers. With a
+# cursor the window is bounded by TIME, not lines: a briefing after a week
+# idle used to report "2000 winner(s)" for 3000 and call an old handoff
+# "none" because it fell past a 2000-line horizon (audit 2026-08-28).
+# Handoffs are always scanned across the whole active journal.
 _BRIEFING_SCAN_LIMIT = 2000
+
+# Budget split of the size cap (ZUGAMIND_BRIEFING_MAX_CHARS) between the
+# sections. The two "exempt" sections used to have no ceiling of their own:
+# a winner with 20 triggers rendered ~6,750 chars on its own, so the final
+# hard slice cut it mid-word and erased "Since last wake" and the handoffs
+# entirely — the docstring's "never touched" was false. Each section is now
+# trimmed to ITS share (whole lines, with a "+N more" marker) before the
+# group cap shrinks and before any last-resort slice.
+_WINNER_SHARE = 0.35
+_DIGEST_SHARE = 0.30
 
 # How many items to list per group in the rendered briefing, before any
 # hard-cap truncation kicks in — keeps the whole briefing well under the
@@ -56,18 +192,89 @@ def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _ends_with_newline(path: Path) -> bool:
+    """True for an empty/missing file or one whose last byte is a newline."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return True
+    if size == 0:
+        return True
+    with path.open("rb") as f:
+        f.seek(-1, os.SEEK_END)
+        return f.read(1) == b"\n"
+
+
+def _rotate_if_needed() -> None:
+    """Once the active segment exceeds the size cap: rename the previous
+    segment into the archive, then rename the active segment to become the
+    previous one. Renames only — nothing is copied, nothing another process
+    may be appending to is ever rewritten, so a concurrent append can never
+    be erased or duplicated: it lands either in the fresh active file or in
+    the just-renamed segment, both of which readers parse. On Windows a
+    rename fails while another process holds the file open (a 0.3 ms
+    window per append); that just defers rotation to the next check. Never
+    deletes a line."""
+    global _appends_since_check, _tail_checked_for
+    _appends_since_check += 1
+    if _appends_since_check < _ROTATE_CHECK_EVERY:
+        return
+    _appends_since_check = 0
+    try:
+        if not JOURNAL_FILE.exists() or JOURNAL_FILE.stat().st_size <= _journal_max_bytes():
+            return
+        with _journal_lock():
+            if not JOURNAL_FILE.exists():
+                return  # another process rotated first
+            prev = previous_segment()
+            if prev.exists():
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+                os.rename(prev, JOURNAL_FILE.with_name(f"{JOURNAL_FILE.stem}.archive.{stamp}.jsonl"))
+            os.rename(JOURNAL_FILE, prev)
+            _tail_checked_for = None  # the next append starts the fresh active file
+        logger.info("journal rotated: active segment -> %s", prev.name)
+    except Exception as e:  # noqa: BLE001 — rotation is housekeeping, never fatal
+        logger.warning("journal rotation deferred (non-fatal): %s", e)
+
+
 def append_event(kind: str, payload: Dict[str, Any]) -> None:
-    """Append one event: `{"ts": now_iso(), "kind": kind, **payload}`.
+    """Append one event: `{**payload, "ts": now_iso(), "kind": kind}`.
+
+    `ts` and `kind` are the journal's own and win over a payload's keys —
+    every `since_iso` window and the rate limiter depend on `ts` being
+    exactly what now_iso() produces. The line is written with ONE unbuffered
+    write; on this process's first append, if the file's tail is torn (no
+    trailing newline) a newline goes first so this event never glues onto
+    the remnant a dead process left behind.
 
     Best-effort and side-effect-free on failure: a full disk, a bad payload,
     or a permissions error is logged at WARNING and swallowed — journaling
     must never be the reason the caller's cycle breaks.
     """
     try:
-        ENGINE_DIR.mkdir(parents=True, exist_ok=True)
-        event = {"ts": now_iso(), "kind": kind, **payload}
-        with JOURNAL_FILE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event, default=str) + "\n")
+        JOURNAL_FILE.parent.mkdir(parents=True, exist_ok=True)
+        if not isinstance(payload, dict):
+            payload = {"payload": payload}
+        event = {**payload, "ts": now_iso(), "kind": kind}
+        line = json.dumps(event, default=str).encode("utf-8")
+        if b"\n" in line:  # json.dumps escapes newlines inside strings; belt and braces
+            line = line.replace(b"\n", b" ")
+        global _tail_checked_for
+        with _journal_lock():
+            prefix = b""
+            if _tail_checked_for != JOURNAL_FILE:
+                prefix = b"" if _ends_with_newline(JOURNAL_FILE) else b"\n"
+                _tail_checked_for = JOURNAL_FILE
+            for attempt in range(_APPEND_ATTEMPTS):
+                try:
+                    with JOURNAL_FILE.open("ab", buffering=0) as f:
+                        f.write(prefix + line + b"\n")
+                    break
+                except PermissionError:
+                    if attempt == _APPEND_ATTEMPTS - 1:
+                        raise
+                    time.sleep(_APPEND_RETRY_SLEEP_S)
+        _rotate_if_needed()
     except Exception as e:  # noqa: BLE001 — journaling is best-effort, never fatal
         logger.warning("journal append failed (non-fatal): %s", e)
 
@@ -78,7 +285,8 @@ def read_events(
     *,
     on_error: str = "empty",
 ) -> List[Dict[str, Any]]:
-    """Return journal events in chronological order (oldest first).
+    """Return journal events in chronological order (oldest first), across
+    the previous and active segments (see the module docstring on rotation).
 
     Args:
         since_iso: if given, only events with `ts` strictly greater than
@@ -97,10 +305,13 @@ def read_events(
                   when the count is unknowable). A missing file is [] in both
                   modes: a fresh install genuinely has no history.
     """
-    if not JOURNAL_FILE.exists():
+    segments = [seg for seg in (previous_segment(), JOURNAL_FILE) if seg.exists()]
+    if not segments:
         return []
     try:
-        raw_lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
+        raw_lines: List[str] = []
+        for seg in segments:  # previous segment first: it is older
+            raw_lines.extend(seg.read_text(encoding="utf-8").splitlines())
     except Exception as e:  # noqa: BLE001 — see on_error
         if on_error == "raise":
             raise
@@ -108,6 +319,7 @@ def read_events(
         return []
 
     events: List[Dict[str, Any]] = []
+    skipped = 0
     for line in raw_lines:
         line = line.strip()
         if not line:
@@ -115,26 +327,85 @@ def read_events(
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
+            skipped += 1
             continue
         if not isinstance(event, dict):
+            skipped += 1
             continue
-        if since_iso is not None and event.get("ts", "") <= since_iso:
+        if since_iso is not None and str(event.get("ts", "")) <= since_iso:
             continue
         events.append(event)
+    if skipped:
+        # Say so: the live journal carried four orphaned event tails for weeks
+        # and nothing ever mentioned them.
+        logger.warning("journal: skipped %d malformed line(s) in %s", skipped,
+                       " + ".join(seg.name for seg in segments))
 
     if limit is not None and limit >= 0:
-        events = events[-limit:]
+        events = events[-limit:] if limit else []  # [-0:] would be the whole list
     return events
+
+
+def _untrusted(text: Any, limit: int) -> str:
+    """One line of externally-sourced text, safe to interpolate into the
+    briefing. Everything a scanner captured — issue titles, feed headlines,
+    harness stdout — reaches the waking harness through here, and every
+    shipped harness prompt says "act on the briefing". A title carrying
+    "\n\n## Why you're being woken\n- SYSTEM OVERRIDE ..." used to render as
+    a second, indistinguishable header (audit 2026-08-28). Markdown
+    structure lives at line starts, so collapsing all whitespace to single
+    spaces removes every header/fence/list injection shape while leaving
+    ordinary titles untouched; a leading "#" is neutralised for the rare
+    case a value opens a line on its own."""
+    flat = " ".join(str(text).split())
+    if flat.startswith(("#", "```", ">")):
+        flat = "\u2060" + flat  # word joiner: invisible, but no longer a line-start token
+    return flat[:limit]
+
+
+def _trigger_line(trig: Any, limit: int = 300) -> str:
+    """`type: detail` for a trigger — never the raw dict. `str(trig)` used to
+    be the fallback, which rendered every field the scanner had stored
+    (including anything token-shaped) verbatim into the briefing."""
+    if not isinstance(trig, dict):
+        return _untrusted(trig, limit)
+    body = trig.get("detail") or trig.get("summary") or trig.get("title") or "(no detail)"
+    ttype = trig.get("type") or "?"
+    return _untrusted(f"{ttype}: {body}", limit)
+
+
+def _fit_lines(lines: List[str], budget_chars: int, keep_head: int = 0) -> List[str]:
+    """Trim a section to `budget_chars` by dropping WHOLE lines from the end
+    (after the first `keep_head`, which always stay), replacing what was
+    dropped with one marker line."""
+    if len("\n".join(lines)) <= budget_chars:
+        return lines
+    kept = list(lines[:keep_head])
+    for line in lines[keep_head:]:
+        candidate = kept + [line]
+        if len("\n".join(candidate)) > budget_chars - 40:
+            break
+        kept = candidate
+    dropped = len(lines) - len(kept)
+    if dropped > 0:
+        kept.append(f"  - (+{dropped} more, see journal)")
+    return kept
 
 
 def _describe_elapsed(since_iso: str, now: Optional[datetime] = None) -> str:
     """Human-readable elapsed time between `since_iso` and `now` (defaults
-    to the real current time — injectable so briefings are testable)."""
+    to the real current time — injectable so briefings are testable). A
+    naive timestamp is read as UTC: every cursor the runner writes comes
+    from now_iso(), which is UTC — a naive value only arrives from a
+    hand-edited state file, and reading it as local time reported a 5-minute
+    gap as "5h 5m" on a UTC-5 box."""
     try:
         then = datetime.fromisoformat(since_iso)
-        current = now if now is not None else (
-            datetime.now(timezone.utc) if then.tzinfo else datetime.now()
-        )
+        if then.tzinfo is None:
+            then = then.replace(tzinfo=timezone.utc)
+        current = now if now is not None else datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
         delta = current - then
         total_minutes = max(0, int(delta.total_seconds() // 60))
         hours, minutes = divmod(total_minutes, 60)
@@ -154,22 +425,45 @@ def _max_briefing_chars() -> int:
         return _DEFAULT_BRIEFING_MAX_CHARS
 
 
-def _wake_gate_hint() -> Optional[tuple]:
-    """`(floor, basis)` the live wake gate is using, or None if unavailable.
+def _wake_gate_hints(winner_module: Optional[str],
+                     harnesses: Optional[List[str]] = None) -> List[tuple]:
+    """`[(harness, floor, basis), ...]` — the gates this winner was ACTUALLY
+    judged by: enabled harnesses in "calibrate" mode, restricted to the
+    names in `harnesses` when the caller says which ones are dispatching,
+    and to those whose `wake_modules` allowlist admits the winner's module.
+    It used to report the first calibrate-mode harness in the file, full
+    stop — so a world_signals wake could be described against a
+    repo_issues-only harness's 0.9 floor it never faced (audit 2026-08-28).
 
     Lazily imported and best-effort on purpose: `act.floor_calibration`
     imports THIS module, so a top-level import here is circular, and a
-    briefing must still render if the act/ layer is missing entirely.
-    Reports the first enabled harness in "calibrate" mode — the gate a
-    self-calibrating deployment is actually judged by."""
+    briefing must still render if the act/ layer is missing entirely."""
+    hints: List[tuple] = []
     try:
         from act import command_actuator, floor_calibration
         for hc in command_actuator.load_harness_configs():
-            if hc.get("enabled", True) and hc.get("wake_min_salience") == "calibrate":
-                return floor_calibration.resolve_gate(hc.get("name", ""))
+            name = hc.get("name", "")
+            if not hc.get("enabled", True) or hc.get("wake_min_salience") != "calibrate":
+                continue
+            if harnesses is not None and name not in harnesses:
+                continue
+            modules = hc.get("wake_modules")
+            if isinstance(modules, list) and modules and winner_module not in modules:
+                continue
+            floor, basis = floor_calibration.resolve_gate(name)
+            hints.append((name, floor, basis))
     except Exception as e:  # noqa: BLE001 — a hint must never break the briefing
         logger.debug("briefing: wake gate hint unavailable: %s", e)
-    return None
+    return hints
+
+
+def _wake_gate_hint() -> Optional[tuple]:
+    """Back-compat seam: `(floor, basis)` of the first applicable
+    calibrate-mode harness, or None. build_briefing consults it only when
+    `_wake_gate_hints` found nothing, so a caller (or test) that replaces
+    this single-gate hook still steers the note."""
+    hints = _wake_gate_hints(None, None)
+    return (hints[0][1], hints[0][2]) if hints else None
 
 
 def build_briefing(
@@ -178,6 +472,7 @@ def build_briefing(
     *,
     other_criticals: Optional[List[Dict[str, Any]]] = None,
     now: Optional[datetime] = None,
+    harnesses: Optional[List[str]] = None,
 ) -> str:
     """Render a markdown wake briefing for a harness invocation.
 
@@ -190,6 +485,10 @@ def build_briefing(
                 triggered wake (e.g. a scheduled/manual run).
         now: override for "the current time", for deterministic tests. Real
              callers should omit it.
+        harnesses: names of the harness configs this briefing is about to be
+             dispatched to, so the "was this wake earned" note quotes the
+             gate(s) the winner actually faced. None = every enabled
+             calibrate-mode harness whose wake_modules admit the winner.
 
     Sections: current cognitive state + time since last wake; the winning
     trigger that caused this wake; recent notable events since the last
@@ -208,9 +507,12 @@ def build_briefing(
     winner's "Why you're being woken" section is never touched — it's the
     one piece of context this briefing exists to deliver.
 
-    Deterministic given the journal's contents and `now`: no randomness, no
-    hidden clock reads beyond the one explicit `now` (or, if omitted, a
-    single read of the real clock for the elapsed-time line).
+    Deterministic given the journal's contents, `now`, and the current
+    state / harness-config / floor-calibration files (all three are read):
+    no randomness, no hidden clock reads beyond the one explicit `now` (or,
+    if omitted, a single read of the real clock for the elapsed-time line).
+    All externally-sourced text is rendered through `_untrusted` — one line,
+    no markdown structure — so scanned content cannot forge a section.
     """
     try:
         state = load_state()
@@ -218,8 +520,14 @@ def build_briefing(
         logger.debug("briefing: state load failed: %s", e)
         state = {"state": "UNKNOWN"}
 
-    all_events = read_events(since_iso=None, limit=_BRIEFING_SCAN_LIMIT)
-    recent_events = [e for e in all_events if since_iso is None or e.get("ts", "") > since_iso]
+    if since_iso:
+        # Bounded by TIME: everything since the cursor, however many events.
+        recent_events = read_events(since_iso=since_iso, limit=None)
+    else:
+        recent_events = read_events(since_iso=None, limit=_BRIEFING_SCAN_LIMIT)
+    # Handoffs are rare and long-lived: resolve them across the whole active
+    # journal, never a line-count window.
+    all_events = read_events(since_iso=None, limit=None)
 
     winners = [e for e in recent_events if e.get("kind") == "cycle" and e.get("winner")]
     actions = [e for e in recent_events if e.get("kind") == "harness_invocation"]
@@ -234,9 +542,11 @@ def build_briefing(
         if e.get("kind") == "handoff" and e.get("id") not in handoff_done_ids
     ]
 
+    max_chars = _max_briefing_chars()
+
     def _render(group_cap: int) -> str:
         lines: List[str] = ["# ZugaMind Wake Briefing", ""]
-        lines.append(f"**Cognitive state:** {state.get('state', 'UNKNOWN')}")
+        lines.append(f"**Cognitive state:** {_untrusted(state.get('state', 'UNKNOWN'), 20)}")
         if since_iso:
             lines.append(f"**Time since last wake:** {_describe_elapsed(since_iso, now)}")
         else:
@@ -244,12 +554,13 @@ def build_briefing(
 
         lines.append("")
         lines.append("## Why you're being woken")
+        winner_lines: List[str] = []
         if winner:
-            module = winner.get("source_module", "?")
-            content = str(winner.get("content", ""))[:200]
+            module = _untrusted(winner.get("source_module", "?"), 60)
+            content = _untrusted(winner.get("content", ""), 200)
             salience = winner.get("salience")
             sal_str = f"{salience:.2f}" if isinstance(salience, (int, float)) else "?"
-            lines.append(f"- **{module}** (salience {sal_str}): {content}")
+            winner_lines.append(f"- **{module}** (salience {sal_str}): {content}")
             # Was this wake EARNED, or did the attention schema's
             # monopoly-breaking multipliers carry it over the bar? Those
             # multipliers exist to share attention INSIDE the mind; the
@@ -264,9 +575,12 @@ def build_briefing(
                     and abs(raw - salience) > 1e-9):
                 note = (f"  Bid {raw:.2f}, woke on {salience:.2f} "
                         f"after attention-health modulation")
-                gate = _wake_gate_hint()
-                if gate:
-                    gate_floor, basis = gate
+                gates = _wake_gate_hints(winner.get("source_module"), harnesses)
+                if not gates:
+                    legacy = _wake_gate_hint()
+                    if legacy:
+                        gates = [("", legacy[0], legacy[1])]
+                if gates:
                     # Report the number the gate ACTUALLY compared. It judges
                     # min(bid, modulated) whenever the floor self-calibrates —
                     # the only case this hint reports — so naming a single
@@ -274,9 +588,12 @@ def build_briefing(
                     # that wording described a wake as gate-approved on 0.67
                     # while the mind had damped the same signal to 0.25.
                     judged = min(raw, salience)
-                    note += (f" (bar {gate_floor:.3f} fitted on the {basis} series; "
-                             f"judged on min(bid, modulated) = {judged:.2f})")
-                lines.append(note + ".")
+                    parts = [(f"{_untrusted(name, 40)}: " if name else "")
+                             + f"bar {gate_floor:.3f} fitted on the {basis} series"
+                             for name, gate_floor, basis in gates[:3]]
+                    note += ("; ".join(f" ({p}" if i == 0 else p for i, p in enumerate(parts))
+                             + f"; judged on min(bid, modulated) = {judged:.2f})")
+                winner_lines.append(note + ".")
             # For an external signal the URL *is* the payload — the content
             # line is only a headline ("HN [202pts]: On AI regulation and
             # messaging"). Dropping it forced the 2026-08-17 17:45 wake to
@@ -285,7 +602,7 @@ def build_briefing(
             # section, so it's capped per-line here.
             top_url = (winner.get("context") or {}).get("top_url")
             if top_url:
-                lines.append(f"  Link: {str(top_url)[:300]}")
+                winner_lines.append(f"  Link: {_untrusted(top_url, 300)}")
             # A winning bid can batch several triggers; the content line above
             # carries only the module's summary of the first/hottest one.
             # Enumerate every trigger so nothing that won attention is lost
@@ -294,15 +611,18 @@ def build_briefing(
             # This section is exempt from the size-cap trimming below, so cap
             # per-line and per-list here instead of trusting the global cap.
             triggers = (winner.get("context") or {}).get("triggers") or []
-            if len(triggers) > 1 or (
-                triggers and str(triggers[0].get("detail", ""))[:300] not in content
-            ):
-                lines.append("  Triggers in this bid:")
+            first_detail = (_untrusted(triggers[0].get("detail", ""), 300)
+                            if triggers and isinstance(triggers[0], dict) else "")
+            if len(triggers) > 1 or (triggers and first_detail not in content):
+                winner_lines.append("  Triggers in this bid:")
                 for trig in triggers[:20]:
-                    detail = str(trig.get("detail", "") or trig)[:300]
-                    lines.append(f"  - {detail}")
+                    winner_lines.append(f"  - {_trigger_line(trig)}")
                 if len(triggers) > 20:
-                    lines.append(f"  - (+{len(triggers) - 20} more, see journal)")
+                    winner_lines.append(f"  - (+{len(triggers) - 20} more, see journal)")
+            # This section is exempt from the group-cap shrink below, so it
+            # gets its own share of the cap: the first line (the winner) and
+            # the earned-note always stay; trigger lines drop from the end.
+            lines.extend(_fit_lines(winner_lines, int(max_chars * _WINNER_SHARE), keep_head=2))
         else:
             lines.append("- (no winner supplied — scheduled/manual wake)")
 
@@ -315,19 +635,20 @@ def build_briefing(
         if other_criticals:
             lines.append("")
             lines.append("## Other active alarms (did not win this cycle)")
+            digest: List[str] = []
             shown = 0
             for bid in other_criticals[:6]:
-                mod = bid.get("source_module", "?")
+                mod = _untrusted(bid.get("source_module", "?"), 40)
                 for trig in ((bid.get("context") or {}).get("triggers") or [])[:5]:
-                    detail = str(trig.get("detail", "") or trig)[:300]
-                    lines.append(f"- [{mod}] {detail}")
+                    digest.append(f"- [{mod}] {_trigger_line(trig)}")
                     shown += 1
             total = sum(
                 len((b.get("context") or {}).get("triggers") or [])
                 for b in other_criticals
             )
             if total > shown:
-                lines.append(f"- (+{total - shown} more, see journal)")
+                digest.append(f"- (+{total - shown} more, see journal)")
+            lines.extend(_fit_lines(digest, int(max_chars * _DIGEST_SHARE)))
 
         lines.append("")
         lines.append("## Since last wake")
@@ -341,8 +662,8 @@ def build_briefing(
             lines.append("### Winners")
             for e in winners[-group_cap:]:
                 w = e.get("winner") or {}
-                lines.append(f"- [{e.get('ts', '?')}] {w.get('source_module', '?')}: "
-                             f"{str(w.get('content', ''))[:120]}")
+                lines.append(f"- [{e.get('ts', '?')}] {_untrusted(w.get('source_module', '?'), 40)}: "
+                             f"{_untrusted(w.get('content', ''), 120)}")
 
         if group_cap > 0 and actions:
             lines.append("")
@@ -350,33 +671,33 @@ def build_briefing(
             for e in actions[-group_cap:]:
                 status = "ok" if e.get("ok") else "FAILED"
                 dry = " (dry-run)" if e.get("dry_run") else ""
-                lines.append(f"- [{e.get('ts', '?')}] {e.get('harness', '?')}: {status}{dry}")
+                lines.append(f"- [{e.get('ts', '?')}] {_untrusted(e.get('harness', '?'), 40)}: {status}{dry}")
 
         if group_cap > 0 and alarms:
             lines.append("")
             lines.append("### Alarms")
             for e in alarms[-group_cap:]:
-                lines.append(f"- [{e.get('ts', '?')}] {e.get('detail', e.get('reason', '?'))}")
+                lines.append(f"- [{e.get('ts', '?')}] {_untrusted(e.get('detail', e.get('reason', '?')), 200)}")
 
         if group_cap > 0 and deferred:
             lines.append("")
             lines.append("### Deferred during quiet hours")
             for e in deferred[-group_cap:]:
                 w = e.get("winner") or {}
-                lines.append(f"- [{e.get('ts', '?')}] {e.get('harness', '?')} <- "
-                             f"{w.get('source_module', '?')}: {str(w.get('content', ''))[:100]}")
+                lines.append(f"- [{e.get('ts', '?')}] {_untrusted(e.get('harness', '?'), 40)} <- "
+                             f"{_untrusted(w.get('source_module', '?'), 40)}: {_untrusted(w.get('content', ''), 100)}")
 
         lines.append("")
         lines.append("## Unresolved handoffs")
         if group_cap > 0 and unresolved:
             for e in unresolved[-group_cap:]:
-                lines.append(f"- [{e.get('ts', '?')}] {e.get('id', '?')}: {e.get('detail', '')}")
+                lines.append(f"- [{e.get('ts', '?')}] {_untrusted(e.get('id', '?'), 60)}: "
+                             f"{_untrusted(e.get('detail', ''), 200)}")
         else:
             lines.append("- none" if not unresolved else f"- {len(unresolved)} pending (trimmed — see journal)")
 
         return "\n".join(lines)
 
-    max_chars = _max_briefing_chars()
     cap = _GROUP_DISPLAY_CAP
     text = _render(cap)
     while len(text) > max_chars and cap > 0:
@@ -392,4 +713,5 @@ def build_briefing(
     return text
 
 
-__all__ = ["append_event", "read_events", "build_briefing", "now_iso", "JOURNAL_FILE"]
+__all__ = ["append_event", "read_events", "build_briefing", "now_iso", "JOURNAL_FILE",
+           "archive_files", "archive_file", "previous_segment", "lock_file"]

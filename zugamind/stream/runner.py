@@ -484,7 +484,8 @@ class StreamRunner:
                 and self.workspace._is_critical(b)
             ]
             briefing = journal.build_briefing(
-                since_iso, winner=winner_dict, other_criticals=other_criticals
+                since_iso, winner=winner_dict, other_criticals=other_criticals,
+                harnesses=[hc.get("name", "") for hc in enabled_configs],
             )
 
             intent = {
