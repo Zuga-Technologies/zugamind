@@ -84,18 +84,28 @@ def _data_dir() -> Path:
                 or Path(__file__).resolve().parent.parent / "data")
 
 
-def _ledger_path() -> Path:
-    """The live ledger path. Honours a _LEDGER_PATH monkeypatch when a test
-    has set one, so the existing test seam keeps working."""
-    patched = globals().get("_LEDGER_PATH")
-    if patched is not None and patched != _DEFAULT_LEDGER_PATH:
-        return patched
+def _default_ledger_path() -> Path:
     return _data_dir() / "scanner_cache" / "_source_ledger.json"
 
 
+def _ledger_path() -> Path:
+    """The live ledger path. Honours a _LEDGER_PATH monkeypatch when a test
+    has set one, so the existing test seam keeps working.
+
+    The default is COMPUTED, not stored: a stored one is a module attribute
+    holding a path into the live data dir, which is exactly the shape
+    tests/foundation/test_no_live_data_writes.py exists to forbid -- and a
+    constant that only ever gets compared against is not worth an exception
+    to that rule.
+    """
+    patched = globals().get("_LEDGER_PATH")
+    if patched is not None and patched != _default_ledger_path():
+        return patched
+    return _default_ledger_path()
+
+
 _DATA_DIR = _data_dir()
-_DEFAULT_LEDGER_PATH = _DATA_DIR / "scanner_cache" / "_source_ledger.json"
-_LEDGER_PATH = _DEFAULT_LEDGER_PATH
+_LEDGER_PATH = _default_ledger_path()
 
 
 def _flag_enabled() -> bool:

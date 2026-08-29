@@ -324,7 +324,7 @@ def test_the_ledger_path_honours_a_data_dir_set_after_import(monkeypatch, tmp_pa
     dir still wrote the LIVE deployment's ledger -- while every other scanner
     in the package resolved its path per call and was correctly isolated."""
     monkeypatch.setenv("ZUGAMIND_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(scheduler, "_LEDGER_PATH", scheduler._DEFAULT_LEDGER_PATH)
+    monkeypatch.setattr(scheduler, "_LEDGER_PATH", scheduler._default_ledger_path())
     assert str(tmp_path) in str(scheduler._ledger_path())
 
 

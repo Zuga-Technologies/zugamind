@@ -92,6 +92,13 @@ def _isolate_live_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(_config, "EVENT_LOG", engine_dir / "events.jsonl")
     monkeypatch.setattr(_config, "TRIGGERS_FILE", engine_dir / "triggers.json")
     monkeypatch.setattr(_config, "SEEN_TRIGGERS_FILE", engine_dir / "seen_triggers.json")
+    # STOP_FILE was the one config path this fixture did not redirect, and
+    # it is the one with a live consumer: stream/runner.py polls it every
+    # second and shuts the daemon down when it appears. The daemon runs on
+    # this box. A test that wrote a stop request without patching it first
+    # would have stopped the real one. The tests that touch it today bring
+    # their own fixture; this is so the next one does not have to know.
+    monkeypatch.setattr(_config, "STOP_FILE", engine_dir / "stop.request")
 
     # Modules that import one of the above BY VALUE (`from foundation.config
     # import BUDGET_FILE`) hold their own separate name binding — patching
@@ -111,6 +118,16 @@ def _isolate_live_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(_workspace_modules.PriorityGoalsModule, "STATE_FILE",
                         engine_dir / "priority_goals_state.json")
     monkeypatch.setattr(_command_actuator, "DEFAULT_HARNESS_CONFIG", data_dir / "harness.json")
+    # The PACKAGE re-exports these, so `from act import DEFAULT_HARNESS_CONFIG`
+    # and `from continuity import JOURNAL_FILE` each bind a SECOND copy that
+    # patching the submodule attribute above never reaches. Same by-value
+    # trap, one level up.
+    import act as _act_pkg
+    import continuity as _continuity_pkg
+    if hasattr(_act_pkg, "DEFAULT_HARNESS_CONFIG"):
+        monkeypatch.setattr(_act_pkg, "DEFAULT_HARNESS_CONFIG", data_dir / "harness.json")
+    if hasattr(_continuity_pkg, "JOURNAL_FILE"):
+        monkeypatch.setattr(_continuity_pkg, "JOURNAL_FILE", engine_dir / "journal.jsonl")
     # command_actuator does `from foundation.config import DATA_DIR`, a BY-VALUE
     # import, so patching _config.DATA_DIR above never reached it and
     # _briefing_dir() kept resolving to the LIVE deployment's
