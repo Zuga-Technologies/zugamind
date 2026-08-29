@@ -322,9 +322,41 @@ def _briefing_dir() -> Optional[str]:
     root = os.environ.get("ZUGAMIND_BRIEFING_DIR") or str(DATA_DIR / "briefings")
     try:
         os.makedirs(root, exist_ok=True)
-        return root
     except OSError:
         return None
+    _sweep_stale_briefings(root)
+    return root
+
+
+# A briefing is unlinked in invoke_harness's `finally`, which covers every
+# ordinary path -- but not a process that is KILLED between creating the file
+# and reaching it, which is precisely when one is left behind (and, before
+# 2026-08-29, `zugamind stop` on Windows was always a hard kill). Nothing ever
+# swept the leftovers: 77 had accumulated. They are not harmless, either --
+# the unlink's own comment says a briefing can carry workspace content.
+_BRIEFING_MAX_AGE_SEC = float(os.environ.get("ZUGAMIND_BRIEFING_MAX_AGE_SEC", "7200"))
+
+
+def _sweep_stale_briefings(root: str) -> None:
+    """Delete briefings older than the max age. Best-effort, never raises.
+
+    The age bound is what makes this safe: a briefing belonging to a harness
+    that is still running is minutes old, not hours, so an in-flight wake is
+    never swept out from under itself.
+    """
+    try:
+        cutoff = time.time() - _BRIEFING_MAX_AGE_SEC
+        for name in os.listdir(root):
+            if not name.startswith("zugamind_briefing_"):
+                continue
+            path = os.path.join(root, name)
+            try:
+                if os.path.getmtime(path) < cutoff:
+                    os.unlink(path)
+            except OSError:
+                continue  # in use, or gone already — either way, not ours to force
+    except OSError as e:
+        logger.debug("briefing sweep skipped: %s", e)
 
 
 def _kill_tree(proc: "subprocess.Popen") -> None:

@@ -69,6 +69,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -89,8 +90,35 @@ def _read_stdin_json() -> dict[str, Any]:
         return {}
 
 
+# One cursor file per Claude Code session id, and a session id is never
+# reused -- so this directory grew by one file per session, forever, with
+# nothing ever removing them (203 files by 2026-08-29). Each is ~19 bytes, so
+# the cost is inodes and clutter rather than disk, but "grows without bound"
+# is still the property you do not want in a data dir nobody looks at.
+# A cursor is a read offset into the journal: losing a dead session's cursor
+# costs nothing, because that session will never read again.
+_CURSOR_MAX_AGE_SEC = float(os.environ.get("ZUGAMIND_CURSOR_MAX_AGE_SEC", str(14 * 86400)))
+
+
+def _prune_cursors() -> None:
+    """Drop cursors untouched for longer than the max age. Never raises."""
+    try:
+        cutoff = time.time() - _CURSOR_MAX_AGE_SEC
+        for entry in _CURSOR_DIR.iterdir():
+            if entry.suffix != ".json":
+                continue
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    entry.unlink()
+            except OSError:
+                continue
+    except OSError:
+        pass  # directory missing or unreadable — nothing to prune
+
+
 def _cursor_file(session_id: str) -> Path:
     safe_id = "".join(c for c in session_id if c.isalnum() or c in "-_") or "_default"
+    _prune_cursors()
     return _CURSOR_DIR / f"{safe_id}.json"
 
 

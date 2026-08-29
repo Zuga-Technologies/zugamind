@@ -111,6 +111,15 @@ def _isolate_live_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(_workspace_modules.PriorityGoalsModule, "STATE_FILE",
                         engine_dir / "priority_goals_state.json")
     monkeypatch.setattr(_command_actuator, "DEFAULT_HARNESS_CONFIG", data_dir / "harness.json")
+    # command_actuator does `from foundation.config import DATA_DIR`, a BY-VALUE
+    # import, so patching _config.DATA_DIR above never reached it and
+    # _briefing_dir() kept resolving to the LIVE deployment's
+    # data/briefings. Proved 2026-08-29: one full-suite run left exactly one
+    # new file there, from test_briefing_cleanup_failure_is_logged_not_swallowed
+    # -- a test that DELIBERATELY fails the unlink. 77 had piled up. The env
+    # var is belt-and-braces: _briefing_dir() checks it before DATA_DIR.
+    monkeypatch.setattr(_command_actuator, "DATA_DIR", data_dir)
+    monkeypatch.setenv("ZUGAMIND_BRIEFING_DIR", str(data_dir / "briefings"))
     monkeypatch.setattr(_floor_calibration, "STATE_FILE", data_dir / "floor_calibration.json")
     monkeypatch.setattr(_scheduler, "_LEDGER_PATH", cache_dir / "_source_ledger.json")
     monkeypatch.setattr(_ai_labs, "_CACHE_DIR", cache_dir)
