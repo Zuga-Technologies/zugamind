@@ -1,8 +1,22 @@
 """ZugaMind identity loader — Facet abstraction.
 
 Layers core identity (shipped in this package, `foundation/persona/`) with an
-optional local override file an integrator maintains at runtime. Read-only by
-design — never writes any file.
+optional local override file kept at runtime under DATA_DIR/overrides/.
+Read-only by design — never writes any file. cognition/self_mod.py is the
+ONE writer, and it borrows override_path() from here so there is exactly
+one rule for where a facet's override lives.
+
+The override path is resolved at CALL time, not import time (2026-08-29).
+Tests redirect foundation.config.DATA_DIR per test; an import-time constant
+here quietly kept the loader pointed at the live deployment's files while
+the writer, resolving live, wrote somewhere else — the agent would have been
+editing a file nothing reads.
+
+Who reads this: gates/action_gate.py heads every local-tier system prompt
+with get_system_prompt(SENTINEL) and every paid-tier one with
+get_system_prompt(DELIBERATIVE), when ZUGAMIND_IDENTITY_PROMPT_ENABLED is
+on. From v0.1.0 until 2026-08-29 nothing called it: the persona shipped and
+no prompt ever carried it.
 
 Stdlib only, matching the rest of ZugaMind.
 """
@@ -11,9 +25,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from foundation.config import DATA_DIR
+__all__ = ["Facet", "SENTINEL", "DELIBERATIVE", "get_system_prompt",
+           "override_path", "overrides_dir", "PERSONA_DIR"]
 
-__all__ = ["Facet", "SENTINEL", "DELIBERATIVE", "get_system_prompt"]
+PERSONA_DIR = Path(__file__).resolve().parent / "persona"
+
+
+def overrides_dir() -> Path:
+    """DATA_DIR/overrides, read from foundation.config at CALL time."""
+    from foundation.config import DATA_DIR  # noqa: WPS433 — call time, see module docstring
+    return Path(DATA_DIR) / "overrides"
+
+
+def override_path(facet_name: str) -> Path:
+    """Where `facet_name`'s runtime override lives: DATA_DIR/overrides/<name>.md."""
+    return overrides_dir() / f"{facet_name}.md"
 
 
 @dataclass(frozen=True)
@@ -21,18 +47,17 @@ class Facet:
     """A self-aware role of the agent's identity.
 
     core_paths: shipped identity files (immutable, part of this package)
-    vault_override_path: an optional local file an integrator curates at
-        runtime (may not exist — that's fine, it's simply skipped)
     role_summary: one-line self-description for diagnostics
+    vault_override_path: the optional local override, resolved live (may
+        not exist — that's fine, it's simply skipped)
     """
     name: str
     core_paths: tuple[Path, ...]
-    vault_override_path: Path
     role_summary: str
 
-
-PERSONA_DIR = Path(__file__).resolve().parent / "persona"
-OVERRIDES_DIR = DATA_DIR / "overrides"
+    @property
+    def vault_override_path(self) -> Path:
+        return override_path(self.name)
 
 
 SENTINEL = Facet(
@@ -40,7 +65,6 @@ SENTINEL = Facet(
     core_paths=(
         PERSONA_DIR / "identity_anchors.md",
     ),
-    vault_override_path=OVERRIDES_DIR / "sentinel.md",
     role_summary="the agent's always-on reflex — local model, fast, watchful",
 )
 
@@ -52,7 +76,6 @@ DELIBERATIVE = Facet(
         PERSONA_DIR / "bootstrap.md",
         PERSONA_DIR / "charter.md",
     ),
-    vault_override_path=OVERRIDES_DIR / "deliberative.md",
     role_summary="the agent's deliberative self — Claude-tier, considers and decides",
 )
 

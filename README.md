@@ -380,11 +380,16 @@ for that instead of assuming it away:
     is the journal only — no channel exists in this core.
   - `gates/self_mod_cooldown.py` — **wired, ships dark**: a restart-durable,
     disk-backed per-file cooldown consulted before every proposal to
-    rewrite a facet's runtime override (`data/overrides/<facet>.md`,
-    `zugamind self-mod`). The proposal is recorded and cools the file
-    either way; it is applied only under `ZUGAMIND_SELF_MOD_ENABLED=true`.
-    The audit log keeps the previous text; deleting the override file is a
-    full revert to the shipped persona.
+    rewrite a facet's runtime override (`data/overrides/<facet>.md`).
+    Proposals come from `zugamind self-mod` (a human) or, under
+    `ZUGAMIND_SELF_MOD_PROPOSER_ENABLED=true`, from the idle-cycle
+    reflection engine: a grounded reflection about the agent itself may
+    yield one standing line for the sentinel's override. The proposal is
+    recorded and cools the file either way; it is applied only under
+    `ZUGAMIND_SELF_MOD_ENABLED=true`. The override reaches the prompt only
+    under `ZUGAMIND_IDENTITY_PROMPT_ENABLED=true` (which heads every system
+    prompt with the facet's shipped persona + override). The audit log
+    keeps the previous text; deleting the override file is a full revert.
   - `gates/integrity.py` — **wired**: a pure-stdlib Augmented
     Dickey-Fuller stationarity test that classifies the floor calibrator's
     drift series as STABLE / DRIFTING / CRITICAL on the idle-cycle cadence

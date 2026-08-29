@@ -144,6 +144,24 @@ def test_an_unanswered_reflection_never_becomes_a_shared_thought(monkeypatch):
     assert suppressed[0]["reason"] == "low_confidence:0.20"
 
 
+def test_an_answered_self_reflection_reaches_the_proposer(monkeypatch):
+    """The reflection -> proposer hop: a SELF-domain pair a source answered
+    ends up as a recorded proposal on the sentinel override (apply flag off,
+    so recorded not applied)."""
+    import cognition.proposer as proposer
+    monkeypatch.setenv("ZUGAMIND_SELF_MOD_PROPOSER_ENABLED", "true")
+    monkeypatch.setattr(proposer, "ollama_query",
+                        lambda *a, **kw: "Probe a port only when something depends on it.")
+
+    with patch.object(engine, "classify_domain", lambda *a, **kw: {"domain": "SELF"}):
+        _reflect_with({"source": "code_search", "content": "runner.py:301 probes it",
+                       "success": True, "latency_ms": 5},
+                      question="why do I re-check the api port every cycle?")
+
+    proposed = _events("cognition_mod_proposed")
+    assert len(proposed) == 1 and proposed[0]["facet"] == "sentinel"
+
+
 def test_an_answered_reflection_reaches_the_journal_as_a_shared_question(monkeypatch):
     monkeypatch.setenv("ZUGAMIND_THOUGHTS_ENABLED", "true")
 

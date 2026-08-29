@@ -34,6 +34,7 @@ from continuity import journal
 from gates.integrity import MIN_INTEGRITY_SAMPLES, compute_consciousness_integrity
 from gates.operational_truth import format_block, is_stale_operational
 
+from ..proposer import propose_from_reflection
 from ..thoughts import consider_thought
 from .answer_router import answer_question
 from .domain_classifier import classify_domain
@@ -163,6 +164,9 @@ def reflect_once() -> Optional[dict]:
         }
         journal.append_event("reflection", result)
         consider_thought(_as_thought(result))
+        # A grounded reflection about the SELF may carry a standing lesson;
+        # the proposer decides, self_mod records (and, if enabled, applies).
+        propose_from_reflection(result)
         return result
     except Exception as exc:  # noqa: BLE001 — idle-cycle work is never load-bearing
         logger.debug("reflection failed: %s", exc)

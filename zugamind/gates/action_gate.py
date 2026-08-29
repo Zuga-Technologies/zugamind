@@ -226,6 +226,36 @@ def _resolve_claude_caller():
     return query_claude_api
 
 
+def _identity_enabled() -> bool:
+    return os.environ.get(
+        "ZUGAMIND_IDENTITY_PROMPT_ENABLED", "false",
+    ).strip().lower() not in ("0", "false", "no", "off", "")
+
+
+def _with_identity(system: str, tier: str) -> str:
+    """Head the system prompt with the facet's identity: SENTINEL on the
+    local tier, DELIBERATIVE on the paid ones (foundation/identity.py).
+
+    That loader had no caller from v0.1.0 until 2026-08-29 -- the persona
+    shipped, and no prompt ever carried it. Ships DARK behind
+    ZUGAMIND_IDENTITY_PROMPT_ENABLED because it changes every live prompt;
+    off, `system` comes back byte-identical. Fail-open: an unreadable
+    persona must never be the reason a call does not happen.
+    """
+    if not _identity_enabled():
+        return system
+    try:
+        import foundation.identity as identity  # noqa: WPS433 — lazy, keeps this file's import graph small
+        facet = identity.SENTINEL if tier == "local" else identity.DELIBERATIVE
+        head = identity.get_system_prompt(facet)
+    except Exception as exc:  # noqa: BLE001 — fail-open
+        logger.warning("action_gate: identity unavailable, prompt sent without it: %s", exc)
+        return system
+    if not head:
+        return system
+    return f"{head}\n\n{system}" if system else head
+
+
 def _resolve_ollama_caller():
     from cognition.models.ollama import ollama_query  # noqa: WPS433
     return ollama_query
@@ -635,7 +665,7 @@ def escalate_for_action(intent: ActionIntent, *, dry_run: bool = False) -> dict:
                 max_tokens, _MAX_TOKENS_CEILING, caller,
             )
             max_tokens = _MAX_TOKENS_CEILING
-        system = str(intent_d.get("system", ""))
+        system = _with_identity(str(intent_d.get("system", "")), tier)
         if tier == "local":
             ollama_query = _resolve_ollama_caller()
             response_text = ollama_query(prompt, max_tokens=max_tokens, system=system)

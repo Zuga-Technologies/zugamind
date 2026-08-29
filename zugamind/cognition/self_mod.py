@@ -45,6 +45,7 @@ from typing import Any, Optional
 
 from continuity import journal
 from foundation.fs import atomic_write_text
+from foundation.identity import override_path  # the loader owns the path rule; re-exported
 from gates.self_mod_cooldown import SelfModCooldown
 
 logger = logging.getLogger("zugamind.self_mod")
@@ -66,11 +67,6 @@ def _data_dir() -> Path:
     # dogfood deployment (the conftest fixture's own war story).
     from foundation.config import DATA_DIR
     return Path(DATA_DIR)
-
-
-def override_path(facet: str) -> Path:
-    """The file identity.py reads for this facet's runtime override."""
-    return _data_dir() / "overrides" / f"{facet}.md"
 
 
 def audit_path() -> Path:

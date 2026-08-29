@@ -10,7 +10,12 @@ protection (that was the state of the last three until 2026-08-29).
 
   WIRED   action_gate    the fail-closed, budget-clamped, human-vetoable
                          chokepoint every paid model call passes through
-                         (stream.runner, act.command_actuator, demo)
+                         (stream.runner, act.command_actuator, demo).
+                         Heads every system prompt with the facet's
+                         identity (foundation.identity: SENTINEL on local,
+                         DELIBERATIVE on paid) under
+                         ZUGAMIND_IDENTITY_PROMPT_ENABLED -- dark, since it
+                         changes every live prompt
   WIRED   work_claim     confabulation check — verb/commit matching AND
                          entity grounding. Advisory (journal-only) on every
                          harness reply from stream.runner; BLOCKING on the
@@ -43,11 +48,19 @@ protection (that was the state of the last three until 2026-08-29).
                          proposal is recorded and cools the file either way,
                          and is APPLIED only under ZUGAMIND_SELF_MOD_ENABLED
                          (decision 2, 2026-08-29: real, not proposal-only)
-                         (cognition.self_mod.propose <- `zugamind self-mod`)
+                         (cognition.self_mod.propose <- `zugamind self-mod`,
+                         and <- cognition.proposer, which turns a grounded
+                         SELF reflection into one standing line under
+                         ZUGAMIND_SELF_MOD_PROPOSER_ENABLED)
 
-What is still missing, so nobody reads the three new rows as more than
-they are: no code in the loop composes an override for self_mod (the CLI
-is its only caller), and foundation.identity.get_system_prompt — the
-reader of the file self_mod writes — has no caller in this repo yet. Both
-are sockets of their own, not calls to add.
+The self-modification lane end to end, and the flag that arms each hop
+(all default off; the guard runs and journals regardless):
+  reflection (SELF, answered) -> proposer  ZUGAMIND_SELF_MOD_PROPOSER_ENABLED
+  proposer -> self_mod.propose (cooldown, audit) -> override APPLIED
+                                            ZUGAMIND_SELF_MOD_ENABLED
+  override -> identity.get_system_prompt -> action_gate system prompt
+                                            ZUGAMIND_IDENTITY_PROMPT_ENABLED
+With all three off the agent proposes nothing, writes nothing, and its
+prompts carry no persona -- exactly the v0.1.0 behaviour. Each flag is
+independently verifiable from the journal before the next is turned on.
 """

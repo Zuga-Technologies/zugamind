@@ -67,21 +67,16 @@ def test_an_applied_mod_rewrites_the_override_the_identity_loader_reads(enabled,
     self_mod.propose("sentinel", "Watch the disk first.", why="alarms clustered",
                      evidence="alarm x3", cooldown=SelfModCooldown(db_path=tmp_path / "c.db"))
 
-    path = self_mod.override_path("sentinel")
-    facet = identity.Facet(name="sentinel", core_paths=identity.SENTINEL.core_paths,
-                           vault_override_path=path, role_summary="")
-    assert identity.get_system_prompt(facet).endswith("Watch the disk first.")
+    assert identity.get_system_prompt(identity.SENTINEL).endswith("Watch the disk first.")
     applied = _events("cognition_mod_applied")
     assert len(applied) == 1 and applied[0]["facet"] == "sentinel"
 
 
-def test_the_mod_targets_exactly_the_file_the_identity_loader_reads(monkeypatch):
-    """identity.py resolved its paths at import, against the real DATA_DIR;
-    self_mod resolves at call time (so tests stay isolated). Point them at
-    the same DATA_DIR and they must agree on the file -- otherwise the
-    agent would be editing a file nothing reads."""
-    monkeypatch.setattr(config, "DATA_DIR", identity.OVERRIDES_DIR.parent)
-    assert self_mod.override_path("deliberative") == identity.DELIBERATIVE.vault_override_path
+def test_the_mod_targets_exactly_the_file_the_identity_loader_reads():
+    """One rule for the path, owned by the loader; the writer borrows it.
+    Two copies of the rule is how an agent ends up editing a file nothing
+    reads."""
+    assert self_mod.override_path is identity.override_path
     assert self_mod.override_path("sentinel") == identity.SENTINEL.vault_override_path
 
 
