@@ -496,6 +496,45 @@ def test_an_eval_governance_pilot_with_institutes_is_public_affairs():
     ) == ai_labs._RELEVANCE_DEFAULT
 
 
+def test_a_vendor_contract_decision_is_public_affairs():
+    """Point 9 in the module docstring, the 2026-08-29 02:12Z wake. [openai]
+    "Our decision on Cursor following its acquisition by SpaceX" is one
+    vendor's commercial decision about one customer — the same "org
+    partnerships" class the list has named since 2026-08-19, arriving
+    through M&A and a contract ending rather than a partnership starting.
+    Nothing a builder can build, buy or call changes."""
+    title = "Our decision on Cursor following its acquisition by SpaceX"
+    summary = ("Our decision to wind down our contract providing OpenAI "
+               "models to Cursor following its acquisition by SpaceX.")
+    relevance = ai_labs._relevance_for(title, summary, "openai")
+    assert relevance == ai_labs._RELEVANCE_NON_WORK
+    assert _salience(relevance, 0.25) < 0.600
+    # the headline alone is enough — the openai RSS summary is not guaranteed
+    assert ai_labs._relevance_for(title) == ai_labs._RELEVANCE_NON_WORK
+    # siblings of the class, phrased through the other verbs
+    for sibling in (
+        "Anthropic acquired by qwertyuiop",
+        "Terminating our agreement with Qwertyuiop",
+        "We have signed a commercial agreement with Qwertyuiop",
+        "Google and Qwertyuiop announce a merger",
+    ):
+        assert ai_labs._relevance_for(sibling) == ai_labs._RELEVANCE_NON_WORK, sibling
+
+
+@pytest.mark.parametrize("title,summary", [
+    # NON-WORK is checked FIRST and wins over HIGH, so a demotion pattern that
+    # matched any of these would make the scanner deaf to real builder news.
+    ("Winding down GPT-4.5 in the API", "The model is deprecated."),
+    ("Deprecating o3: sunsetting the model on August 26", ""),
+    ("Testing our API contract with schema validation", ""),
+    ("Data acquisition for long-horizon agent training", ""),
+    ("Merging expert models without retraining", ""),
+    ("Extending the context window to 1M tokens", ""),
+])
+def test_the_commercial_grammar_does_not_demote_shipping_news(title, summary):
+    assert ai_labs._relevance_for(title, summary) != ai_labs._RELEVANCE_NON_WORK
+
+
 # --------------------------------------------------------------------------
 # date extraction
 # --------------------------------------------------------------------------

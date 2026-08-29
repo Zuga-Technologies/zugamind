@@ -160,6 +160,31 @@ eight separate times over twelve days and bought a harness wake:
    institutional class directly, for the sibling posts that will phrase
    the same news as a partnership.
 
+9. A LAB'S COMMERCIAL DECISION ABOUT ANOTHER COMPANY IS PUBLIC AFFAIRS TOO.
+   [openai] "Our decision on Cursor following its acquisition by SpaceX" —
+   summary "Our decision to wind down our contract providing OpenAI models
+   to Cursor following its acquisition by SpaceX" — bought a wake on DEFAULT
+   at 0.600 (modulated to 0.66) on 2026-08-29 02:12Z. The docstring's
+   tier-one list has NAMED "org partnerships" since 2026-08-19 and the regex
+   has matched `partnership` / `partnering with` ever since, but this is the
+   same class arriving through its other door — M&A and the ENDING of a
+   commercial relationship rather than the announcing of one — and none of
+   that vocabulary was present. A single vendor's decision about a single
+   customer changes nothing a builder can build: the models, the API, and
+   the price are all where they were.
+
+   The trap here is that the obvious word is the one you must NOT take.
+   "Wind down" is exactly how a real model sunset is phrased, and NON-WORK
+   is checked FIRST and wins over HIGH — so demoting the bare phrase would
+   make the scanner deaf to deprecations, which are HIGH by definition.
+   Same for bare "contract" (API contract, data contract) and bare
+   "acquisition" (data acquisition). So the match is a VERB+OBJECT grammar
+   — winding down / terminating / renewing / signing a contract, agreement
+   or deal — which only the commercial sense produces, plus "acquisition
+   by" / "acquired by" / "merger" for the M&A half and "our decision on"
+   for the corporate-statement headline grammar (the sibling of the
+   "statement on" / "letter to" already in the list).
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -345,7 +370,17 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     r"|\bpartnering\s+with\b|\bpartnership\b|\bletter\s+to\b|\bstatement\s+on\b"
     r"|\b(?:joins|joining)\s+(?:the\s+)?[\w-]+\s+"
     r"(?:project|initiative|coalition|alliance|consortium|council|pledge)\b"
-    r"|\bindividual\s+freedom\b|\bdouble-blind\b|\bsafety\s+institutes?\b",
+    r"|\bindividual\s+freedom\b|\bdouble-blind\b|\bsafety\s+institutes?\b"
+    # M&A and the ending of a commercial relationship — the other door into
+    # the "org partnerships" class this list has named since 2026-08-19.
+    # Added 2026-08-29 for the Cursor/SpaceX contract wind-down; see point 9.
+    # Every piece is a phrase, never the bare noun: "wind down" alone is how
+    # a model sunset is phrased (HIGH), "contract" alone is an API contract,
+    # "acquisition" alone is data acquisition. The verb+object grammar below
+    # is produced only by the commercial sense.
+    r"|\bour\s+decision\s+on\b|\bacquisition\s+by\b|\bacquired\s+by\b|\bmergers?\b"
+    r"|\b(?:wind(?:ing|s)?\s+down|terminat\w+|renew\w+|extend\w+|sign(?:s|ed|ing)?)"
+    r"(?:\s+(?:our|the|its|a))?\s+(?:commercial\s+)?(?:contracts?|agreements?|deals?)\b",
     re.IGNORECASE,
 )
 
