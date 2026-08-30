@@ -304,7 +304,9 @@ def _extract_entities(text: str) -> List[str]:
     sentence-INITIAL position is capitalized by grammar unless it also carries
     name shape. Costs some real sentence-initial names ("Postgres is in the
     stack") -- the right direction to miss in, for a gate whose action is
-    SUPPRESS.
+    SUPPRESS. The exemption holds WITH a dictionary too (2026-08-29): system
+    word lists are headword lists, so an inflected form ("Acted") is missing
+    from them and would otherwise be promoted to a name.
     """
     common = _common_words()
     out, seen = [], set()
@@ -314,8 +316,15 @@ def _extract_entities(text: str) -> List[str]:
             el = e.lower()
             if el in _ENTITY_STOPWORDS or el in common:
                 continue  # ordinary word, not a name
-            # <=2 leaves room for an opening quote or bracket.
-            if not common and m.start() <= 2 and not _has_name_shape(e):
+            # <=2 leaves room for an opening quote or bracket. Unconditional
+            # on purpose: this used to apply only when NO dictionary existed,
+            # and macOS's /usr/share/dict/words is a headword list -- it has
+            # "act" but not "acted" -- so "Acted on: repo." became the entity
+            # "Acted", failed the repo probe, and suppressed every report on
+            # every macOS CI runner (5 red runs, 2026-08-29). A capitalized
+            # sentence-initial word without name shape is grammar on every
+            # platform; the dictionary only ever helped the NON-initial case.
+            if m.start() <= 2 and not _has_name_shape(e):
                 continue
             if el not in seen:
                 seen.add(el)

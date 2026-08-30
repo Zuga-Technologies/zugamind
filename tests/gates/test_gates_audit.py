@@ -301,6 +301,24 @@ def test_a_real_name_is_still_caught_at_sentence_start(monkeypatch):
     assert r["grounded"] is False and "ClickHouse" in r["ungrounded"]
 
 
+def test_sentence_initial_exemption_holds_with_a_headword_dictionary(monkeypatch):
+    """macOS ships /usr/share/dict/words as a HEADWORD list: "act" is in it,
+    "acted" is not. The exemption used to apply only when no dictionary
+    existed, so the CLI report's own second line -- "Acted on: repo." --
+    became the entity "Acted", failed the repo probe, and every macOS CI
+    runner suppressed the report (5 red runs on main, 2026-08-29)."""
+    monkeypatch.setattr(wc, "_common_words",
+                        lambda: frozenset({"act", "on", "repo", "the"}))
+    monkeypatch.setattr(wc, "_entity_in_repo", lambda *_: False)
+    for text in ("Acted on: repo.",
+                 "In the last 60 minutes: 1 cycle, 1 acted." + chr(10) + "Acted on: repo.",
+                 "Currently the parser handles unicode."):
+        assert wc.check_entity_grounding(text)["grounded"] is True, text
+    # A real name at sentence start is still caught -- name shape decides.
+    r = wc.check_entity_grounding("ClickHouse is now in our stack.")
+    assert r["grounded"] is False and "ClickHouse" in r["ungrounded"]
+
+
 def test_entity_negatives_are_not_cached_forever(monkeypatch):
     """A dependency added mid-run must stop being 'ungrounded' without a
     process restart."""
