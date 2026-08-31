@@ -25,8 +25,8 @@ real agent session, whether it is a half-finished feature or a lockfile that
 `npm install` touched. Two conditions therefore drop a report below that
 floor, where it still reaches the stream but is not worth waking for:
 
-  1. nothing a person wrote is dirty — every changed path is a lockfile or a
-     build artifact;
+  1. nothing a person wrote is dirty — every changed path is a lockfile, a
+     build artifact, or render/capture output (see _GENERATED_EXTENSIONS);
   2. nothing moved — the dirty set is identical to the one already reported a
      threshold ago, so the report would repeat something already ignored.
 
@@ -67,6 +67,34 @@ _GENERATED_SUFFIXES = (
 )
 _GENERATED_DIR_PARTS = ("node_modules/", "__pycache__/", "dist/", "build/", ".venv/")
 
+# Render/capture output: rasters, video, audio, and 3D scene binaries. Added
+# 2026-08-31 after a wake fired at FULL strength on "Backrooms has had
+# uncommitted changes for 20.1h" — all 29 dirty paths were .blend scenes and
+# directories of render .png, nothing tracked was modified, and there was no
+# carried work to lose. Lockfiles were covered; the artifact class that
+# actually dominates a game/3D repo was not, so a render session's leftovers
+# bought a real agent session.
+#
+# Deliberately extension-based and format-only. A tool wrote every byte of
+# these; a person edits the SCRIPT that emits them, and that script is a .py
+# which stays authored. Text formats a human really does hand-edit are left
+# out on purpose — .svg, .obj, .mtl, .json, .md — so this suppresses output,
+# not authorship.
+#
+# The failure mode this can cause is the mild one by design: a genuinely
+# hand-made asset sitting uncommitted drops to _WEAK, which still reaches the
+# stream and still shows up in the digest. It just stops buying a session on
+# its own. The reverse error — a half-finished feature staying silent — is
+# impossible here, because one authored path anywhere in the dirty set keeps
+# the whole report _STRONG.
+_GENERATED_EXTENSIONS = (
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tga", ".tif", ".tiff",
+    ".exr", ".hdr", ".psd", ".ico",
+    ".mp4", ".mov", ".webm", ".avi", ".mkv",
+    ".wav", ".mp3", ".ogg", ".flac",
+    ".blend", ".blend1", ".fbx", ".glb", ".gltf", ".usd", ".usdz", ".abc",
+)
+
 # See the module docstring: with WorldSignals' 0.25 + 0.4*rel + 0.2*urg, these
 # two pairs decide whether a signal costs a session or merely joins the stream.
 #   strong -> 0.61   weak -> 0.43
@@ -89,6 +117,12 @@ def _is_generated(path: str) -> bool:
     norm = path.replace("\\", "/")
     if norm.endswith(_GENERATED_SUFFIXES):
         return True
+    # Lowered for the extension test only: git reports the real on-disk case,
+    # and a capture rig that writes HERO.PNG is no more hand-authored than one
+    # writing hero.png. The lockfile names above stay case-sensitive because
+    # those are exact filenames, not a format class.
+    if norm.lower().endswith(_GENERATED_EXTENSIONS):
+        return True
     return any(part in norm for part in _GENERATED_DIR_PARTS)
 
 
@@ -108,7 +142,19 @@ def _survey(repo_path: str) -> dict[str, Any] | None:
     """
     try:
         status = subprocess.run(
-            ["git", "-C", repo_path, "status", "--porcelain", "-z"],
+            # -uall: list untracked FILES, not the collapsed directory entry.
+            # Default porcelain reports a wholly-untracked dir as one record,
+            # `?? evidence/desk_v4/` — a path with no extension, whose contents
+            # this function cannot see and _is_generated can never classify. In
+            # the 2026-08-31 Backrooms wake 11 of the 29 records were exactly
+            # that shape, hiding ~90 render PNGs behind directory names that
+            # read as authored work. Collapsed entries also make `files`
+            # undercount badly (29 records for ~130 real files), and this
+            # function's whole contract is "what is ACTUALLY sitting here, not
+            # merely whether something is". Cost is bounded: -uall still honors
+            # .gitignore (so node_modules and friends stay out) and the 10s
+            # timeout below fails to _SURVEY_ERROR rather than hanging a cycle.
+            ["git", "-C", repo_path, "status", "--porcelain", "-z", "-uall"],
             capture_output=True, text=True, timeout=10, errors="replace",
         )
         if status.returncode != 0:
