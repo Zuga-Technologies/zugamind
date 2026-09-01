@@ -185,6 +185,24 @@ eight separate times over twelve days and bought a harness wake:
    for the corporate-statement headline grammar (the sibling of the
    "statement on" / "letter to" already in the list).
 
+10. ONE FEED PUBLISHES ITS OWN SUBJECT, SO STOP GUESSING IT. [google_res]
+   "Mapping global methane emissions from space with deep learning" won a
+   wake on DEFAULT at 0.600 against a 0.590 floor on 2026-09-01 18:51Z.
+   Same class as points 5 and 7 -- AI applied to another field -- and the
+   third round of it. What is different is that google_res's RSS
+   <description> is not prose at all: it is a label from Google's published
+   research-areas taxonomy ("Climate & Sustainability"). That makes this
+   feed simultaneously the WORST case for the vocabulary rules, since with
+   no prose in the summary every demotion regex has only the title to read,
+   and the ONLY feed that hands the subject over as structured data.
+   Measured on the full live RSS window (100 items, not the 8-item cache):
+   35 sit in off-domain categories and 31 of them score DEFAULT, against
+   the 3 that two rounds of subject-phrase work had caught. Points 5 and 7 each
+   added the field that had just burned us; there are more fields than a
+   word list can hold, and Google has already enumerated them. See
+   _OFF_DOMAIN_CATEGORIES -- including why this is the one demotion asked
+   AFTER the HIGH check when every other one is asked before it.
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -228,6 +246,58 @@ _RELEVANCE_NON_WORK = 0.40  # the lab talking about itself — bids 0.46 fresh, 
 # the module docstring. FIREHOSE and NON_WORK price the same today for
 # different reasons; they are separate constants so either can move alone.
 _FIREHOSE_LABS = frozenset({"hf_papers"})
+
+# NON-WORK, tier four: the feed's OWN category says the post is off-domain.
+# google_res is the one feed here whose RSS summary is not prose but a label
+# from Google's published research-areas taxonomy. Two consequences, pulling
+# opposite ways: with no prose to read, every demotion regex above sees only
+# the title on this feed -- and the subject arrives as structured data, so it
+# does not have to be guessed at all.
+#
+# Measured 2026-09-01 on the full live RSS window (100 items, not the 8-item
+# cache): 35 items sit in the categories below and 31 of them score DEFAULT,
+# each one priced to buy a Claude session on publication. Two prior rounds of
+# adding subject phrases (points 5 and 7, and the 2026-08-29 health/weather
+# extension) catch 3 of the 34 non-launch ones between them. That gap is the
+# case for reading the category: "AI applied to another field" has more fields
+# than a word list can enumerate, and this publisher has already enumerated them.
+#
+# The wake that prompted it: "Mapping global methane emissions from space with
+# deep learning" / "Climate & Sustainability", 18:51Z, DEFAULT at 0.75 -> bid
+# 0.600 against a 0.590 floor. `climate model` and `climate change` are BOTH
+# already in _SCI_DOMAIN_RE, and neither is what that headline says.
+#
+# ASKED AFTER THE HIGH CHECK -- the one demotion here that is, and the reason
+# is not caution, it is a difference in what the evidence proves. A phrase is
+# evidence about what a post DOES; a category is evidence only about which
+# shelf it sits on, and a lab can ship a real tool from any shelf. Measured
+# proof in the same 100 items: "Introducing Groundsource: Turning news reports
+# into data with Gemini" is filed under Climate & Sustainability and is a
+# genuine launch. Checked first, this rule would have silenced it.
+#
+# Left out on purpose: "Education Innovation" (3 items), because one of them
+# is "Testing LLMs on superconductivity research questions" -- an LLM
+# capability eval, which is builder evidence wearing a domain label -- and no
+# wake has come from that category yet. The rest of the taxonomy (Generative
+# AI, Algorithms & Theory, Machine Intelligence, NLP, Data Management, Machine
+# Perception, Security/Privacy, HCI) is 64 of the 100 and stays DEFAULT.
+#
+# Honest cost, so a later reader can weigh reverting: two of the 31 are
+# arguable keeps -- "Science One Framework: A verifiable autonomous research
+# framework" and "Exploring a space-based, scalable AI infrastructure system
+# design". They go quiet. That is the price of not paying for the other 29.
+_TAXONOMY_LABS = frozenset({"google_res"})
+_OFF_DOMAIN_CATEGORIES = frozenset({
+    "climate & sustainability",
+    "earth ai",
+    "health & bioscience",
+    "general science",
+    "quantum",
+    # The lab talking about itself -- tier one by kind, arriving as a category
+    # instead of a phrase.
+    "year in review",
+    "conferences & events",
+})
 # Honors ZUGAMIND_DATA_DIR without importing foundation — scanners stay standalone.
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent.parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
@@ -639,8 +709,10 @@ def _relevance_for(title: str, summary: str = "", lab: str = "") -> float:
     vocabulary that drifts out of date makes the mind no deafer than it
     already is — but only on a feed where "unrecognized" is a near-miss. On a
     firehose it is the base case, and fail-open there means paying for the
-    quota. `lab` defaults to "" (curated) so an unlabelled call keeps the old
-    answer.
+    quota. It is also not a near-miss when the feed's own taxonomy has
+    already filed the post under a field we do not build in -- see
+    _OFF_DOMAIN_CATEGORIES. `lab` defaults to "" (curated) so an unlabelled
+    call keeps the old answer.
     """
     # Order matters and NON-WORK deliberately wins: a promo that names a model
     # is still a promo (the 2026-08-19 Replit wake). What changed on
@@ -652,7 +724,18 @@ def _relevance_for(title: str, summary: str = "", lab: str = "") -> float:
         return _RELEVANCE_HIGH
     if lab in _FIREHOSE_LABS:
         return _RELEVANCE_FIREHOSE
+    # After HIGH, unlike every other NON-WORK rule -- see _OFF_DOMAIN_CATEGORIES
+    # for why a category may not outvote an explicit launch.
+    if lab in _TAXONOMY_LABS and _category_is_off_domain(summary):
+        return _RELEVANCE_NON_WORK
     return _RELEVANCE_DEFAULT
+
+
+def _category_is_off_domain(summary: str) -> bool:
+    """True when a taxonomy feed's category label names a field this mind does
+    not build in. Normalised on whitespace and case because the label is CMS
+    copy, not an identifier -- nothing guarantees it keeps its exact casing."""
+    return " ".join((summary or "").split()).lower() in _OFF_DOMAIN_CATEGORIES
 
 
 def _urgency_for(published: float | None, now: float) -> float:
