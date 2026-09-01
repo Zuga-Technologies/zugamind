@@ -408,9 +408,35 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     # is produced only by the commercial sense.
     r"|\bour\s+decision\s+on\b|\bacquisition\s+by\b|\bacquired\s+by\b|\bmergers?\b"
     r"|\b(?:wind(?:ing|s)?\s+down|terminat\w+|renew\w+|extend\w+|sign(?:s|ed|ing)?)"
-    r"(?:\s+(?:our|the|its|a))?\s+(?:commercial\s+)?(?:contracts?|agreements?|deals?)\b",
+    r"(?:\s+(?:our|the|its|a))?\s+(?:commercial\s+)?(?:contracts?|agreements?|deals?)\b"
+    # A named piece of PENDING legislation. This list knew "legislation",
+    # "lawmaker", "congress" and "ai act" -- and not "bill", the ordinary
+    # English word for the thing. That is how [openai] "OpenAI supports
+    # California's bill to advance youth AI safety" (SB 1119) cleared the
+    # 0.563 floor at DEFAULT 0.600 on 2026-09-01: a lab endorsing a state
+    # bill is public affairs by kind, the exact class this tier exists for,
+    # and every word it used was outside the vocabulary.
+    # Never the bare noun, per the rule the M&A block above states: "bill"
+    # is also the INVOICE sense, and pricing posts are HIGH tier -- a bare
+    # bill-word alone would demote a price change and silence the very
+    # thing this tier was built to let through. Only grammars the invoice
+    # sense does not produce: a chamber-qualified bill, a bill carrying a
+    # legislative verb, and a lab taking a position on someone's bill.
+    r"|\b(?:state|federal|senate|assembly|house|omnibus)\s+bills?\b"
+    r"|\bbills?\s+to\s+(?:advance|require|protect|regulate|ban|restrict"
+    r"|mandate|establish|amend|repeal)\b"
+    r"|\b(?:supports?|backs?|endorses?|opposes?|co-?sponsors?)\s+"
+    r"(?:\w+(?:'s|\u2019s)?\s+){0,3}bills?\b",
     re.IGNORECASE,
 )
+
+# The bill NUMBER, case-SENSITIVELY -- the same discriminator the promo
+# patterns use. "SB 1119" / "AB 1064" / "H.R. 9" are always capitalised
+# chamber prefixes, and that capital is the whole thing separating them
+# from prose: under the IGNORECASE flag of the pattern above, a bare
+# "sb 200" would start matching model-ish tokens. Kept as its own
+# compiled pattern for exactly that reason.
+_BILL_NUMBER_RE = re.compile(r"\b(?:S\.?B\.?|A\.?B\.?|H\.?B\.?|H\.?R\.?)\s?\d{1,4}\b")
 
 # NON-WORK, tier two: promotion — a customer case study is the lab selling its
 # product with a named buyer as the proof. It reads technical (it names models,
@@ -587,6 +613,7 @@ def _is_non_work(text: str, title: str = "") -> bool:
     return bool(
         _is_partner_powered_by(text)
         or _PUBLIC_AFFAIRS_RE.search(text)
+        or _BILL_NUMBER_RE.search(text)
         or _PROMO_HOW_RE.search(text)
         or _PROMO_OUTCOME_RE.search(text)
         or _PROMO_CASE_STUDY_RE.search(text)
