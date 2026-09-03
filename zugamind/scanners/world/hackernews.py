@@ -123,6 +123,124 @@ _BRAND_TERMS = [t.strip() for t in
 _BRAND_RE = (re.compile("|".join(re.escape(t) for t in _BRAND_TERMS), re.IGNORECASE)
              if _BRAND_TERMS else None)
 
+# ---------------------------------------------------------------------------
+# RELEVANCE TIERS. Why a flat number could never work, measured 2026-09-03:
+#
+# Every non-brand story this scanner emitted carried relevance 0.5, flat.
+# WorldSignals prices a bid at 0.25 + 0.4*relevance + 0.2*urgency, and urgency
+# here is floored at 0.3 and capped at 0.65. So EVERY story this scanner has
+# ever emitted bid somewhere in [0.510, 0.580] — a band 0.07 wide, inside
+# which a 740-point front-page story and a 1-point YC job ad are separated by
+# less than 0.01. The flat relevance did not express a judgement; it removed
+# the scanner's ability to make one.
+#
+# A 0.07-wide band does not degrade as the wake floor moves. It SWITCHES.
+# On 2026-09-03T04:52Z the calibrated raw floor drifted 0.5708 -> 0.5073 (and
+# on to 0.5042) as a quiet night aged the loud samples out of the rolling
+# 50-sample window. At 0.5708 essentially nothing here could wake. Three and a
+# half hours later, at 0.5042 — below the bottom of the band — a 6-point blog
+# post woke a paid session, and a sweep of the live cache put 6 of 6
+# keyword-passing stories over the bar. The scanner went from mute to fully
+# open with no usable setting in between, because there was nothing between.
+#
+# The floor is calibrated as the 90th percentile of ambient winners + 0.05, so
+# it is DEFINITIONALLY pulled to just above whatever this scanner emits at
+# volume. That is the calibration working. It cannot work when a scanner's
+# ambient chatter and its real signal are the same number: "above ambient" and
+# "above signal" become one threshold, and no value of that number fixes it —
+# lower it and the floor follows it down. The fix is not a better constant, it
+# is two lanes far enough apart that the margin fits between them.
+#
+# AMBIENT (0.25) is what a broad topical keyword match actually is. _KEEP_RE
+# matches "Python", "model", "agent", "launch", "startup" — on HackerNews that
+# is the base rate of the site, not news. Bids 0.41-0.48.
+# PROMOTED (0.9) is the brand lane and the vendor-ship lane below. Bids
+# 0.67-0.75, clearing every floor this deployment has run (0.5042-0.6407).
+# The gap between the lanes is ~0.19, versus a CALIBRATION_MARGIN of 0.05, so
+# floor drift anywhere in 0.49-0.66 now produces the SAME behaviour instead of
+# flipping it.
+#
+# Honest cost, so a later reader can weigh reverting it: stories that are real
+# industry news but name no vendor we build on go quiet. From the journal's
+# own history that is "Our decision on Cursor following its acquisition by
+# SpaceX" (740pts) and the METR/Redwood HuggingFace postmortem. Widening
+# _VENDOR_RE to catch them is NOT the answer — "cursor" is also an ordinary
+# English word, and that is the exact trap the 09-01 bill-grammar session
+# documented. They are the price of not paying for "I hate AI images and
+# music", "Why open source rocks" and "EVE Online moves to Python 3", all of
+# which this scanner also surfaced.
+_RELEVANCE_AMBIENT = 0.25
+_RELEVANCE_PROMOTED = 0.9
+
+# ---------------------------------------------------------------------------
+# Vendor-ship watch. Why this exists, measured 2026-09-01:
+#
+# Written when the floor sat at 0.56-0.59 and the flat 0.5 relevance put this
+# scanner's CEILING (0.58) under it: arithmetically mute, 52 global-workspace
+# wins in four days and ZERO wakes. The ONLY escape was _BRAND_RE at 0.9, and
+# ZUGAMIND_BRAND_TERMS has never been set in this deployment, so that branch
+# is dark.
+#
+# Read that premise as history, not as current state — it inverted on
+# 2026-09-03, when floor drift dropped the bar under this scanner's FLOOR and
+# the same flat number that muted it opened it completely. See the RELEVANCE
+# TIERS block above: both states are the one defect, seen from either side.
+# This lane is still exactly right, and it is now the half that earns a wake
+# rather than the half that smuggles one past a floor.
+#
+# What it swallowed in those 52: "Claude Code is going reduce limits by 25% from
+# September 14", "Claude permanently raising weekly limits by 25%", and "Claude
+# Fable 5.1 and Claude Mythos 5.1" — a launch and two changes to the usage terms
+# of the tool this whole operation runs on. Seven minutes after filtering that
+# last one, an unrecognized post on a lab's own PR feed bid 0.600 and bought a
+# session. Press releases could wake the mind; news could not.
+#
+# The gate is deliberately narrow — a vendor we BUILD ON, and a title that says
+# the thing we build on changed. Both halves are required. A vendor name alone
+# is ambient chatter ("Warp builds self-improving agents on Claude", "I hate AI
+# images and music"); ship-grammar alone on a firehose is every "Show HN: my new
+# SDK" ever posted. On the 40 real titles this scanner emitted 2026-08-29..09-01
+# the conjunction fires on exactly 4, and all 4 are things that change what Buga
+# can build or what it costs.
+_VENDOR_RE = re.compile(
+    r"\b(?:claude|anthropic|openai|chatgpt|gpt|codex|gemini|deepmind)\b",
+    re.IGNORECASE,
+)
+
+# The usage TERMS changing — the class ai_labs' _HIGH_RELEVANCE_RE does not
+# cover because it knows "rate limits" and not "limits", the ordinary word for
+# the thing. Never matched bare: "limits"/"quota"/"pricing" are common English
+# and only mean anything here next to a vendor we depend on.
+_VENDOR_TERMS_RE = re.compile(
+    r"\blimits?\b|\bquotas?\b|\bpricing\b|\bprice\s+(?:rise|increase|change|cut)"
+    r"|\bdeprecat\w+|\bsunsett?ing\b|\bshutting\s+down\b|\bend[- ]of[- ]life\b"
+    r"|\boutage\b|\busage\s+caps?\b",
+    re.IGNORECASE,
+)
+
+# One grammar for "a lab shipped something", not two that drift. ai_labs owns
+# it; this is the same pattern applied behind the vendor gate above. Imported
+# lazily inside _is_vendor_ship so importing this scanner does not pull ai_labs'
+# module-level _DATA_DIR resolution into every test that touches HackerNews.
+_HIGH_RELEVANCE_RE = None
+
+
+def _ship_grammar():
+    global _HIGH_RELEVANCE_RE
+    if _HIGH_RELEVANCE_RE is None:
+        from scanners.world.ai_labs import _HIGH_RELEVANCE_RE as _re_
+        _HIGH_RELEVANCE_RE = _re_
+    return _HIGH_RELEVANCE_RE
+
+
+def _is_vendor_ship(title: str) -> bool:
+    """True when a vendor we build on shipped something, or changed the terms
+    of something we already build on. Both halves required — see the block
+    above for the measurement behind that."""
+    if not title or not _VENDOR_RE.search(title):
+        return False
+    return bool(_ship_grammar().search(title) or _VENDOR_TERMS_RE.search(title))
+
 # `detail` is the literal briefing text handed to a paid model, and a title
 # is third-party, untrusted text — a newline or control byte inside it is a
 # prompt-injection seam, not cosmetic noise. Collapse to single spaces FIRST,
@@ -283,15 +401,25 @@ def scan_hackernews() -> list[dict]:
             "story_id": sid,
             "score": score,
             "novelty": safe_http.clamp01(0.55),
-            "relevance": safe_http.clamp01(0.5),
+            "relevance": safe_http.clamp01(_RELEVANCE_AMBIENT),
             "urgency": urgency,
         }
         if brand_hit:
             trig["detail"] = f"HN BRAND MENTION [{int(score)}pts]: {clean_title}"
             trig["brand_mention"] = True
             trig["novelty"] = safe_http.clamp01(0.9)
-            trig["relevance"] = safe_http.clamp01(0.9)
+            trig["relevance"] = safe_http.clamp01(_RELEVANCE_PROMOTED)
             trig["urgency"] = safe_http.clamp01(max(0.75, urgency))
+        elif _is_vendor_ship(clean_title):
+            # PROMOTED is chosen to clear a floor, not to express enthusiasm:
+            # at 0.9 the raw bid is 0.61 + 0.2*urgency, i.e. 0.67 even for a
+            # story nobody upvoted — over every floor this deployment has run.
+            # Urgency is left alone on purpose: it is the alarm lane's
+            # discriminator (>= 0.9), and a model launch is news, not an
+            # outage.
+            trig["detail"] = f"HN VENDOR SHIP [{int(score)}pts]: {clean_title}"
+            trig["vendor_ship"] = True
+            trig["relevance"] = safe_http.clamp01(_RELEVANCE_PROMOTED)
         candidates.append(trig)
 
     if cold_start:
