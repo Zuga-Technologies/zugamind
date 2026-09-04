@@ -335,6 +335,22 @@ class StreamRunner:
         state = self._transition_state(winner_dict)
         state["attention"] = self.workspace.attention_schema.to_dict()
         state["idle_cycles"] = self._idle_cycles
+        # `last_cycle` and `cycles_today` were declared in foundation.state._fresh()
+        # and written by NOTHING until 2026-09-04. Every status view that read them
+        # therefore reported a mind that had never had a thought, while the journal
+        # recorded 150-200 cycles a day. The journal was always right; the state file
+        # was the liar, and it is the state file people look at.
+        #
+        # Recorded HERE, not in the harness block below, because a cycle is a cycle
+        # whether or not it woke anything — and ~95% of them wake nothing. Putting it
+        # next to `last_wake` would have reproduced the same silence in a new place.
+        now_iso = journal.now_iso()
+        state["cycles_today"] = (
+            int(state.get("cycles_today") or 0) + 1
+            if (state.get("last_cycle") or "")[:10] == now_iso[:10]
+            else 1
+        )
+        state["last_cycle"] = now_iso
         self._save_state_safe(state)
 
         journal.append_event("cycle", {
