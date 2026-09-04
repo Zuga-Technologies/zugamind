@@ -183,6 +183,22 @@ def _new_findings(cursor_file: Path) -> tuple[list[dict], int]:
     return _scan_from(offset)
 
 
+def _failure_reason(ev: dict) -> str:
+    """One-line why for a failed harness_invocation, built from whichever
+    fields the runner recorded. Nothing here is load-bearing for control flow —
+    it exists so a reader can tell a 900-second kill apart from a 500 from the
+    API, instead of seeing the same blank line for both."""
+    if ev.get("error") == "timeout":
+        killed = " (killed)" if ev.get("killed_tree") else ""
+        secs = ev.get("timeout_sec")
+        after = f" after {secs}s" if secs else ""
+        return f"timed out{after}{killed} — no output produced"
+    detail = (ev.get("stdout") or ev.get("stderr") or "").strip().replace("\n", " ")
+    rc = ev.get("returncode")
+    prefix = f"exit {rc}" if rc is not None else (ev.get("failure_reason") or "failed")
+    return f"{prefix} — {detail[:200]}" if detail else prefix
+
+
 def _format_findings(findings: list[dict]) -> str:
     lines = []
     for ev in findings[:_MAX_ITEMS]:
@@ -191,8 +207,18 @@ def _format_findings(findings: list[dict]) -> str:
         if kind == "alarm":
             lines.append(f"- [{ts}] alarm: {ev.get('detail', '')[:200]}")
         elif kind == "harness_invocation":
+            harness = ev.get("harness", "?")
             stdout = (ev.get("stdout") or "").strip().replace("\n", " ")
-            lines.append(f"- [{ts}] wake result ({ev.get('harness', '?')}): {stdout[:250]}")
+            # A failed invocation is NOT a result. Both failure shapes used to
+            # read as findings: a timed-out child (stdout "") rendered as a bare
+            # "wake result:" -- indistinguishable from a wake that ran and had
+            # nothing to say -- and an API error rendered its own error text as
+            # though that were the wake's conclusion. Default True so records
+            # written before `ok` existed keep their old formatting.
+            if ev.get("ok", True):
+                lines.append(f"- [{ts}] wake result ({harness}): {stdout[:250]}")
+            else:
+                lines.append(f"- [{ts}] wake FAILED ({harness}): {_failure_reason(ev)}")
     if len(findings) > _MAX_ITEMS:
         lines.append(f"- (+{len(findings) - _MAX_ITEMS} more since last check)")
     return "\n".join(lines)
