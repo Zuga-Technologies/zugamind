@@ -390,7 +390,14 @@ def test_powered_by_is_promotion_without_a_buyer_capture():
     open the title with "How") nor _PROMO_OUTCOME_RE ("expands" and
     "introduces" are not outcome verbs) matched, so the model token alone
     bought "Replit expands access to software creation with GPT-5.6 Luna"
-    the HIGH tier."""
+    the HIGH tier.
+
+    As of 2026-09-03 _PROMO_OUTCOME_RE does catch this title: its verb slot
+    is a shape rather than a whitelist, so "expands" no longer walks through.
+    Kept as-is anyway, and deliberately. What it pins is the OTHER route --
+    a promo whose headline carries no product tail at all and is given away
+    only by "powered by <model>" in the summary. Two rules covering one post
+    is defence in depth, not duplication."""
     title = "Replit expands access to software creation with GPT-5.6 Luna"
     summary = (
         "Replit introduces Free Mode, powered by GPT-5.6 Luna, so anyone "

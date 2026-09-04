@@ -525,8 +525,41 @@ _PROMO_OUTCOME = (
 # "How NVIDIA scales expertise with ChatGPT Work"
 _PROMO_HOW_RE = re.compile(rf"\bHow\s+{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b")
 # "Asana cleared 5 years of engineering work in 2 weeks with Codex"
+#
+# The verb list is not the discriminator, and 2026-09-03 21:09Z proved it at
+# the cost of a session: "Legora reviewed 41 documents in minutes with GPT-6
+# Astra" matched EVERY part of this grammar except one word. Capitalised
+# third-party buyer at the head, the lab's product in a `with <Capital>`
+# tail, an ad in between -- and because NON-WORK missed, the token "GPT-6"
+# bought it HIGH (0.95, bids 0.68), the tier reserved for launches. That is
+# the highest price this scanner can pay, and it paid it for a customer story.
+#
+# _PROMO_CASE_STUDY_RE, twenty lines down, already learned this: "The
+# discriminator is the TAIL, not the verb." That lesson was applied to the
+# "How ..." grammar and never to its sibling here, which kept hanging on a
+# closed list of ways to say a customer did something -- an unbounded set,
+# since it is every verb in the language.
+#
+# So the verb slot becomes a SHAPE (past tense or third person) rather than a
+# membership test, and safety moves to the HEAD, where the set really is
+# bounded: a lab announcing its own shipping either names itself or opens
+# with a launch gerund. Both are excluded by the same negative-lookahead
+# device _PROMO_CASE_STUDY_RE uses. The head guard is not decoration --
+# measured before adding it, an open verb slot flipped "Introducing agentic
+# video understanding with Gemini" and "Introducing CARE-X: Towards
+# Clinically Useful Radiology VLMs with Auxiliary Supervision" from HIGH to
+# NON-WORK, which is the scanner going deaf to the exact news it exists for.
+_PROMO_FIRST_PARTY_HEAD = (
+    r"(?!(?:We|Our|I|The|A|An|OpenAI|Anthropic|Google|DeepMind|Microsoft|"
+    r"Meta|Mistral|Claude|GPT|Gemini|ChatGPT|Codex|Sora|"
+    r"Introducing|Announcing|Previewing|Launching|Presenting|Unveiling|"
+    r"Improving|Updating|Upgrading|Extending|Expanding|Adding|Bringing|"
+    r"Deprecating|Sunsetting|Winding|Retiring|Testing|Measuring|Evaluating|"
+    r"Merging|Building|Teaching|Training|Scaling|Towards|Toward)\b)"
+)
 _PROMO_OUTCOME_RE = re.compile(
-    rf"^{_PROMO_BUYER}\s+(?:{_PROMO_OUTCOME})\b.*\bwith\s+[A-Z]"
+    rf"^{_PROMO_FIRST_PARTY_HEAD}{_PROMO_BUYER}\s+"
+    rf"(?:{_PROMO_OUTCOME}|\w+(?:ed|ies|es|s))\b.*\bwith\s+[A-Z]"
 )
 # "How loveholidays is making everyone a builder with Codex"
 #
