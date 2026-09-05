@@ -473,6 +473,7 @@ def build_briefing(
     other_criticals: Optional[List[Dict[str, Any]]] = None,
     now: Optional[datetime] = None,
     harnesses: Optional[List[str]] = None,
+    gate_hints: Optional[List[tuple]] = None,
 ) -> str:
     """Render a markdown wake briefing for a harness invocation.
 
@@ -489,6 +490,16 @@ def build_briefing(
              dispatched to, so the "was this wake earned" note quotes the
              gate(s) the winner actually faced. None = every enabled
              calibrate-mode harness whose wake_modules admit the winner.
+        gate_hints: `[(harness, floor, basis), ...]` as `_wake_gate_hints`
+             returns them, captured by the caller AT THE MOMENT OF THE WAKE
+             DECISION. None = look the gates up now. The runner must pass
+             them: it records the winner as a calibration sample before it
+             builds the briefing, and a winner high enough to wake is high
+             enough to move the 90th-percentile floor — so a live lookup
+             here reports a bar the decision was never made against. Seen
+             2026-09-05 18:54: judged 0.55 against 0.520, briefed as
+             "bar 0.555; judged on 0.55" — a legitimate wake described as
+             failing its own gate.
 
     Sections: current cognitive state + time since last wake; the winning
     trigger that caused this wake; recent notable events since the last
@@ -583,7 +594,8 @@ def build_briefing(
                     and abs(raw - salience) > 1e-9):
                 note = (f"  Bid {raw:.2f}, woke on {salience:.2f} "
                         f"after attention-health modulation")
-                gates = _wake_gate_hints(winner.get("source_module"), harnesses)
+                gates = (gate_hints if gate_hints is not None
+                         else _wake_gate_hints(winner.get("source_module"), harnesses))
                 if not gates:
                     legacy = _wake_gate_hint()
                     if legacy:
