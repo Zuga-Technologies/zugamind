@@ -581,6 +581,18 @@ class StreamRunner:
             filter_reasons = [(hc, self._harness_filter_reason(hc, winner_dict)) for hc in enabled_configs]
             enabled_configs = [hc for hc, reason in filter_reasons if reason is None]
 
+            # Snapshot the gates this winner was just judged by, BEFORE the
+            # sample below moves them. The briefing quotes these; looking
+            # them up at build time (2026-09-05) reported the floor this
+            # winner's own salience had just raised, so a wake judged 0.55
+            # against 0.520 was briefed as "bar 0.555; judged on 0.55".
+            gate_hints = None
+            if enabled_configs:
+                gate_hints = journal._wake_gate_hints(
+                    winner_dict.get("source_module"),
+                    [hc.get("name", "") for hc in enabled_configs],
+                )
+
             # Record this cycle's winner as an ambient calibration sample for
             # any harness in "calibrate" mode — AFTER the filter decision
             # above, so this winner's own salience can only affect the floor
@@ -653,6 +665,7 @@ class StreamRunner:
             briefing = journal.build_briefing(
                 since_iso, winner=winner_dict, other_criticals=other_criticals,
                 harnesses=[hc.get("name", "") for hc in enabled_configs],
+                gate_hints=gate_hints,
             )
 
             intent = {
