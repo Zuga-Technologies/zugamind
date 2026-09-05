@@ -97,6 +97,20 @@ the 5-trigger cap allows, only the emitted ones are marked seen/hash-
 advanced — the rest are left pending so they get a fair shot at surfacing
 on a later cycle instead of being silently and permanently dropped.
 
+A web_watch diff also gets a SECOND, content-addressed dedupe layer sharing
+the search channel's own seen-set/TTL: found live on openai.com/news, where
+one hero-video link's "+1 new" diff bought a workspace win every ~2h for
+3+ days straight (2026-08-29 to -09-01, then again from 2026-09-05) despite
+the line-set baseline being correctly committed after every single fire —
+each cycle re-forgot the one line it had just learned. The line-set only
+ever compares against the ONE most recent snapshot, so if that element's
+key falls out even once (Jina's HTML->markdown conversion is not guaranteed
+byte-stable for an unchanged element when unrelated content around it
+moves — the likely mechanism, though unconfirmed short of catching a live
+mismatch), the identical text reports as new again on the next real change,
+forever. A sha1 of the sorted added-line set, checked before a candidate is
+even built, catches that independently of whatever the line-set is doing.
+
 Stdlib only (urllib.request, subprocess, hashlib) — not a hard requirement
 for *your own* private scanner (only core PRs are stdlib-constrained, see
 CONTRIBUTING.md), but it means you can copy this and run it with zero
@@ -414,8 +428,10 @@ def scan_agent_reach() -> list[dict[str, Any]]:
     # Each candidate carries what it takes to commit itself to disk *after*
     # the cap is applied, so overflow candidates are left uncommitted (and
     # therefore still eligible next cycle) instead of being marked done and
-    # lost forever.
-    candidates: list[tuple[str, str, str | None, list[str] | None, dict[str, Any]]] = []
+    # lost forever. The 6th field is the `seen`-set key a watch candidate
+    # commits on emission (None for search, which already commits its own
+    # `key`) -- see the dedupe note below.
+    candidates: list[tuple[str, str, str | None, list[str] | None, dict[str, Any], str | None]] = []
 
     for url in (watch_urls if run_watch else []):
         body = _fetch_jina(url)
@@ -444,6 +460,31 @@ def scan_agent_reach() -> list[dict[str, Any]]:
             watch_hashes[url] = digest
             watch_lines[url] = line_keys
             continue
+        # Content-addressed dedupe on TOP of the line-set baseline. Observed
+        # live on openai.com/news: a single hero-video link re-fired the
+        # identical "+1 new" diff every ~2h for 3+ days (2026-08-29 to -09-01,
+        # then again from 2026-09-05), each time correctly committed to
+        # `watch_lines` per the branch above -- yet the very next cycle it
+        # read back as "added" again. The line-set baseline can only compare
+        # against the ONE most recent snapshot; if a single element's line
+        # boundary shifts even once (a plausible cause here: Jina's HTML->
+        # markdown conversion is not guaranteed byte-stable across fetches of
+        # a genuinely-unchanged element when unrelated page content around it
+        # changes), that element's key silently falls out and the same text
+        # reports as new again on the NEXT change, forever, since each cycle
+        # re-commits a single snapshot that forgets it once more. A content
+        # hash of the diff text itself, kept in the same long-lived `seen`
+        # set the search channel already uses, catches this independently of
+        # whatever the line-set baseline is doing.
+        diff_key = "watchdiff:" + url + ":" + hashlib.sha1(
+            "\x1f".join(sorted(added)).encode("utf-8")).hexdigest()[:16]
+        if diff_key in seen:
+            # Already reported this exact addition inside the seen-set TTL --
+            # advance the baseline (same as the no-op branch above) but don't
+            # re-buy a wake for it.
+            watch_hashes[url] = digest
+            watch_lines[url] = line_keys
+            continue
         added_text = " | ".join(added)
         candidates.append(("watch", url, digest, line_keys, {
             "type": "reach_web_update",
@@ -461,7 +502,7 @@ def scan_agent_reach() -> list[dict[str, Any]]:
             "relevance": _keyword_relevance(added_text[:5000]),
             "urgency": 0.3,
             "url": url,
-        }))
+        }, diff_key))
 
     if run_search:
         for query in queries:
@@ -488,16 +529,18 @@ def scan_agent_reach() -> list[dict[str, Any]]:
                     "urgency": _search_urgency(_parse_published(r.get("publishedDate")), now),
                     "url": url,
                     "query": query,
-                }))
+                }, None))
 
     emitted = candidates[:_MAX_TRIGGERS]
     triggers: list[dict[str, Any]] = []
-    for kind, key, digest, line_keys, trigger in emitted:
+    for kind, key, digest, line_keys, trigger, dedupe_key in emitted:
         triggers.append(trigger)
         if kind == "watch":
             watch_hashes[key] = digest
             if line_keys is not None:
                 watch_lines[key] = line_keys
+            if dedupe_key is not None:
+                seen[dedupe_key] = now
         else:
             seen[key] = now
 

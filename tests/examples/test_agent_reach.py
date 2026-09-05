@@ -424,6 +424,42 @@ def test_reordered_page_adds_nothing_and_stays_silent(monkeypatch, tmp_path):
     assert agent_reach.scan_agent_reach() == []
 
 
+def test_forgotten_baseline_does_not_rebuy_the_same_addition(monkeypatch, tmp_path):
+    """Live bug (openai.com/news, 2026-08-29 through 2026-09-05): a single
+    hero-video link fired the identical "+1 new" diff every ~2h for days,
+    each time correctly committed to watch_lines per the no-op/first-sight
+    branches, yet read back as "added" again next cycle anyway -- the
+    line-set baseline only ever compares against the ONE most recent
+    snapshot, so a single element's key falling out once (however that
+    happens) makes the same text re-report forever. This drives exactly
+    that shape without needing to know why the key fell out: commit cycle 2's
+    real addition, then simulate the baseline forgetting it, and confirm the
+    content-addressed seen-set (independent of the line-set) still deduped."""
+    clock = _watch_only(monkeypatch, tmp_path)
+    bodies = iter([
+        "line A\nline B",
+        "line A\nline B\nline C",
+        "line A\nline B \nline C",  # trailing space: digest moves, normalized text doesn't
+    ])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []            # cycle 1: silent baseline
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()                    # cycle 2: real addition
+    assert len(out) == 1 and "line C" in out[0]["detail"]
+
+    # Simulate the baseline forgetting "line C"'s key between cycles.
+    cache_file = tmp_path / "agent_reach_fetch.json"
+    cache = json.loads(cache_file.read_text())
+    cache["watch_lines"]["http://example.com/page"] = [
+        agent_reach._line_key("line A"), agent_reach._line_key("line B"),
+    ]
+    cache_file.write_text(json.dumps(cache))
+
+    clock["t"] += 200
+    assert agent_reach.scan_agent_reach() == []             # cycle 3: deduped, no re-fire
+
+
 def test_detail_carries_the_addition_not_the_top_of_the_page(monkeypatch, tmp_path):
     clock = _watch_only(monkeypatch, tmp_path)
     head = "Skip to main content\nNewsroom\nolder post from last week"
