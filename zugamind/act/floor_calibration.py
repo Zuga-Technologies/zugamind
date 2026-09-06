@@ -18,9 +18,11 @@ quantile, not frozen max" below for why it became a 90th-percentile + margin
 over a rolling window (2026-08-06).
 
 Warmup safety: before `CALIBRATION_WINDOW` ambient samples have been
-observed, `resolve_floor()` returns `WARMUP_FLOOR` — the same 0.35 the
-product has always shipped as a static default — so calibrate mode is never
-MORE permissive than today's default while it's still learning.
+observed, `resolve_floor()` returns `WARMUP_FLOOR`, and every calibrated
+floor is clamped to at least `WARMUP_FLOOR` — so calibrate mode is never
+MORE permissive than the shipped default, learning or not. (It shipped at
+0.35, the old static default; raised to 0.50 on 2026-09-06 — see the
+constant.)
 
 Rolling quantile, not frozen max (redesigned 2026-08-06): the original
 design froze `max(20 samples) + margin` forever. Both choices failed live
@@ -97,7 +99,17 @@ CALIBRATION_WINDOW = 20   # min samples before a calibrated floor applies
 ROLLING_WINDOW = 50       # max samples kept; older ones age out
 QUANTILE = 0.9            # floor sits above ~90% of ambient noise, not above all of it
 CALIBRATION_MARGIN = 0.05
-WARMUP_FLOOR = 0.35
+# Hard MINIMUM on any floor — warmup value and lower clamp. Was 0.35 (the
+# pre-calibration static default from July, chosen before world signals were
+# wired to the brain). Raised 2026-09-06 after two noise wakes in one quiet
+# night: when only priority_goals heartbeats (0.21-0.26) win cycles, the 90th
+# percentile + margin falls to ~0.31 and the clamp is the whole gate. At 0.35
+# it equalled the search channel's lowest possible bid (0.25 + 0.4x0.2 +
+# 0.2x0.1 — "no keyword hits, no publish date") and sat under the HN ambient
+# tier (0.41-0.48). Measured over 8 days / 316 world_signals winners: 65 bids
+# in 0.41-0.47, none worth a session; all 44 real wakes bid >= 0.51; nothing
+# ever bid 0.48-0.50. 0.50 sits in that gap. Alarm lane still bypasses.
+WARMUP_FLOOR = 0.50
 # Hard ceiling on any calibrated floor. Salience is bounded at 1.0, so a
 # floor above ~0.9 means "never wake" — the opposite of what calibration is
 # for. Found live 2026-08-06: near-max winners (0.99) recorded as "ambient"

@@ -81,8 +81,10 @@ canary run has not been repeated since. If you copy one, run
   ambient winner salience + 0.05) reaches the cost of hand-tuning a
   per-source gate, with zero detection loss (alarm-lane winners always
   bypass the floor, calibrated or not). Until 20 ambient samples have been
-  observed it behaves exactly like `0.35` (today's old static default) —
-  never more permissive while still learning. See
+  observed it behaves exactly like `0.50` (`WARMUP_FLOOR`), and the learned
+  floor is never allowed BELOW that — so a quiet night, when only low
+  heartbeat bids win cycles, cannot drag the bar under the scanners' own
+  "I found nothing" bids. See
   `zugamind/act/floor_calibration.py`. State persists to
   `<data_dir>/floor_calibration.json`; a `floor_calibrated` journal event
   fires once, when the window fills.

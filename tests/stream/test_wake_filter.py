@@ -71,8 +71,62 @@ def test_calibrate_string_survives_the_config_loader(tmp_path):
 def test_calibrate_mode_uses_warmup_floor_before_calibration(tmp_path, monkeypatch):
     monkeypatch.setattr(floor_calibration, "STATE_FILE", tmp_path / "floor_calibration.json")
     hc = {"name": "h", "wake_min_salience": "calibrate"}
-    assert not StreamRunner._harness_wants(hc, _winner(salience=0.2))
-    assert StreamRunner._harness_wants(hc, _winner(salience=0.4))
+    # Asserted against the constant, not a literal: this used to pin 0.4 as a
+    # waking bid, which was only true while WARMUP_FLOOR was 0.35.
+    below = floor_calibration.WARMUP_FLOOR - 0.05
+    assert not StreamRunner._harness_wants(hc, _winner(salience=below))
+    assert StreamRunner._harness_wants(hc, _winner(salience=floor_calibration.WARMUP_FLOOR))
+    assert StreamRunner._harness_wants(hc, _winner(salience=floor_calibration.WARMUP_FLOOR + 0.05))
+
+
+# --- the hard minimum is a real gate, not a warmup placeholder (2026-09-06) --
+
+def test_warmup_floor_sits_above_the_whole_ambient_tier(tmp_path, monkeypatch):
+    """Two noise wakes in one quiet night (2026-09-06, 03:23 and 07:16 EDT).
+    When only priority_goals heartbeats win cycles, the 90th-percentile floor
+    falls below WARMUP_FLOOR and the clamp IS the gate — so the clamp has to
+    sit above every bid the scanners emit for "I learned nothing":
+
+      * agent_reach search result, no keyword hits, no publish date:
+        relevance 0.2, urgency 0.1 -> the lowest bid the channel can make.
+        At WARMUP_FLOOR = 0.35 this bid landed exactly ON the bar and the
+        inclusive gate (`salience < floor` filters) woke a session on an
+        agency's cost-calculator blog.
+      * HackerNews ambient tier (_RELEVANCE_AMBIENT, any velocity): 0.41-0.48.
+        A 4-point story bid 0.41 and woke the very next quiet cycle.
+
+    Measured over 8 days: 65 bids in 0.41-0.47, none worth a session; every
+    real wake bid >= 0.51; nothing ever bid 0.48-0.50."""
+    from cognition.workspace.workspace_modules import WorldSignalsModule as WS
+    from scanners.world import hackernews
+
+    def bid(relevance, urgency):
+        return round(min(WS._SALIENCE_CAP, WS._BASE + 0.4 * relevance + 0.2 * urgency), 4)
+
+    search_no_evidence = bid(0.2, 0.1)
+    hn_ambient_dearest = bid(hackernews._RELEVANCE_AMBIENT, 0.65)
+    assert (search_no_evidence, hn_ambient_dearest) == (0.35, 0.48)
+    assert search_no_evidence < floor_calibration.WARMUP_FLOOR
+    assert hn_ambient_dearest < floor_calibration.WARMUP_FLOOR
+    # ...and the gate agrees with the arithmetic, pre-calibration.
+    monkeypatch.setattr(floor_calibration, "STATE_FILE", tmp_path / "floor_calibration.json")
+    hc = {"name": "fresh", "wake_min_salience": "calibrate"}
+    for raw in (search_no_evidence, 0.41, hn_ambient_dearest):
+        w = _winner("world_signals", salience=raw)
+        w["context"] = {"raw_salience": raw}
+        assert not StreamRunner._harness_wants(hc, w), f"ambient bid {raw} bought a session"
+
+
+def test_warmup_floor_still_lets_a_real_wake_through(tmp_path, monkeypatch):
+    """The other half: every real wake in the 8-day record bid >= 0.51, and
+    the HN promoted tier's cheapest possible story bids 0.67. Neither may be
+    lost to the raised clamp."""
+    monkeypatch.setattr(floor_calibration, "STATE_FILE", tmp_path / "floor_calibration.json")
+    hc = {"name": "fresh", "wake_min_salience": "calibrate"}
+    for raw in (0.51, 0.67):
+        w = _winner("world_signals", salience=raw)
+        w["context"] = {"raw_salience": raw}
+        assert StreamRunner._harness_wants(hc, w), f"real bid {raw} was refused"
 
 
 def test_calibrate_mode_uses_learned_floor_once_calibrated(tmp_path, monkeypatch):
