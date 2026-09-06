@@ -90,7 +90,7 @@ def test_non_dict_state_file_reads_as_empty(tmp_path, monkeypatch):
 
 def test_resolve_floor_follows_the_raw_basis_once_switched(tmp_path, monkeypatch):
     _patch(tmp_path, monkeypatch)
-    _fill(salience=0.8, raw=0.4)  # modulated floor ~0.85, raw floor ~0.45
+    _fill(salience=0.8, raw=0.55)  # modulated floor ~0.85, raw floor ~0.60 (above the clamp, so it is FITTED)
     floor, basis = floor_calibration.resolve_gate("h")
     assert basis == "raw"
     assert floor_calibration.resolve_floor("h") == floor
@@ -117,7 +117,7 @@ def test_floor_drift_is_journaled_once_it_moves_enough(tmp_path, monkeypatch):
     # the environment shifts: the rolling window fills with much louder noise
     _fill(n=floor_calibration.ROLLING_WINDOW, salience=0.7)
     drifts = _events("floor_drifted")
-    assert drifts, "a 0.35 -> ~0.75 floor move must be visible in the journal"
+    assert drifts, "a WARMUP_FLOOR -> ~0.75 floor move must be visible in the journal"
     assert drifts[0]["basis"] == "modulated"
     assert drifts[-1]["to"] > drifts[0]["from"]
     assert all(d["at_ceiling"] is False for d in drifts)

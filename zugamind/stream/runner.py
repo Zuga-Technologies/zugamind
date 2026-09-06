@@ -496,9 +496,9 @@ class StreamRunner:
         calibrated = floor == "calibrate"
         if calibrated:
             # Opt-in self-calibrating floor (issue #12) — resolves to the
-            # learned floor once calibrated, WARMUP_FLOOR (0.35, today's old
-            # static default) until then. Never more permissive than the
-            # shipped default while still learning. See act/floor_calibration.py.
+            # learned floor once calibrated, WARMUP_FLOOR until then — and the
+            # learned floor is clamped to at least WARMUP_FLOOR, so a quiet
+            # night cannot open the ambient tier. See act/floor_calibration.py.
             floor, basis = floor_calibration.resolve_gate(hc.get("name", ""))
         if floor is None:
             return None

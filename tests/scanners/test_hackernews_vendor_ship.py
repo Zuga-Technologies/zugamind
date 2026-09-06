@@ -256,13 +256,17 @@ def test_ambient_stories_sit_under_every_floor_this_deployment_has_run():
     _KEEP_RE matches "Python", "model", "agent", "startup" -- so the ambient
     tier has to lose to every bar we have actually seen, including the lowest.
 
-    Not asserted against WARMUP_FLOOR (0.35): nothing can get under that, since
-    WorldSignals' own _BASE is 0.25 and ambient bids start at 0.41. That is a
-    pre-calibration state only, and it is a known, accepted gap."""
+    WARMUP_FLOOR is in the list on purpose. This docstring used to call the
+    pre-calibration floor "a known, accepted gap" that ambient bids could not
+    be asserted against. That premise was false: WARMUP_FLOOR is also the
+    lower CLAMP on every calibrated floor, so it is the bar on every quiet
+    night -- and on 2026-09-06 a 4-point story bid 0.41 against it and woke a
+    session. The ambient tier has to lose to the clamp too."""
+    from act.floor_calibration import WARMUP_FLOOR
     cheapest = _raw_bid(hackernews._RELEVANCE_AMBIENT, 0.3)
     dearest = _raw_bid(hackernews._RELEVANCE_AMBIENT, 0.65)
     assert (cheapest, dearest) == (0.41, 0.48)
-    for floor in _FLOORS_SEEN:
+    for floor in _FLOORS_SEEN + (WARMUP_FLOOR,):
         assert dearest < floor, f"ambient tier reaches the {floor} floor"
 
 
