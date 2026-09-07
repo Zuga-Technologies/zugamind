@@ -203,6 +203,61 @@ eight separate times over twelve days and bought a harness wake:
    _OFF_DOMAIN_CATEGORIES -- including why this is the one demotion asked
    AFTER the HIGH check when every other one is asked before it.
 
+11. THE LAB PAYING FOR A CAUSE IS PUBLIC AFFAIRS, AND THE MONEY IS THE TELL.
+   [openai] "Supporting independent journalism in Ukraine" -- "OpenAI, AIRPPU
+   and WAN-IFRA launch an AI program to help Ukrainian news organizations
+   strengthen innovation, resilience, and independent journalism" -- scored
+   DEFAULT 0.75, bid 0.600 against a 0.500 bar and bought a session on
+   2026-09-07 12:14Z. Nothing in it moves what a builder can build or what it
+   costs: NGOs are the partners, journalists are the beneficiaries, and no
+   model, price or endpoint changes.
+
+   The tier is not new -- this list has named "philanthrop" and nonprofits
+   since 2026-08-18. Two separate gaps let this through.
+
+   First, `\bnonprofit\b` was decoration: the word boundary cannot match
+   "nonprofits" and the hyphen splits "non-profit", which between them are
+   every form the posts actually use. Measured over the live openai window
+   (1173 items) the old spelling caught ZERO of the four nonprofit posts,
+   including "Introducing OpenAI" itself.
+
+   Second, the class is bigger than one wake and it was worth measuring
+   before writing vocabulary. Over the same 1173 items, 16 posts belong to
+   this tier and sit above it -- four of them at HIGH, because "Announcing
+   the OpenAI Safety Fellowship", "Announcing the initial People-First AI
+   Fund grantees" and "Introducing OpenAI Academy for News Organizations"
+   all open with launch verbs. That is the highest price this scanner can
+   pay, spent three times on grant announcements, and it is only avoided
+   because NON-WORK is checked FIRST (point 2).
+
+   The trap here is the same one point 9 names, in a new word: "grant" is
+   the obvious match and the one you must NOT take. `GRANT SELECT`, an OAuth
+   grant type, "grant access to your org" -- a bare match reaches permissions
+   and billing copy, and billing copy is where pricing posts live, which are
+   HIGH by definition. So the money half is grammar (a grant PROGRAM or FUND,
+   funding/awarding grants, a sum "in grants", grants FOR research) and the
+   sector half is phrases with no builder reading at all (independent
+   journalism, press freedom, newsroom, civil society, human rights,
+   humanitarian, disaster response). Four of those sectors have never fired;
+   they are included on point 8's standard, because the alternative is one
+   wake per sector while the list learns them one funeral at a time.
+
+   One shape carries no money word and no sector word: "The Newsroom AI
+   Catalyst: a global program with WAN-IFRA", whose RSS summary is EMPTY,
+   so the title is the only evidence. `_ORG_PROGRAM_RE` handles it as
+   partnership grammar rather than by extending the sector list -- and
+   case-SENSITIVELY, because "the developer program with new API tiers" is
+   the same string shape with a lowercase tail and is a launch.
+
+   Measured end to end over 1283 live items (openai 1173, deepmind 100,
+   msft_research 10): 17 posts change tier, all downward, zero promotions.
+   Honest cost, so a later reader can weigh reverting: ONE of the 17 is an
+   arguable keep -- "Accelerating the cyber defense ecosystem that protects
+   us all", whose summary pairs "$10M in API grants" with a real model
+   variant (GPT-5.4-Cyber). It goes quiet. Special-casing it would mean
+   letting a model token override a demotion, which is precisely the hole
+   point 2 was written to close, so the model token does not get a vote.
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -456,7 +511,10 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     r"|\bai\s+policy\b|policy\s+ideas|policymaker|regulator|regulation"
     r"|legislation|lawmaker|\bcongress\b|\bparliament\b|\bai\s+act\b"
     r"|\belections?\b|\bgovernments?\b|global\s+affairs|public\s+affairs"
-    r"|philanthrop|\bnonprofit\b|economic\s+index|economic\s+research"
+    # `\bnonprofit\b` matched neither surface form these posts use -- the word
+    # boundary fails on the plural "nonprofits" and the hyphen splits
+    # "non-profit". Widened 2026-09-07; see point 11.
+    r"|philanthrop|\bnon-?profits?\b|economic\s+index|economic\s+research"
     # The noun forms ("partnership", "partnering with") were covered; the
     # VERB form was not, and it is how the announcements are actually
     # titled -- "OpenAI partners with Scale...", "Google DeepMind partners
@@ -496,8 +554,52 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     r"|\bbills?\s+to\s+(?:advance|require|protect|regulate|ban|restrict"
     r"|mandate|establish|amend|repeal)\b"
     r"|\b(?:supports?|backs?|endorses?|opposes?|co-?sponsors?)\s+"
-    r"(?:\w+(?:'s|\u2019s)?\s+){0,3}bills?\b",
+    r"(?:\w+(?:'s|\u2019s)?\s+){0,3}bills?\b"
+    # The lab FUNDING a cause. This tier has named "philanthrop" and
+    # nonprofits since 2026-08-18, and [openai] "Supporting independent
+    # journalism in Ukraine" (2026-09-07, DEFAULT 0.600 vs a 0.500 bar) used
+    # neither word: it is a grant program announced with two NGOs, and the
+    # money words were the only tell. Added 2026-09-07; see point 11.
+    #
+    # Never the bare noun, per the rule the M&A and bill blocks above state:
+    # "grant" is `GRANT SELECT`, an OAuth grant type, and "grant access to
+    # your org" -- and a demotion reaching permissions or billing copy
+    # silences pricing, which is HIGH. Only grammars the technical sense
+    # does not produce: a grant PROGRAM or FUND, a verb+grants pair, a sum
+    # "in grants", grants FOR research.
+    r"|\bgrants?\s+(?:program(?:me)?s?|funds?)\b|\b(?:funding|awarding)\s+grants?\b"
+    r"|\bin\s+grants?\b|\bgrants?\s+for\s+(?:new\s+)?(?:research|projects?)\b"
+    # "awarding $40.5M in unrestricted grants" -- the adjective slot is why
+    # the bare "in grants" above is not enough, and the dollar figure is what
+    # makes opening the slot safe ("logged in to grant access" has no sum).
+    r"|\$[\d,.]+\s*[MBK]?\s+in\s+(?:[\w-]+\s+){0,2}grants?\b"
+    r"|\bfellowships?\b|\bngos?\b"
+    # The beneficiary SECTOR. "independent journalism" is the one that cost a
+    # session; the rest are its siblings, added un-fired on the same standard
+    # as "safety institute(s)" in point 8 -- none has a builder reading, and
+    # a list that waits for each sibling to fire pays one wake per sector.
+    r"|\bindependent\s+journalism\b|\bpress\s+freedom\b|\bnewsrooms?\b"
+    r"|\bcivil\s+society\b|\bhuman\s+rights\b|\bhumanitarian\b"
+    r"|\bdisaster\s+(?:response|relief|preparedness)\b",
     re.IGNORECASE,
+)
+
+# A joint program with a NAMED ORG, case-SENSITIVELY -- the org-partnership
+# class arriving through a door "partners with" / "partnership" / "agreement
+# with" do not cover ("The Newsroom AI Catalyst: a global program with
+# WAN-IFRA", whose RSS summary is empty, so the title is the only evidence).
+#
+# Case-sensitive for the same reason as _BILL_NUMBER_RE and the promo
+# grammars: the capital on the partner is the whole discriminator. Under the
+# IGNORECASE flag of the pattern above, "the developer program with new API
+# tiers" and "our partner program with improved rate limits" read identically
+# to a partnership announcement, and both are things a builder acts on.
+# Measured 2026-09-07 over 1283 live items (openai 1173, deepmind 100,
+# msft_research 10): two matches, both correct, zero HIGH collateral.
+_ORG_PROGRAM_RE = re.compile(
+    r"\b[Pp]rogram(?:me)?s?\s+with\s+(?:the\s+)?[A-Z]"
+    r"|\b[Ii]nitiatives?\s+with\s+(?:the\s+)?[A-Z]"
+    r"|\b[Cc]ollaboratives?\s+with\s+(?:the\s+)?[A-Z]"
 )
 
 # The bill NUMBER, case-SENSITIVELY -- the same discriminator the promo
@@ -717,6 +819,7 @@ def _is_non_work(text: str, title: str = "") -> bool:
         _is_partner_powered_by(text)
         or _PUBLIC_AFFAIRS_RE.search(text)
         or _BILL_NUMBER_RE.search(text)
+        or _ORG_PROGRAM_RE.search(text)
         or _PROMO_HOW_RE.search(text)
         or _PROMO_OUTCOME_RE.search(text)
         or _PROMO_CASE_STUDY_RE.search(text)
