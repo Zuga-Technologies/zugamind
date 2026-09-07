@@ -55,7 +55,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
@@ -425,6 +425,61 @@ def _max_briefing_chars() -> int:
         return _DEFAULT_BRIEFING_MAX_CHARS
 
 
+def _wake_deadline_note(harnesses: Optional[List[str]] = None,
+                        now: Optional[datetime] = None) -> Optional[str]:
+    """The one line telling a waking harness when it gets killed, or None.
+
+    A harness invoked by `command_actuator` runs under `timeout_sec`, and
+    on expiry the WHOLE process tree is killed and its stdout is thrown
+    away. The child was never told any of that. Measured on this
+    deployment 2026-09-07, over 56 wakes: 11 (20%) ended
+    `error: timeout, stdout: ""`, and the two sampled transcripts show
+    normal tool-by-tool work continuing to within 7 seconds of the kill --
+    not hangs. One had already written a palace drawer and committed it,
+    then died mid-STATUS.md-edit, and the journal recorded the whole wake
+    as producing nothing. The work survived; only the report was lost.
+
+    So the deadline goes in the briefing, which is the one thing every
+    woken session reads. Same best-effort contract as `_wake_gate_hints`:
+    lazily imported (act/ imports this module) and never allowed to break
+    a briefing -- a wake with no deadline line is worse than no wake, but
+    a wake with no briefing is worse still.
+
+    The quoted budget is the MINIMUM across the dispatching harnesses:
+    when several are woken at once the session is bounded by whichever
+    kills first.
+    """
+    try:
+        from act import command_actuator
+        budgets = []
+        for hc in command_actuator.load_harness_configs():
+            if not hc.get("enabled", True):
+                continue
+            if harnesses is not None and hc.get("name", "") not in harnesses:
+                continue
+            secs = int(hc.get("timeout_sec", 0) or 0)
+            if secs > 0:
+                budgets.append(secs)
+        if not budgets:
+            return None
+        secs = min(budgets)
+        current = now if now is not None else datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        deadline = current + timedelta(seconds=secs)
+        return (
+            "**Hard deadline: " + deadline.strftime("%H:%M:%SZ") + "** ("
+            + str(secs // 60) + "m from now). At that moment this session's "
+            "whole process tree is killed and its output is DISCARDED. Work "
+            "already written to disk survives; your summary does not. Land "
+            "your findings before then -- do not start a new edit near the "
+            "line."
+        )
+    except Exception as e:  # noqa: BLE001 -- a hint must never break the briefing
+        logger.debug("briefing: wake deadline note unavailable: %s", e)
+        return None
+
+
 def _wake_gate_hints(winner_module: Optional[str],
                      harnesses: Optional[List[str]] = None) -> List[tuple]:
     """`[(harness, floor, basis), ...]` — the gates this winner was ACTUALLY
@@ -560,6 +615,9 @@ def build_briefing(
         lines.append(f"**Cognitive state:** {_untrusted(state.get('state', 'UNKNOWN'), 20)}")
         if since_iso:
             lines.append(f"**Time since last wake:** {_describe_elapsed(since_iso, now)}")
+        deadline_note = _wake_deadline_note(harnesses, now)
+        if deadline_note:
+            lines.append(deadline_note)
         else:
             lines.append("**Time since last wake:** (no prior wake recorded — first briefing)")
 
