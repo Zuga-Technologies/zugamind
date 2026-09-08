@@ -249,6 +249,30 @@ eight separate times over twelve days and bought a harness wake:
    case-SENSITIVELY, because "the developer program with new API tiers" is
    the same string shape with a lowercase tail and is a launch.
 
+   EXTENDED 2026-09-08. The money half above is grant-shaped, and the class
+   has a second noun. [openai] "Daybreak for Frontline Defenders: $1B to
+   protect essential services" -- "A $1 billion commitment expands access to
+   frontier cyber AI" -- was sitting at DEFAULT 0.75 in the live cache on the
+   day the rule above shipped: the next wake of this class, already queued,
+   missed because it says "commitment" and not "grant".
+
+   Same discipline, same reason. A bare "commitment" is "our commitment to
+   reliability" on every status page and "investment" is what every
+   infrastructure post calls itself, so the SUM is the discriminator -- the
+   same device the "$40.5M in unrestricted grants" adjective slot uses. Both
+   orders are matched, because the feed writes it both ways ("$1 billion
+   commitment", "commits $7.5M").
+
+   Four items match across 1384 live items, and all four are the lab pledging
+   money to an outside institution: Daybreak, the $7.5M Alignment Project
+   grant, [deepmind] Google's $40M Genesis Mission commitment, and
+   "Introducing NextGenAI" ("OpenAI commits $50M in funding and tools to
+   leading institutions"). The last is at HIGH and goes quiet -- the same
+   trade this point already accepted three paragraphs down for the Safety
+   Fellowship and the People-First AI Fund grantees, on the same reasoning: a
+   philanthropy announcement that opens with a launch verb is still a
+   philanthropy announcement, and the launch verb does not get a vote.
+
    Measured end to end over 1283 live items (openai 1173, deepmind 100,
    msft_research 10): 17 posts change tier, all downward, zero promotions.
    Honest cost, so a later reader can weigh reverting: ONE of the 17 is an
@@ -632,6 +656,20 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     # the bare "in grants" above is not enough, and the dollar figure is what
     # makes opening the slot safe ("logged in to grant access" has no sum).
     r"|\$[\d,.]+\s*[MBK]?\s+in\s+(?:[\w-]+\s+){0,2}grants?\b"
+    # The same tell without the word "grant". [openai] "Daybreak for Frontline
+    # Defenders: $1B to protect essential services" -- "A $1 billion
+    # commitment expands access to frontier cyber AI" -- was sitting at
+    # DEFAULT 0.75 in the live cache the day this rule shipped, i.e. the next
+    # wake of this class already queued. A lab pledging a sum to a cause is
+    # point 11 exactly; only the noun changed. Added 2026-09-08.
+    #
+    # The sum is what keeps it safe, same as the adjective slot above: a bare
+    # "commitment" is "our commitment to reliability" on every status page,
+    # and "investment" is what every infrastructure post calls itself.
+    r"|\$[\d,.]+\s*(?:[MBK]\b|million|billion|trillion)[^.]{0,40}"
+    r"\b(?:commitments?|pledges?|donations?|contributions?)\b"
+    r"|\b(?:commits?|committed|pledges?|pledged|donates?|donated)\b[^.]{0,40}"
+    r"\$[\d,.]+\s*(?:[MBK]\b|million|billion|trillion)"
     r"|\bfellowships?\b|\bngos?\b"
     # The beneficiary SECTOR. "independent journalism" is the one that cost a
     # session; the rest are its siblings, added un-fired on the same standard
