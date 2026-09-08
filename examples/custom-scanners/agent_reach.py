@@ -129,6 +129,7 @@ import os
 import shutil
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -249,6 +250,39 @@ def _line_key(line: str) -> str:
     """Short digest of one line — the cache stores keys, not the page, so a
     watched page costs ~12 bytes/line on disk instead of its full body."""
     return hashlib.sha1(line.encode("utf-8")).hexdigest()[:12]
+
+
+_MEDIA_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+                   ".mp4", ".webm", ".mov", ".m4v", ".mp3", ".wav")
+
+
+def _is_media_line(line: str) -> bool:
+    """True for a line that carries an asset, not a headline.
+
+    A news index renders every story TWICE in markdown: once as the card's
+    image/video and once as the story link. Both are lines, so both count as
+    "added" -- which inflated `+N new` to roughly double the number of actual
+    stories, pushed `novelty` to its 0.85 ceiling on a two-article day, and,
+    worst of all, spent the whole 280-char `detail` budget on ONE CDN URL.
+    The 2026-09-08 wake read, in full: `+11 new: ![Image 1: The Work Now
+    Within Reach - clean cover](https://images.ctfassets.net/kftzwdyauwt9/5iH`
+    -- truncated mid-URL, naming not one of the two headlines it woke for.
+    The alt text duplicates the adjacent link line, so dropping media lines
+    loses no headline; it only stops each story being counted twice.
+
+    Two shapes, both observed on the watched pages:
+      - a markdown image: `![Image 1: ...](https://images.ctfassets.net/...)`
+      - a lone link to a media file, e.g. `[Video 3](https://cdn.openai.com/
+        .../Astra_Hero-1x1.mp4)` -- the same hero-video line whose identical
+        "+1 new" diff bought a workspace win every ~2h for 3+ days.
+    """
+    stripped = line.strip()
+    if stripped.startswith("!["):
+        return True
+    if stripped.startswith("[") and stripped.endswith(")"):
+        target = stripped.rsplit("(", 1)[-1].rstrip(")").split("?", 1)[0].lower()
+        return target.endswith(_MEDIA_SUFFIXES)
+    return False
 
 
 def _added_lines(body: str, previous_keys: list[str]) -> list[str]:
@@ -451,12 +485,16 @@ def scan_agent_reach() -> list[dict[str, Any]]:
             continue
         if digest == previous:
             continue
-        added = _added_lines(body, previous_lines)
+        added = [l for l in _added_lines(body, previous_lines)
+                 if not _is_media_line(l)]
         if not added:
-            # The bytes moved but nothing was ADDED — a reorder, a removal, a
-            # rotating promo slot. Advance the baseline silently: reporting
-            # this as a signal is what let a page with no new headline buy a
-            # real session (2026-08-18).
+            # The bytes moved but no HEADLINE was added — a reorder, a
+            # removal, a rotating promo slot, or (since the media filter
+            # above) a swapped card image with no new story behind it.
+            # Advance the baseline silently: reporting this as a signal is
+            # what let a page with no new headline buy a real session
+            # (2026-08-18). A media-only change lands here deliberately —
+            # it is the same "nothing was published" answer.
             watch_hashes[url] = digest
             watch_lines[url] = line_keys
             continue
@@ -499,7 +537,21 @@ def scan_agent_reach() -> list[dict[str, Any]]:
             # any byte-change to anthropic.com/news bid a fixed 0.25 + 0.4*0.9
             # + 0.2*0.3 = 0.67 against a 0.600 wake floor, so that one URL was
             # a standing wake voucher regardless of what it published.
-            "relevance": _keyword_relevance(added_text[:5000]),
+            # exclude=host, for exactly the reason the search channel passes
+            # its query: EVERY link on openai.com/news contains "openai" and
+            # every link on anthropic.com/news contains "anthropic" BY
+            # CONSTRUCTION -- it is the domain, not something the page
+            # revealed. Unexcluded, that one tautological hit scored a flat
+            # 0.5 relevance on any diff whatsoever, i.e. 0.25 + 0.4*0.5 +
+            # 0.2*0.3 = 0.51 against a 0.500 wake bar: a standing wake
+            # voucher for both watched URLs, which is what the 2026-09-08
+            # wake (bid 0.51, to the digit) actually bought -- two "Company"
+            # PR posts. The HOST only, never the full URL: a path like
+            # /news/claude-updates would otherwise mute "claude" forever.
+            "relevance": _keyword_relevance(
+                added_text[:5000],
+                exclude=urllib.parse.urlsplit(url).netloc,
+            ),
             "urgency": 0.3,
             "url": url,
         }, diff_key))
