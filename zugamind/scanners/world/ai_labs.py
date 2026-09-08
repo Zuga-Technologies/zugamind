@@ -249,6 +249,30 @@ eight separate times over twelve days and bought a harness wake:
    case-SENSITIVELY, because "the developer program with new API tiers" is
    the same string shape with a lowercase tail and is a launch.
 
+   EXTENDED 2026-09-08. The money half above is grant-shaped, and the class
+   has a second noun. [openai] "Daybreak for Frontline Defenders: $1B to
+   protect essential services" -- "A $1 billion commitment expands access to
+   frontier cyber AI" -- was sitting at DEFAULT 0.75 in the live cache on the
+   day the rule above shipped: the next wake of this class, already queued,
+   missed because it says "commitment" and not "grant".
+
+   Same discipline, same reason. A bare "commitment" is "our commitment to
+   reliability" on every status page and "investment" is what every
+   infrastructure post calls itself, so the SUM is the discriminator -- the
+   same device the "$40.5M in unrestricted grants" adjective slot uses. Both
+   orders are matched, because the feed writes it both ways ("$1 billion
+   commitment", "commits $7.5M").
+
+   Four items match across 1384 live items, and all four are the lab pledging
+   money to an outside institution: Daybreak, the $7.5M Alignment Project
+   grant, [deepmind] Google's $40M Genesis Mission commitment, and
+   "Introducing NextGenAI" ("OpenAI commits $50M in funding and tools to
+   leading institutions"). The last is at HIGH and goes quiet -- the same
+   trade this point already accepted three paragraphs down for the Safety
+   Fellowship and the People-First AI Fund grantees, on the same reasoning: a
+   philanthropy announcement that opens with a launch verb is still a
+   philanthropy announcement, and the launch verb does not get a vote.
+
    Measured end to end over 1283 live items (openai 1173, deepmind 100,
    msft_research 10): 17 posts change tier, all downward, zero promotions.
    Honest cost, so a later reader can weigh reverting: ONE of the 17 is an
@@ -257,6 +281,46 @@ eight separate times over twelve days and bought a harness wake:
    variant (GPT-5.4-Cyber). It goes quiet. Special-casing it would mean
    letting a model token override a demotion, which is precisely the hole
    point 2 was written to close, so the model token does not get a vote.
+
+12. THE LAB'S ECONOMIC NARRATIVE IS PUBLIC AFFAIRS, AND IT IS A CONTENT LINE.
+   [openai] "The Work Now Within Reach" -- "Explore how more capable,
+   affordable AI can expand the work people and businesses can accomplish
+   -- and make growth more economical" -- scored DEFAULT 0.75, bid 0.600
+   against a 0.500 bar and bought a session on 2026-09-08 13:10Z. It names
+   no model, no price, no endpoint. It is an essay about AI and the economy.
+
+   The tier is not new -- this list has named "economic index" and "economic
+   research" since 2026-08-18. What was wrong is that those are two SURFACE
+   FORMS of a standing content line, not the line itself: OpenAI ships
+   Economic Blueprints per country, an economic-opportunity/Jobs Platform
+   program, economic-impact studies, and the essays that carry them. The
+   list was learning that line one headline at a time.
+
+   Measured over 1384 live items (openai 1174, deepmind 100, google_res 100,
+   msft_research 10): 12 posts change tier, all downward, zero HIGH
+   collateral. The 12 are the four national Economic Blueprints, the Jobs
+   Platform launch, the OpenAI Foundation's $1B, the Stargate Michigan
+   campus, "Seizing the AI opportunity", two economic-impact research posts,
+   the new economic analysis, and the wake itself.
+
+   The trap is the one points 9 and 11 name, in a third word. The obvious
+   match is the bare stem `economic*` -- and it is the one you must NOT
+   take. Measured, it is nearly right: 17 demotions, still zero HIGH
+   collateral. But three of the 17 mention economics only in passing, and
+   two of those are real work: "Measuring Goodhart's law" states the law's
+   origin as an economics idea inside a reward-hacking research post, and
+   [google_res] "Optimizing cloud economics with linear elastic caching" is
+   cost engineering, which is exactly what a builder acts on. So the match
+   is grammar again -- economics paired with a POLICY/PROGRAM noun
+   (blueprint, opportunity, impact, analysis, index, research, policy,
+   growth), or growth and economics inside one clause, which is a macro
+   claim no builder post makes.
+
+   Honest cost, so a later reader can weigh reverting: the third passing
+   mention is "Measuring the performance of our models on real-world tasks"
+   (GDPval, "real-world economically valuable tasks"), an eval release and
+   an arguable keep. The noun-pair grammar spares it, deliberately -- an
+   eval a builder can run against is closer to work than to narrative.
 
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
@@ -514,7 +578,26 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     # `\bnonprofit\b` matched neither surface form these posts use -- the word
     # boundary fails on the plural "nonprofits" and the hyphen splits
     # "non-profit". Widened 2026-09-07; see point 11.
-    r"|philanthrop|\bnon-?profits?\b|economic\s+index|economic\s+research"
+    r"|philanthrop|\bnon-?profits?\b"
+    # The lab's ECONOMIC-NARRATIVE line -- blueprints, jobs/opportunity
+    # programs, impact studies, and the essays that carry them. This list
+    # knew exactly two surface forms of it ("economic index", "economic
+    # research") and [openai] "The Work Now Within Reach" used neither, so
+    # it woke a session at DEFAULT 0.75 on 2026-09-08. Added then; see
+    # point 12.
+    #
+    # Never the bare stem, per the rule points 9 and 11 state: `economic*`
+    # alone reaches "Measuring Goodhart's law" (an economics ANALOGY inside
+    # a reward-hacking research post) and [google_res] "Optimizing cloud
+    # economics with linear elastic caching" (cost engineering, which is
+    # builder work). Measured -- the bare stem demotes those two; the
+    # noun-pair grammars below spare both.
+    r"|\beconomic\s+(?:blueprints?|opportunit\w+|impacts?|analysis|analyses"
+    r"|index|indices|research|policy|policies|growth)\b"
+    # "make growth more economical" -- the wake's own phrasing, which names
+    # no program and no field. Growth and economics inside one clause is a
+    # macro claim; a builder post pairs neither word with the other.
+    r"|\bgrowth\b[^.]{0,30}\beconom\w+|\beconom\w+[^.]{0,30}\bgrowth\b"
     # The noun forms ("partnership", "partnering with") were covered; the
     # VERB form was not, and it is how the announcements are actually
     # titled -- "OpenAI partners with Scale...", "Google DeepMind partners
@@ -573,6 +656,20 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     # the bare "in grants" above is not enough, and the dollar figure is what
     # makes opening the slot safe ("logged in to grant access" has no sum).
     r"|\$[\d,.]+\s*[MBK]?\s+in\s+(?:[\w-]+\s+){0,2}grants?\b"
+    # The same tell without the word "grant". [openai] "Daybreak for Frontline
+    # Defenders: $1B to protect essential services" -- "A $1 billion
+    # commitment expands access to frontier cyber AI" -- was sitting at
+    # DEFAULT 0.75 in the live cache the day this rule shipped, i.e. the next
+    # wake of this class already queued. A lab pledging a sum to a cause is
+    # point 11 exactly; only the noun changed. Added 2026-09-08.
+    #
+    # The sum is what keeps it safe, same as the adjective slot above: a bare
+    # "commitment" is "our commitment to reliability" on every status page,
+    # and "investment" is what every infrastructure post calls itself.
+    r"|\$[\d,.]+\s*(?:[MBK]\b|million|billion|trillion)[^.]{0,40}"
+    r"\b(?:commitments?|pledges?|donations?|contributions?)\b"
+    r"|\b(?:commits?|committed|pledges?|pledged|donates?|donated)\b[^.]{0,40}"
+    r"\$[\d,.]+\s*(?:[MBK]\b|million|billion|trillion)"
     r"|\bfellowships?\b|\bngos?\b"
     # The beneficiary SECTOR. "independent journalism" is the one that cost a
     # session; the rest are its siblings, added un-fired on the same standard
