@@ -258,6 +258,46 @@ eight separate times over twelve days and bought a harness wake:
    letting a model token override a demotion, which is precisely the hole
    point 2 was written to close, so the model token does not get a vote.
 
+12. THE LAB'S ECONOMIC NARRATIVE IS PUBLIC AFFAIRS, AND IT IS A CONTENT LINE.
+   [openai] "The Work Now Within Reach" -- "Explore how more capable,
+   affordable AI can expand the work people and businesses can accomplish
+   -- and make growth more economical" -- scored DEFAULT 0.75, bid 0.600
+   against a 0.500 bar and bought a session on 2026-09-08 13:10Z. It names
+   no model, no price, no endpoint. It is an essay about AI and the economy.
+
+   The tier is not new -- this list has named "economic index" and "economic
+   research" since 2026-08-18. What was wrong is that those are two SURFACE
+   FORMS of a standing content line, not the line itself: OpenAI ships
+   Economic Blueprints per country, an economic-opportunity/Jobs Platform
+   program, economic-impact studies, and the essays that carry them. The
+   list was learning that line one headline at a time.
+
+   Measured over 1384 live items (openai 1174, deepmind 100, google_res 100,
+   msft_research 10): 12 posts change tier, all downward, zero HIGH
+   collateral. The 12 are the four national Economic Blueprints, the Jobs
+   Platform launch, the OpenAI Foundation's $1B, the Stargate Michigan
+   campus, "Seizing the AI opportunity", two economic-impact research posts,
+   the new economic analysis, and the wake itself.
+
+   The trap is the one points 9 and 11 name, in a third word. The obvious
+   match is the bare stem `economic*` -- and it is the one you must NOT
+   take. Measured, it is nearly right: 17 demotions, still zero HIGH
+   collateral. But three of the 17 mention economics only in passing, and
+   two of those are real work: "Measuring Goodhart's law" states the law's
+   origin as an economics idea inside a reward-hacking research post, and
+   [google_res] "Optimizing cloud economics with linear elastic caching" is
+   cost engineering, which is exactly what a builder acts on. So the match
+   is grammar again -- economics paired with a POLICY/PROGRAM noun
+   (blueprint, opportunity, impact, analysis, index, research, policy,
+   growth), or growth and economics inside one clause, which is a macro
+   claim no builder post makes.
+
+   Honest cost, so a later reader can weigh reverting: the third passing
+   mention is "Measuring the performance of our models on real-world tasks"
+   (GDPval, "real-world economically valuable tasks"), an eval release and
+   an arguable keep. The noun-pair grammar spares it, deliberately -- an
+   eval a builder can run against is closer to work than to narrative.
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -514,7 +554,26 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     # `\bnonprofit\b` matched neither surface form these posts use -- the word
     # boundary fails on the plural "nonprofits" and the hyphen splits
     # "non-profit". Widened 2026-09-07; see point 11.
-    r"|philanthrop|\bnon-?profits?\b|economic\s+index|economic\s+research"
+    r"|philanthrop|\bnon-?profits?\b"
+    # The lab's ECONOMIC-NARRATIVE line -- blueprints, jobs/opportunity
+    # programs, impact studies, and the essays that carry them. This list
+    # knew exactly two surface forms of it ("economic index", "economic
+    # research") and [openai] "The Work Now Within Reach" used neither, so
+    # it woke a session at DEFAULT 0.75 on 2026-09-08. Added then; see
+    # point 12.
+    #
+    # Never the bare stem, per the rule points 9 and 11 state: `economic*`
+    # alone reaches "Measuring Goodhart's law" (an economics ANALOGY inside
+    # a reward-hacking research post) and [google_res] "Optimizing cloud
+    # economics with linear elastic caching" (cost engineering, which is
+    # builder work). Measured -- the bare stem demotes those two; the
+    # noun-pair grammars below spare both.
+    r"|\beconomic\s+(?:blueprints?|opportunit\w+|impacts?|analysis|analyses"
+    r"|index|indices|research|policy|policies|growth)\b"
+    # "make growth more economical" -- the wake's own phrasing, which names
+    # no program and no field. Growth and economics inside one clause is a
+    # macro claim; a builder post pairs neither word with the other.
+    r"|\bgrowth\b[^.]{0,30}\beconom\w+|\beconom\w+[^.]{0,30}\bgrowth\b"
     # The noun forms ("partnership", "partnering with") were covered; the
     # VERB form was not, and it is how the announcements are actually
     # titled -- "OpenAI partners with Scale...", "Google DeepMind partners
