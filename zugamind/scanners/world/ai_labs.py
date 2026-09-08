@@ -819,6 +819,31 @@ _PROMO_KEYWORD_RE = re.compile(
 # "radiology" would have demoted a launch through this exact list. "clinical"
 # is matched only paired with trial/consultations/diagnos-, which "Clinically
 # Useful" is not.
+#
+# Extended 2026-09-08 for genomics and computational pathology, after
+# [deepmind] "AlphaGenome Atlas: A predictive map of every possible DNA letter
+# change in the human genome" bid 0.600 at DEFAULT and bought a session. This
+# was not a new judgement: the SAME subject already demotes one feed over, via
+# _OFF_DOMAIN_CATEGORIES -- [google_res] "Transfer learning for genomic
+# prediction in underrepresented populations" is filed under "General Science"
+# and scores 0.40. The verdict existed; it just was not portable, because that
+# path reads a feed's own taxonomy and this list is the only path that works
+# without one. deepmind has none to read: a live fetch of its RSS on 2026-09-08
+# returned zero <category> elements across the whole feed (google_res 283,
+# openai 1017, msft_research 10 and all of them the constant "Research Blog"),
+# so vocabulary is not the lazy lever here, it is the only lever. Second item
+# measured at DEFAULT in the same sweep and covered by the pathology half:
+# [msft_research] "GigaPath-Flash and GigaTIME-Flash: Toward population-scale
+# discovery with efficient pathology foundation models".
+#
+# Same discipline again, and it bites harder here than anywhere else in this
+# list: "gene" is a PREFIX of generative/general/generate/generation, and these
+# feeds are wall-to-wall generative AI, so the bare stem would demote most of
+# the sweep. Matched only in phrases -- "gene expression", "genome-wide",
+# "human genome". Bare "genome"/"genomics" is deliberately absent so a shipped
+# product keeps the WeatherNext escape: "Introducing AlphaGenome 3, our
+# genomics model" still scores HIGH, exactly as "Introducing WeatherNext 3 ...
+# global weather AI model" does against "weather forecast".
 _SCI_DOMAIN_RE = re.compile(
     r"weather\s+forecast|forecast\w*\s+(?:weather|cyclones?|hurricanes?|storms?)"
     r"|(?:cyclones?|hurricanes?|storms?)\s+forecast|climate\s+model"
@@ -830,7 +855,10 @@ _SCI_DOMAIN_RE = re.compile(
     r"|mobility\s+(?:data|patterns?)|understanding\s+of\s+place"
     r"|biomarkers?|glucose\s+monitoring|cardiometabolic"
     r"|clinical\s+(?:trials?|consultations?|diagnos\w*)|biomedical"
-    r"|earth[\s-]system|climate\s+change",
+    r"|earth[\s-]system|climate\s+change"
+    r"|human\s+genome|genome[\s-]wide|genomic\s+(?:predict\w*|variants?|sequenc\w*)"
+    r"|dna\s+(?:letter|variants?|methylation|sequenc\w*)|gene\s+expression|connectomics"
+    r"|(?:computational|digital)\s+pathology|pathology\s+foundation|whole[\s-]slide",
     re.IGNORECASE,
 )
 
