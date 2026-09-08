@@ -615,11 +615,15 @@ def build_briefing(
         lines.append(f"**Cognitive state:** {_untrusted(state.get('state', 'UNKNOWN'), 20)}")
         if since_iso:
             lines.append(f"**Time since last wake:** {_describe_elapsed(since_iso, now)}")
+        else:
+            lines.append("**Time since last wake:** (no prior wake recorded — first briefing)")
+        # After the elapsed line, never between it and its else: appending here
+        # once re-parented that else onto `if deadline_note`, so a briefing with
+        # no budget to quote called a real prior wake a first briefing, and one
+        # with a budget dropped the first-briefing line entirely.
         deadline_note = _wake_deadline_note(harnesses, now)
         if deadline_note:
             lines.append(deadline_note)
-        else:
-            lines.append("**Time since last wake:** (no prior wake recorded — first briefing)")
 
         lines.append("")
         lines.append("## Why you're being woken")
