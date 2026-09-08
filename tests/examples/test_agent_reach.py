@@ -509,6 +509,139 @@ def test_relevance_still_peaks_when_the_addition_is_the_news(monkeypatch, tmp_pa
     assert out[0]["relevance"] == 0.9
 
 
+def test_watch_relevance_ignores_the_watched_hosts_own_name(monkeypatch, tmp_path):
+    """Every link on openai.com/news contains "openai" because that is the
+    domain. Counting it scored a flat 0.5 on any diff at all — 0.25 + 0.4*0.5
+    + 0.2*0.3 = 0.51 against a 0.500 bar, a standing wake voucher. Reproduced
+    from the live 2026-09-08 wake, which bid exactly 0.51 for two PR posts."""
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZUGAMIND_REACH_WATCH_URLS", "https://openai.com/news")
+    monkeypatch.delenv("ZUGAMIND_REACH_QUERIES", raising=False)
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv(
+        "ZUGAMIND_REACH_KEYWORDS", "agent,claude,anthropic,mcp,llm,openai,open source"
+    )
+    clock = _fake_clock(monkeypatch)
+
+    page = "Newsroom\nolder story"
+    addition = (
+        "[The Work Now Within Reach Company Sep 8, 2026]"
+        "(https://openai.com/index/the-work-now-within-reach/)"
+    )
+    bodies = iter([page, page + "\n" + addition])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()
+
+    assert len(out) == 1
+    # "openai" is the host, not evidence — and it was the ONLY hit.
+    assert out[0]["relevance"] == 0.2
+    bid = min(0.75, 0.25 + 0.4 * out[0]["relevance"] + 0.2 * out[0]["urgency"])
+    assert bid < 0.5   # would no longer clear the wake bar
+
+
+def test_watch_relevance_keeps_hits_the_host_does_not_supply(monkeypatch, tmp_path):
+    """The exclusion is the host only. A genuine Claude launch on
+    anthropic.com still scores — otherwise the fix would mute the one source
+    that matters most to us."""
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZUGAMIND_REACH_WATCH_URLS", "https://www.anthropic.com/news")
+    monkeypatch.delenv("ZUGAMIND_REACH_QUERIES", raising=False)
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "agent,claude,anthropic,mcp")
+    clock = _fake_clock(monkeypatch)
+
+    page = "Newsroom\nolder story"
+    bodies = iter([page, page + "\nClaude gains MCP agent support today"])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()
+
+    # claude + mcp + agent all count; only "anthropic" was excluded.
+    assert out[0]["relevance"] == 0.9
+
+
+def test_watch_path_segments_never_mute_a_keyword(monkeypatch, tmp_path):
+    """Excluding the full URL would kill "claude" forever on a /news/claude-*
+    watch path. Only the HOST is by-construction noise."""
+    _use_tmp_cache(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "ZUGAMIND_REACH_WATCH_URLS", "https://example.com/news/claude-updates"
+    )
+    monkeypatch.delenv("ZUGAMIND_REACH_QUERIES", raising=False)
+    monkeypatch.setenv("ZUGAMIND_REACH_CACHE_TTL", "100")
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "claude")
+    clock = _fake_clock(monkeypatch)
+
+    bodies = iter(["boilerplate", "boilerplate\nClaude 5 ships"])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    assert agent_reach.scan_agent_reach()[0]["relevance"] == 0.5
+
+
+def test_media_lines_are_not_counted_as_new_stories(monkeypatch, tmp_path):
+    """A news index renders each story twice — card image, then story link.
+    Only the link is a headline. The 2026-09-08 wake reported "+11 new" for
+    two actual articles and spent all 280 detail chars on one CDN URL."""
+    clock = _watch_only(monkeypatch, tmp_path)
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "agent")
+    page = "Newsroom"
+    addition = (
+        "![Image 1: The Work Now Within Reach — clean cover]"
+        "(https://images.ctfassets.net/kftzwdyauwt9/5iHLT/347b9d80.png?w=3840&q=90&fm=webp)\n"
+        "[The Work Now Within Reach Company Sep 8, 2026]"
+        "(https://openai.com/index/the-work-now-within-reach/)\n"
+        "[Video 3](https://cdn.openai.com/ctf-cdn/bf58ef4d/Astra_Hero-1x1.mp4)"
+    )
+    bodies = iter([page, page + "\n" + addition])
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    out = agent_reach.scan_agent_reach()
+
+    assert len(out) == 1
+    assert "+1 new" in out[0]["detail"]                     # one story, not three
+    assert "The Work Now Within Reach" in out[0]["detail"]  # the headline survives
+    assert "images.ctfassets.net" not in out[0]["detail"]   # the CDN URL does not
+    assert "Astra_Hero-1x1.mp4" not in out[0]["detail"]
+
+
+def test_a_swapped_card_image_alone_is_not_a_signal(monkeypatch, tmp_path):
+    """Media-only change = nothing was published. Same answer as a reorder."""
+    clock = _watch_only(monkeypatch, tmp_path)
+    page = "Newsroom\n[A story](https://example.com/a)"
+    bodies = iter(
+        [page, page + "\n![Image 9: new hero art](https://cdn.example.com/x.webp)"]
+    )
+    monkeypatch.setattr(agent_reach, "_fetch_jina", lambda url: next(bodies))
+
+    assert agent_reach.scan_agent_reach() == []
+    clock["t"] += 200
+    assert agent_reach.scan_agent_reach() == []
+
+
+def test_is_media_line_classifies_both_shapes():
+    assert agent_reach._is_media_line(
+        "![Image 1: cover](https://images.ctfassets.net/x.png?w=3840)"
+    )
+    assert agent_reach._is_media_line(
+        "[Video 3](https://cdn.openai.com/a/Astra_Hero-1x1.mp4)"
+    )
+    # a headline link is not media, even though it sits next to one
+    assert not agent_reach._is_media_line(
+        "[GPT-6 Astra: A new generation of intelligence Research Sep 3, 2026]"
+        "(https://openai.com/index/gpt-6-astra/)"
+    )
+    assert not agent_reach._is_media_line("Anthropic ships a new Claude agent today")
+
+
 def test_cache_without_a_line_set_rebaselines_silently(monkeypatch, tmp_path):
     """Migration: a cache written before line-sets existed must not report the
     entire page as new on the first upgraded fetch."""

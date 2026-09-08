@@ -100,6 +100,46 @@ def test_non_work_wins_over_the_launch_verb_in_these_titles():
         assert ai_labs._relevance_for(title, summary, "openai") == ai_labs._RELEVANCE_NON_WORK, title
 
 
+def test_a_pledged_sum_is_the_tell_when_the_word_grant_is_absent():
+    """Extension 2026-09-08. The money grammar above is grant-shaped, and the
+    class has a second noun. [openai] "Daybreak for Frontline Defenders" was
+    sitting at DEFAULT 0.75 in the live cache the day the grant rule shipped
+    -- the next wake of this class, already queued, missed on one word.
+
+    All four live matches, judged by kind rather than counted. Every one is
+    the lab pledging money to an outside institution."""
+    for title, summary in (
+        ("Daybreak for Frontline Defenders: $1B to protect essential services",
+         "OpenAI introduces Daybreak for Frontline Defenders. A $1 billion "
+         "commitment expands access to frontier cyber AI, training, and support "
+         "for essential services."),
+        ("Advancing independent research on AI alignment",
+         "OpenAI commits $7.5M to The Alignment Project to fund independent AI "
+         "alignment research."),
+        ("Accelerating the frontiers of scientific discovery: Google’s $40M "
+         "commitment to the Genesis Mission",
+         "Google commits $40M in AI tokens and credits for the Genesis Mission"),
+        ("Introducing NextGenAI",
+         "OpenAI commits $50M in funding and tools to leading institutions."),
+    ):
+        assert ai_labs._is_non_work(f"{title} {summary}"), title
+
+
+def test_the_sum_is_the_discriminator_not_the_pledge_noun():
+    """A bare "commitment" is on every status page and "investment" is what
+    every infrastructure post calls itself. Without a figure, none of these
+    is public affairs."""
+    for title, summary in (
+        ("Our commitment to reliability",
+         "A deeper commitment to uptime, latency and transparent incident reporting."),
+        ("Introducing the Realtime API",
+         "Our investment in low-latency speech, now generally available."),
+        ("Updated pricing for the OpenAI API",
+         "We are committed to passing efficiency gains on to developers."),
+    ):
+        assert not ai_labs._is_non_work(f"{title} {summary}"), title
+
+
 def test_beneficiary_sectors_demote():
     """The sector nouns a lab uses when it is funding a cause. None has a
     builder reading -- the same standard "individual freedom" (point 6) and
