@@ -233,11 +233,43 @@ def _ship_grammar():
     return _HIGH_RELEVANCE_RE
 
 
+# A case study is not a ship. Measured 2026-09-09, at the cost of a session:
+# "How GPT-5.6 Sol helps run quantum computing experiments" cleared
+# _is_vendor_ship and took the PROMOTED lane (relevance 0.9, bid 0.67+),
+# because _ship_grammar() matched on the bare version token "GPT-5" -- the
+# model name alone satisfied the "says the thing we build on changed" half.
+# The unversioned form of the same sentence ("How Codex helps a hospital
+# triage patients") correctly returned False, which is what exposed it: the
+# gate was keying on the version digits, not on any claim that something
+# shipped.
+#
+# ai_labs.py already solved this exact shape -- _PROMO_HOW_RE, asked BEFORE
+# its HIGH tier, because "promotional copy quotes the product it sells". Same
+# veto here, deliberately narrower than ai_labs' (no buyer-noun requirement,
+# because an HN title often names no buyer at all).
+#
+# Kept tight on purpose. It requires the title to OPEN with "How", so
+# "Anthropic launches Claude Opus 5" and "Claude Code is going to reduce
+# limits by 25%" are untouched, and it lists only usage verbs -- a title that
+# opens "How" and then announces a real change ("How Claude Code's new
+# sandbox works") is not vetoed here (it is judged on the ship grammar
+# like anything else).
+_CASE_STUDY_RE = re.compile(
+    r"^\s*How\s+.{0,60}?\b(?:help(?:s|ed|ing)?|power(?:s|ed|ing)?|"
+    r"enabl(?:es|ed|ing)|us(?:es|ed|ing)|run(?:s|ning)?\s+on)\b",
+    re.I,
+)
+
+
 def _is_vendor_ship(title: str) -> bool:
     """True when a vendor we build on shipped something, or changed the terms
     of something we already build on. Both halves required — see the block
     above for the measurement behind that."""
     if not title or not _VENDOR_RE.search(title):
+        return False
+    # Asked before the grammar, for the same reason ai_labs asks NON-WORK
+    # first: the copy quotes the product it is a case study about.
+    if _CASE_STUDY_RE.search(title):
         return False
     return bool(_ship_grammar().search(title) or _VENDOR_TERMS_RE.search(title))
 
