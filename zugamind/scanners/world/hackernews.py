@@ -222,15 +222,56 @@ _VENDOR_TERMS_RE = re.compile(
 # it; this is the same pattern applied behind the vendor gate above. Imported
 # lazily inside _is_vendor_ship so importing this scanner does not pull ai_labs'
 # module-level _DATA_DIR resolution into every test that touches HackerNews.
+#
+# HN takes the EVENT half only (_SHIP_EVENT_RE, not the full union). Measured
+# 2026-09-09, at the cost of a fourth paid session: a versioned model name is
+# an announcement when the LAB publishes it and nothing at all when a stranger
+# does, and HN is strangers. See _is_vendor_ship's block for the wake.
 _HIGH_RELEVANCE_RE = None
 
 
 def _ship_grammar():
     global _HIGH_RELEVANCE_RE
     if _HIGH_RELEVANCE_RE is None:
-        from scanners.world.ai_labs import _HIGH_RELEVANCE_RE as _re_
+        from scanners.world.ai_labs import _SHIP_EVENT_RE as _re_
         _HIGH_RELEVANCE_RE = _re_
     return _HIGH_RELEVANCE_RE
+
+
+_VERSIONED_MODEL_PAT = None
+
+
+def _version_grammar():
+    """The other half of ai_labs' ship grammar: a model name carrying a
+    version number. Only meaningful here alongside _is_vendor_host."""
+    global _VERSIONED_MODEL_PAT
+    if _VERSIONED_MODEL_PAT is None:
+        from scanners.world.ai_labs import _VERSIONED_MODEL_RE as _re_
+        _VERSIONED_MODEL_PAT = _re_
+    return _VERSIONED_MODEL_PAT
+
+
+# The hosts for which publishing a version number IS the announcement. Kept
+# to first-party lab properties only -- a press outlet reporting a launch
+# needs a ship VERB like anyone else, which it will have.
+_VENDOR_HOST_RE = re.compile(
+    r"(?:^|\.)(?:anthropic\.com|claude\.com|openai\.com|deepmind\.google"
+    r"|blog\.google|ai\.google\.dev|mistral\.ai|ai\.meta\.com|x\.ai"
+    r"|cohere\.com|deepseek\.com|qwen\.ai)$",
+    re.IGNORECASE,
+)
+
+_URL_HOST_RE = re.compile(r"^[a-z][a-z0-9+.-]*://([^/?#]+)", re.IGNORECASE)
+
+
+def _is_vendor_host(url: str) -> bool:
+    m = _URL_HOST_RE.match((url or "").strip())
+    if not m:
+        return False
+    # Strip port and any userinfo before matching, so ":8080" or an
+    # "user@evil.test" prefix cannot smuggle a vendor host past the anchor.
+    host = m.group(1).rsplit("@", 1)[-1].split(":")[0].rstrip(".")
+    return bool(_VENDOR_HOST_RE.search(host))
 
 
 # A case study is not a ship. Measured 2026-09-09, at the cost of a session:
@@ -242,6 +283,18 @@ def _ship_grammar():
 # triage patients") correctly returned False, which is what exposed it: the
 # gate was keying on the version digits, not on any claim that something
 # shipped.
+#
+# That first fix vetoed the "How <vendor> helps ..." SHAPE and left the CAUSE
+# it had already named in place: the bare version token was still the whole
+# ship half. 2026-09-09 16:03Z, a fourth paid wake, on a title with no verb in
+# it at all -- "GPT-6 Astra, Looped Transformers, and Hidden Reasoning", a
+# personal newsletter (magazine.sebastianraschka.com) listing three topics.
+# _ship_grammar() matched span (0,5): "GPT-6". Nothing claimed a ship.
+#
+# So the gate no longer asks the version half here -- see _ship_grammar above.
+# A vendor name plus a claim ("Anthropic launches Claude Opus 5", "Claude Code
+# is going to reduce limits by 25%") still promotes; a vendor name plus a
+# version number, published by a stranger, does not.
 #
 # ai_labs.py already solved this exact shape -- _PROMO_HOW_RE, asked BEFORE
 # its HIGH tier, because "promotional copy quotes the product it sells". Same
@@ -261,17 +314,27 @@ _CASE_STUDY_RE = re.compile(
 )
 
 
-def _is_vendor_ship(title: str) -> bool:
+def _is_vendor_ship(title: str, url: str = "") -> bool:
     """True when a vendor we build on shipped something, or changed the terms
     of something we already build on. Both halves required — see the block
-    above for the measurement behind that."""
+    above for the measurement behind that.
+
+    `url` is the story's link, and it is load-bearing, not decoration: a bare
+    version number is an announcement when the LAB publishes it and nothing at
+    all when a stranger does. Unknown publisher fails CLOSED — an item with no
+    URL (an Ask HN self-post) does not get to assert a launch by naming one.
+    """
     if not title or not _VENDOR_RE.search(title):
         return False
     # Asked before the grammar, for the same reason ai_labs asks NON-WORK
     # first: the copy quotes the product it is a case study about.
     if _CASE_STUDY_RE.search(title):
         return False
-    return bool(_ship_grammar().search(title) or _VENDOR_TERMS_RE.search(title))
+    # Evidence from any publisher: a title that CLAIMS a change happened.
+    if _ship_grammar().search(title) or _VENDOR_TERMS_RE.search(title):
+        return True
+    # Evidence from the vendor only: a version number and nothing else.
+    return bool(_version_grammar().search(title) and _is_vendor_host(url))
 
 # `detail` is the literal briefing text handed to a paid model, and a title
 # is third-party, untrusted text — a newline or control byte inside it is a
@@ -442,7 +505,7 @@ def scan_hackernews() -> list[dict]:
             trig["novelty"] = safe_http.clamp01(0.9)
             trig["relevance"] = safe_http.clamp01(_RELEVANCE_PROMOTED)
             trig["urgency"] = safe_http.clamp01(max(0.75, urgency))
-        elif _is_vendor_ship(clean_title):
+        elif _is_vendor_ship(clean_title, url):
             # PROMOTED is chosen to clear a floor, not to express enthusiasm:
             # at 0.9 the raw bid is 0.61 + 0.2*urgency, i.e. 0.67 even for a
             # story nobody upvoted — over every floor this deployment has run.

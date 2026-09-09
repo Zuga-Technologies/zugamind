@@ -87,7 +87,17 @@ def test_promoted_stories_clear_the_floor_even_with_no_upvotes():
 
 def test_the_filtered_launch_now_promotes():
     """The story that caused this test file."""
-    assert hackernews._is_vendor_ship("Claude Fable 5.1 and Claude Mythos 5.1")
+    assert hackernews._is_vendor_ship(
+        "Claude Fable 5.1 and Claude Mythos 5.1",
+        "https://www.anthropic.com/news/claude-fable-5-1",
+    )
+    # ...and the SAME title from a stranger does not. The version number is
+    # the lab's announcement or it is somebody's commentary; only the
+    # publisher says which. Measured 2026-09-09, fourth paid wake.
+    assert not hackernews._is_vendor_ship(
+        "Claude Fable 5.1 and Claude Mythos 5.1",
+        "https://magazine.example.com/p/weekly-roundup",
+    )
 
 
 def test_usage_terms_changes_promote():
@@ -206,12 +216,28 @@ _LIVE_CORPUS = [
 ]
 
 
+# The corpus is titles, but promotion is now a function of title AND
+# publisher, so the two items that promote on a version number alone have to
+# name where they came from. Everything else is scored as a stranger, which is
+# what the front page mostly is.
+_STRANGER = "https://news.example.com/some-post"
+_CORPUS_PUBLISHER = {
+    "Claude Fable 5.1 and Claude Mythos 5.1":
+        "https://www.anthropic.com/news/claude-fable-5-1",
+    "Breaking Claude Code Opus 5 Auto Mode":
+        "https://claude.com/blog/opus-5-auto-mode",
+}
+
+
 def test_blast_radius_on_the_real_corpus():
     """Every distinct title this scanner emitted 2026-08-29..2026-09-01. The
     point of pinning the exact set: this promotion spends real sessions, and a
     later loosening of the grammar should have to change this list on purpose
     rather than discover the cost in the budget ledger."""
-    promoted = {t for t in _LIVE_CORPUS if hackernews._is_vendor_ship(t)}
+    promoted = {
+        t for t in _LIVE_CORPUS
+        if hackernews._is_vendor_ship(t, _CORPUS_PUBLISHER.get(t, _STRANGER))
+    }
     assert promoted == {
         "Breaking Claude Code Opus 5 Auto Mode",
         "Claude Code is going reduce limits by 25% from September 14",

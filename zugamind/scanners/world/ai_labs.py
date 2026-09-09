@@ -887,16 +887,50 @@ _SCI_DOMAIN_RE = re.compile(
 # Measured against the live cache (56 items) and every quoted string in the
 # three ai_labs test files (214 strings): exactly the two named posts flip,
 # zero collateral.
-_HIGH_RELEVANCE_RE = re.compile(
+# The ship grammar, in its two named halves. Split 2026-09-09 (it was one
+# union) because the halves carry DIFFERENT evidential weight depending on who
+# published the title, and only one consumer can trust both:
+#
+#   _SHIP_EVENT_RE      -- words that CLAIM a change happened ("introducing",
+#                          "deprecating", "release notes"). Evidence on any
+#                          feed, from any publisher.
+#   _VERSIONED_MODEL_RE -- a model name carrying a version number ("GPT-6",
+#                          "Claude Opus 5"). Evidence ONLY on a vendor's own
+#                          curated feed, where the lab publishing the name IS
+#                          the announcement. On an open aggregator it proves
+#                          nothing: anyone may write about GPT-6.
+#
+# ai_labs reads curated lab feeds, so it keeps the union and its behaviour is
+# unchanged. hackernews.py imports the EVENT half only -- see the measurement
+# in its _is_vendor_ship block.
+_SHIP_EVENT_RE = re.compile(
     r"\bintroducing\b|\bannouncing\b|\bpreviewing\b|\blaunching\b"
     r"|\bnow\s+available\b|\bgenerally\s+available\b|\bdeprecat\w+"
     r"|\bsunsett?ing\b|\bbreaking\s+change|\bmigration\s+guide\b"
     r"|\bpricing\b|\brate\s+limits?\b|\brelease\s+notes\b|\bchangelog\b"
     r"|\bapis?\b|\bsdks?\b"
-    r"|\b(?:gpt|claude|gemini|llama|qwen|opus|sonnet|haiku|fable|codex)"
+    # Finite forms of the same events. These were MISSING from the union and
+    # were being covered only by the version token sitting beside them:
+    # "OpenAI releases GPT-6 Astra" matched on "GPT-6", never on "releases".
+    # Splitting the halves is what exposed it -- the discrimination table
+    # failed two rows that MUST wake. A ship verb is evidence on its own,
+    # whoever publishes it, which is exactly why it belongs in this half.
+    r"|\brelease[sd]?\b|\blaunche[sd]\b|\bship(?:s|ped)\b"
+    r"|\bunveil(?:s|ed)\b|\bannounce[sd]\b|\bintroduce[sd]\b"
+    r"|\brolls?\s+out\b|\bavailable\s+now\b",
+    re.IGNORECASE,
+)
+
+_VERSIONED_MODEL_RE = re.compile(
+    r"\b(?:gpt|claude|gemini|llama|qwen|opus|sonnet|haiku|fable|codex)"
     r"(?:[\s‑-]+(?:omni|robotics|er|flash|pro|ultra|mini|nano|turbo|vision|"
     r"audio|live|instant|reasoning|thinking|lite|max|air|plus|base)){0,2}"
     r"[\s‑-]?\d",
+    re.IGNORECASE,
+)
+
+_HIGH_RELEVANCE_RE = re.compile(
+    _SHIP_EVENT_RE.pattern + r"|" + _VERSIONED_MODEL_RE.pattern,
     re.IGNORECASE,
 )
 
