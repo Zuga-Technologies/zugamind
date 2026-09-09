@@ -222,13 +222,18 @@ _VENDOR_TERMS_RE = re.compile(
 # it; this is the same pattern applied behind the vendor gate above. Imported
 # lazily inside _is_vendor_ship so importing this scanner does not pull ai_labs'
 # module-level _DATA_DIR resolution into every test that touches HackerNews.
+#
+# HN takes the EVENT half only (_SHIP_EVENT_RE, not the full union). Measured
+# 2026-09-09, at the cost of a fourth paid session: a versioned model name is
+# an announcement when the LAB publishes it and nothing at all when a stranger
+# does, and HN is strangers. See _is_vendor_ship's block for the wake.
 _HIGH_RELEVANCE_RE = None
 
 
 def _ship_grammar():
     global _HIGH_RELEVANCE_RE
     if _HIGH_RELEVANCE_RE is None:
-        from scanners.world.ai_labs import _HIGH_RELEVANCE_RE as _re_
+        from scanners.world.ai_labs import _SHIP_EVENT_RE as _re_
         _HIGH_RELEVANCE_RE = _re_
     return _HIGH_RELEVANCE_RE
 
@@ -242,6 +247,18 @@ def _ship_grammar():
 # triage patients") correctly returned False, which is what exposed it: the
 # gate was keying on the version digits, not on any claim that something
 # shipped.
+#
+# That first fix vetoed the "How <vendor> helps ..." SHAPE and left the CAUSE
+# it had already named in place: the bare version token was still the whole
+# ship half. 2026-09-09 16:03Z, a fourth paid wake, on a title with no verb in
+# it at all -- "GPT-6 Astra, Looped Transformers, and Hidden Reasoning", a
+# personal newsletter (magazine.sebastianraschka.com) listing three topics.
+# _ship_grammar() matched span (0,5): "GPT-6". Nothing claimed a ship.
+#
+# So the gate no longer asks the version half here -- see _ship_grammar above.
+# A vendor name plus a claim ("Anthropic launches Claude Opus 5", "Claude Code
+# is going to reduce limits by 25%") still promotes; a vendor name plus a
+# version number, published by a stranger, does not.
 #
 # ai_labs.py already solved this exact shape -- _PROMO_HOW_RE, asked BEFORE
 # its HIGH tier, because "promotional copy quotes the product it sells". Same
