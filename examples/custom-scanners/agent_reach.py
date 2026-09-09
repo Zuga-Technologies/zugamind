@@ -129,6 +129,7 @@ import os
 import shutil
 import subprocess
 import time
+import re
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
@@ -235,6 +236,35 @@ def _keyword_relevance(text: str, exclude: str = "") -> float:
         keywords = [k for k in keywords if k.lower() not in ex]
     hits = sum(1 for k in keywords if k.lower() in text.lower())
     return min(0.9, 0.3 + 0.2 * hits) if hits else 0.2
+
+
+_LINK_HOST_RE = re.compile(r"https?://[^/\s)>\]\"']+", re.I)
+
+
+def _strip_link_hosts(added_text: str) -> str:
+    """Blank out the `scheme://host` of every link in the diff, keeping the
+    path and all the human-written text around it.
+
+    Excluding only the watched page's host (2026-09-08) was half the rule. A
+    vendor news index links to its OWN other properties by construction, so
+    the 2026-09-09 14:42Z wake got through when anthropic.com/news added
+    `* [Scientists](https://claude.com/programs/team-plan-for-scientists)`:
+    "anthropic" was excluded as the page host, but "claude" matched inside
+    `claude.com` -- the link's domain, not anything the page said. One hit is
+    relevance 0.5, i.e. 0.25 + 0.4*0.5 + 0.2*0.3 = 0.51 against a 0.504 bar,
+    so a marketing-program link bought a full paid session. Same tautology as
+    the page host, one level down.
+
+    Done by STRIPPING the host rather than by excluding those keywords: an
+    exclude mutes the word everywhere on the line, which also swallowed
+    `[OpenAI releases GPT-6 Astra](https://openai.com/...)` -- a rival's ship
+    announcement, exactly the thing worth waking for, killed because the
+    title's own subject happened to also be the link's domain.
+
+    HOST only, never the path: `/news/mcp-streaming-spec` must still let
+    "mcp" count, and a title that SAYS "Claude" still counts. Only the domain
+    spelling stops being evidence."""
+    return _LINK_HOST_RE.sub(" ", added_text)
 
 
 # ---------------------------------------------------------------- web_watch --
@@ -549,7 +579,7 @@ def scan_agent_reach() -> list[dict[str, Any]]:
             # PR posts. The HOST only, never the full URL: a path like
             # /news/claude-updates would otherwise mute "claude" forever.
             "relevance": _keyword_relevance(
-                added_text[:5000],
+                _strip_link_hosts(added_text)[:5000],
                 exclude=urllib.parse.urlsplit(url).netloc,
             ),
             "urgency": 0.3,
