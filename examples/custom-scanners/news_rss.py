@@ -294,6 +294,85 @@ def _parse_feed(xml_bytes: bytes, source: str) -> list[dict[str, Any]]:
     return items
 
 
+# --- Relevance tiers -------------------------------------------------------
+# Added 2026-09-09. Every item this scanner emitted carried relevance 0.6, flat.
+# WorldSignals prices a bid at 0.25 + 0.4*relevance + 0.2*urgency, so 0.6 put a
+# fresh item at 0.25 + 0.24 + 0.05 = 0.54 against a bar fitted around 0.50:
+# being NEW was sufficient to buy a 900-second billed Claude Code wake, whatever
+# the subject. Four consecutive wakes on 2026-09-08 were killed at the 900s
+# timeout having produced nothing; the 2026-09-09T13:28Z wake was bought by a
+# Series A funding round. A flat number is not a judgement, it is the absence
+# of one -- see zugamind/scanners/world/ai_labs.py for the same lesson.
+#
+# Unlike the curated lab feeds, a general news feed is a FIREHOSE: "unrecognized
+# subject" is the base case here, not a near-miss. So this fails CLOSED to a
+# non-waking tier rather than open. An off-topic item is not silenced -- it is
+# still emitted and can still win the workspace by stacking with other signals
+# -- it just cannot clear the wake floor on its own freshness.
+_RELEVANCE_ON_TOPIC = 0.6    # bears on what this mind actually builds; the old flat value
+_RELEVANCE_OFF_TOPIC = 0.25  # -> bid ~0.40, under the floor: reportable, not wake-worthy
+_RELEVANCE_NON_WORK = 0.2    # business/personnel news ABOUT the industry, not FOR it
+
+# Money-and-org news. Asked FIRST, because this copy quotes the technology it is
+# about ("Sequoia doubles down on <X> as AI agents create new enterprise security
+# risks") and would otherwise buy the on-topic tier off a keyword it only mentions
+# in passing. A funding round changes nothing about how we build.
+_NON_WORK_RE = re.compile(
+    r"\b("
+    r"series\s+[a-j]\b|seed\s+round|pre-seed|funding\s+round|raises?\s+\$|raised\s+\$"
+    r"|valuation|valued\s+at|term\s+sheet|cap\s+table|led\s+the\s+round|co-led"
+    r"|ipo\b|s-1\b|goes?\s+public|spac\b|tender\s+offer"
+    r"|acqui(?:re[sd]?|sition|hire)|merger|buyout|takeover|stake\s+in"
+    r"|layoffs?|hiring\s+spree|steps?\s+down|resign|appoint(?:s|ed)?\s|names?\s+new"
+    r"|as\s+(?:its\s+)?(?:new\s+)?(?:ceo|cto|coo|cfo|cro|chief)"
+    r"|earnings|revenue\s+(?:beat|miss)|share\s+price|stock\s+(?:jump|slump|surge)"
+    r"|lawsuit|sues?\b|antitrust|settlement|subpoena"
+    r")\b",
+    re.I,
+)
+
+# What this mind actually builds with. Deliberately concrete: tools, protocols and
+# techniques, not the word "AI", which by now matches the entire technology press.
+_PORTFOLIO_RE = re.compile(
+    r"\b("
+    r"model\s+context\s+protocol|mcp\b|claude\s+code|cursor\b|copilot\b|codex\b"
+    r"|coding\s+agent|agent(?:ic)?\s+(?:framework|harness|loop|sdk|runtime)"
+    r"|tool[\s-]use|function\s+calling|structured\s+output"
+    r"|prompt(?:ing)?\s+(?:technique|injection|caching)|context\s+window|context\s+rot"
+    r"|rag\b|retrieval[\s-]augmented|embedding|vector\s+(?:db|database|store)"
+    r"|fine[\s-]tun|distill|quantiz|lora\b|inference\s+(?:cost|speed|latency)"
+    r"|token\s+(?:cost|price|pricing|limit)|price\s+(?:cut|drop)\s+(?:on|for)\s+"
+    r"|open[\s-]weights?|open[\s-]source\s+model|self[\s-]host"
+    r"|benchmark|eval(?:uation)?s?\b|swe-bench|leaderboard"
+    r"|api\s+(?:change|deprecat|breaking)|deprecat|breaking\s+change|rate\s+limit"
+    r"|sandbox|prompt\s+injection|jailbreak|supply[\s-]chain\s+attack"
+    r"|memory\s+(?:system|architecture)|long[\s-]term\s+memory"
+    r"|unreal\s+engine|godot|unity\b|blender|game\s+engine"
+    r"|discord\s+(?:bot|api)|webhook|oauth|supertokens|railway|cloudflare"
+    r"|fastapi|sqlalchemy|pydantic|typescript|vue\s*3|electron"
+    r")\b",
+    re.I,
+)
+
+
+def _relevance_for(title: str, summary: str = "") -> float:
+    """How much this item bears on what this mind builds.
+
+    Order is load-bearing and matches ai_labs._relevance_for: NON-WORK is asked
+    FIRST because business copy quotes the technology it reports on, so an
+    "AI agents" mention inside a funding story must not buy it the on-topic tier.
+
+    Both tiers read title AND summary -- on a firehose the title alone is a
+    headline writer's choice, and the subject often only appears in the blurb.
+    """
+    text = f"{title or ''} {summary or ''}"
+    if _NON_WORK_RE.search(text):
+        return _RELEVANCE_NON_WORK
+    if _PORTFOLIO_RE.search(text):
+        return _RELEVANCE_ON_TOPIC
+    return _RELEVANCE_OFF_TOPIC
+
+
 def scan_news_rss() -> list[dict[str, Any]]:
     """Return `news_rss` triggers for unseen items across the configured feeds."""
     feeds_raw = os.environ.get("ZUGAMIND_NEWS_FEEDS", "").strip()
@@ -405,7 +484,7 @@ def scan_news_rss() -> list[dict[str, Any]]:
             "link": link,
             "published": published,
             "novelty": 0.8,
-            "relevance": 0.6,
+            "relevance": _relevance_for(it.get("title", ""), it.get("summary", "")),
             "urgency": _urgency_for(published, now),
         })
 
