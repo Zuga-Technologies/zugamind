@@ -344,6 +344,47 @@ _COMPARISON_TAIL_RE = re.compile(
 )
 
 
+# A past release REFERRED TO is not a release ANNOUNCED. Measured
+# 2026-09-10 23:42Z, at the cost of a session: "OpenAI's Navier-Stokes release
+# included a Lean 4 formal proof" cleared _is_vendor_ship and took the
+# PROMOTED lane (relevance 0.9, bid 0.70), published by a stranger
+# (johndcook.com).
+#
+# Every earlier fix here asked whether a ship claim was real and WHOSE it was.
+# This title passes both: OpenAI is the subject, and OpenAI did ship. The
+# missing axis is TENSE. `_SHIP_EVENT_RE` carries `\brelease[sd]?\b`, added
+# for the finite VERB forms ("OpenAI releases GPT-6"), and the bare stem in
+# that alternation also matches the NOUN. Here it matched at span (23,30) --
+# "release" as the head of the possessive phrase "OpenAI's Navier-Stokes
+# release". The sentence is not announcing that release; it is describing what
+# an already-shipped one contained. The article is about the Lean 4 proof.
+#
+# Fixed here rather than in _SHIP_EVENT_RE on purpose: ai_labs.py reads
+# curated lab feeds, where "Release: GPT-6" on the vendor's own blog IS the
+# announcement. Narrowing the shared union would cost ai_labs real wakes to
+# buy this one back. Same split the module already documents.
+#
+# And it MASKS rather than vetoes. A hard veto would kill "OpenAI's release of
+# GPT-6 introduces new pricing", which promotes on evidence the noun is not
+# carrying. So the retrospective noun is blanked and the grammar is re-asked:
+# the title promotes iff something OTHER than that noun claims a change.
+_RETRO_RELEASE_RE = re.compile(
+    # "OpenAI's ... release", "the GPT-6 release", "in that release" --
+    # a determiner or possessive, then at most a short noun pile, then the
+    # bare singular. `releases`/`released` are finite forms and never match.
+    r"(?:'s|’s|\b(?:the|this|that|its|their|a|an)\b)"
+    r"(?:\s+[\w.‑-]+){0,3}\s+release\b",
+    re.I,
+)
+
+
+def _mask_retro_release(title: str) -> str:
+    """Blank out `release` where it is the head of a backward-looking noun
+    phrase, so the ship grammar is asked of the rest of the title only."""
+    return _RETRO_RELEASE_RE.sub(
+        lambda m: m.group(0)[: -len("release")] + " " * len("release"), title)
+
+
 def _ship_subject(title: str) -> str:
     """The part of the title a ship claim is ABOUT: everything before the first
     comparison marker. A vendor name that appears only past that marker is the
@@ -378,7 +419,10 @@ def _is_vendor_ship(title: str, url: str = "") -> bool:
     if _CASE_STUDY_RE.search(title):
         return False
     # Evidence from any publisher: a title that CLAIMS a change happened.
-    if _ship_grammar().search(title) or _VENDOR_TERMS_RE.search(title):
+    # Asked of the title with any backward-looking "release" noun blanked --
+    # see _mask_retro_release. Everything else in the title still counts.
+    if (_ship_grammar().search(_mask_retro_release(title))
+            or _VENDOR_TERMS_RE.search(title)):
         return True
     # Evidence from the vendor only: a version number and nothing else.
     return bool(_version_grammar().search(title) and _is_vendor_host(url))
