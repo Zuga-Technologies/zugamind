@@ -314,6 +314,51 @@ _CASE_STUDY_RE = re.compile(
 )
 
 
+# A vendor named as the thing being BEATEN did not ship anything. Measured
+# 2026-09-10, at the cost of a session: "Cognition launches new SWE-2 model,
+# Rivaling Fable 5.1 and GPT-Astra" cleared _is_vendor_ship and took the
+# PROMOTED lane (relevance 0.9, bid 0.68).
+#
+# Both halves matched -- and they matched DIFFERENT SUBJECTS. The ship verb
+# ("launches") belongs to Cognition, which is not a vendor we build on; the
+# vendor token _VENDOR_RE found was "GPT" at span (59,62), inside the
+# comparison tail "Rivaling Fable 5.1 and GPT-Astra". The conjunction this gate
+# is built on ("a vendor we BUILD ON, and a title that says the thing we build
+# on changed") was satisfied by two unrelated clauses of one sentence. Neither
+# earlier fix could catch it: the title has a real ship VERB (so the version-
+# token narrowing does not apply) and it does not open with "How" (so the
+# case-study veto does not apply). The missing axis is not the evidence -- it
+# is WHOSE ship it is.
+#
+# So the vendor half is now asked of the SUBJECT span only. A rival's launch is
+# still emitted; it just takes the ambient lane (0.25) like other competitor
+# news, because it does not change what Buga can build or what it costs -- the
+# only thing the PROMOTED lane exists to interrupt him for.
+_COMPARISON_TAIL_RE = re.compile(
+    r"\b(?:rival(?:s|ing|ed|ry)?|vs\.?|versus"
+    r"|compar(?:ed|es|ing)\s+(?:to|with|against)"
+    r"|beat(?:s|ing)?|outperform(?:s|ing|ed)?"
+    r"|alternative\s+to|competitor\s+to|challenger\s+to|takes\s+on"
+    r"|(?:better|faster|cheaper|smarter|stronger)\s+than)\b",
+    re.I,
+)
+
+
+def _ship_subject(title: str) -> str:
+    """The part of the title a ship claim is ABOUT: everything before the first
+    comparison marker. A vendor name that appears only past that marker is the
+    thing being measured against, not the thing that shipped.
+
+    A title that OPENS with the marker has no subject span to narrow to, so it
+    is returned whole and judged exactly as before -- that shape ("Rivaling
+    GPT-6: Anthropic ships Opus 5") carries its real subject in the tail.
+    """
+    m = _COMPARISON_TAIL_RE.search(title)
+    if not m or m.start() == 0:
+        return title
+    return title[: m.start()]
+
+
 def _is_vendor_ship(title: str, url: str = "") -> bool:
     """True when a vendor we build on shipped something, or changed the terms
     of something we already build on. Both halves required — see the block
@@ -324,7 +369,9 @@ def _is_vendor_ship(title: str, url: str = "") -> bool:
     all when a stranger does. Unknown publisher fails CLOSED — an item with no
     URL (an Ask HN self-post) does not get to assert a launch by naming one.
     """
-    if not title or not _VENDOR_RE.search(title):
+    # The vendor half is asked of the SUBJECT span, not the whole title: a
+    # vendor named only past a comparison marker is the rival, not the shipper.
+    if not title or not _VENDOR_RE.search(_ship_subject(title)):
         return False
     # Asked before the grammar, for the same reason ai_labs asks NON-WORK
     # first: the copy quotes the product it is a case study about.
