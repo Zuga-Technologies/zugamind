@@ -718,10 +718,37 @@ def test_search_relevance_ignores_the_querys_own_terms(monkeypatch, tmp_path):
     (t,) = agent_reach.scan_agent_reach()
     # Bare scoring counted agent + llm + mcp = 3 hits -> the 0.9 ceiling and a
     # 0.65 bid. "agent" is the query's own word; only llm + mcp are evidence.
-    assert t["relevance"] == 0.7
-    # Undated -> low urgency. 0.25 + 0.4*0.7 + 0.2*0.1 = 0.55: under the
-    # 0.570 floor the original 0.65 cleared.
+    assert agent_reach._keyword_relevance(
+        "I built an open-source cognitive memory layer for AI agents in Go"
+        " LLMs are trained to be both a reasoner and a knowledge base. MCP server included.",
+        exclude="open source AI agent cognition attention",
+    ) == 0.7
+    # ...but this hit is UNDATED, so the evergreen cap applies on top. 0.7 gave
+    # a 0.55 bid, which still cleared the 0.500 bar the series later fitted;
+    # 0.4 gives 0.43 and does not.
+    assert t["relevance"] == agent_reach._SEARCH_EVERGREEN_RELEVANCE_CAP
     assert t["urgency"] == agent_reach._SEARCH_URGENCY_UNDATED
+
+
+def test_undated_or_stale_search_hit_cannot_buy_a_wake_on_relevance_alone():
+    # The 2026-09-10 wake: tech-leads-club/agent-skills, an UNDATED GitHub repo
+    # page, bid 0.63 against a 0.500 bar at relevance 0.9 / urgency 0.1.
+    text = ("GitHub - tech-leads-club/agent-skills: skill registry for AI coding"
+            " agents. mcp llm openai anthropic open source")
+    query = "Claude Code agent skills"
+    bid = lambda r, u: round(0.25 + 0.4 * r + 0.2 * u, 4)
+
+    fresh = agent_reach._search_relevance(text, query, agent_reach._SEARCH_URGENCY_FRESH)
+    undated = agent_reach._search_relevance(text, query, agent_reach._SEARCH_URGENCY_UNDATED)
+    stale = agent_reach._search_relevance(text, query, 0.0)
+
+    # Dated inside the freshness window keeps its full score and still wakes.
+    assert fresh == 0.9
+    assert bid(fresh, agent_reach._SEARCH_URGENCY_FRESH) > 0.5
+    # Undated and stale are evergreen pages, not events: capped, and under the bar.
+    assert undated == stale == agent_reach._SEARCH_EVERGREEN_RELEVANCE_CAP
+    assert bid(undated, agent_reach._SEARCH_URGENCY_UNDATED) < 0.5
+    assert bid(stale, 0.0) < 0.5
 
 
 def test_search_urgency_is_publish_age_or_low_when_undated():

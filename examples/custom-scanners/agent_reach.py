@@ -394,6 +394,39 @@ def _search_urgency(published: float | None, now: float) -> float:
     return round(_SEARCH_URGENCY_FRESH * (1.0 - (age_h - _SEARCH_FRESH_HOURS) / span), 4)
 
 
+_SEARCH_EVERGREEN_RELEVANCE_CAP = 0.4
+
+
+def _search_relevance(text: str, query: str, urgency: float) -> float:
+    """Keyword relevance for a search hit, CAPPED unless the backend vouched
+    the result is fresh.
+
+    Urgency cannot gate this channel on its own. The bid is
+    `0.25 + 0.4*relevance + 0.2*urgency`, so the whole age ramp — fresh 0.25
+    down to stale 0.0 — is worth **0.05** of bid, while relevance is worth
+    0.36. A result at the 0.9 keyword ceiling therefore bids 0.68 fresh, 0.63
+    undated and 0.61 maximally stale: all three clear a ~0.50 bar. That is how
+    an UNDATED GitHub repo page (`tech-leads-club/agent-skills`, query "Claude
+    Code agent skills") bought a billed session on 2026-09-10 at bid 0.63 —
+    the 2026-09-09 fail-low-when-undated fix was in force and could not have
+    stopped it, because 0.1 vs 0.25 urgency is 0.03 of bid.
+
+    Recency has to be expressed through the 0.4-weighted term instead. An
+    undated or stale hit is an evergreen PAGE, not an event, so its relevance
+    is capped at 0.4 -> bid 0.43 undated, 0.41 stale: no wake. A result the
+    backend dates inside `_SEARCH_FRESH_HOURS` keeps its full score and still
+    bids 0.68, which is correct — a repo that appeared in the last 24h is a
+    real signal.
+
+    Capped items are still EMITTED and can still win the workspace by stacking
+    with other signals, exactly as the news_rss off-topic tier does. They just
+    cannot buy a session on their own."""
+    relevance = _keyword_relevance(text, exclude=query)
+    if urgency < _SEARCH_URGENCY_FRESH:
+        return min(relevance, _SEARCH_EVERGREEN_RELEVANCE_CAP)
+    return relevance
+
+
 def _mcporter_available() -> bool:
     return shutil.which("mcporter") is not None
 
@@ -599,16 +632,19 @@ def scan_agent_reach() -> list[dict[str, Any]]:
                 if not url.startswith("http") or key in seen:
                     continue
                 title = r.get("title", url)
+                # Publish age when the backend reports one (Exa's
+                # `publishedDate`), low when it does not (Tavily).
+                urgency = _search_urgency(_parse_published(r.get("publishedDate")), now)
                 candidates.append(("search", key, None, None, {
                     "type": "reach_search_result",
                     "detail": f"[{query}] {title} -- {url}"[:280],
                     "novelty": 0.6,
                     # Scored on the keywords the query did NOT already
-                    # contain — the ones a result could actually reveal.
-                    "relevance": _keyword_relevance(f"{title} {r.get('text', '')}", exclude=query),
-                    # Publish age when the backend reports one (Exa's
-                    # `publishedDate`), low when it does not (Tavily).
-                    "urgency": _search_urgency(_parse_published(r.get("publishedDate")), now),
+                    # contain — the ones a result could actually reveal,
+                    # then CAPPED when the result is not demonstrably fresh.
+                    "relevance": _search_relevance(
+                        f"{title} {r.get('text', '')}", query, urgency),
+                    "urgency": urgency,
                     "url": url,
                     "query": query,
                 }, None))
