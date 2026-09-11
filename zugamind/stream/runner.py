@@ -724,6 +724,7 @@ class StreamRunner:
                 state["last_wake"] = journal.now_iso()
                 self._save_state_safe(state)
                 self._post_action_integrity(winner_dict, harness_results, enabled_configs)
+                self._notify_dispatched(winner_dict, harness_results)
 
             return harness_results
         except Exception as e:  # noqa: BLE001 — fail-closed: no gate error reaches a harness call
@@ -734,6 +735,35 @@ class StreamRunner:
                 "failure_reason": map_local_slug(skip_reason),
             })
             return []
+
+    def _notify_dispatched(
+        self, winner_dict: Dict[str, Any], harness_results: List[Dict[str, Any]],
+    ) -> bool:
+        """Tell the WINNING module that a harness really ran for its bid.
+
+        Winning the workspace is free and happens every cycle; a dispatched
+        session is the event that costs money and can advance something. A
+        module that keeps a per-target clock (priority_goals) must reset it
+        on THIS event, not on the win: resetting on wins kept real goals
+        under an hour stale for 13 days (1,057 wins, 0 sessions, BugaPC
+        2026-08-29..09-11). Only results that are ok and not dry-run count.
+        Fail-open: never raises, never affects the cycle that already
+        happened. Returns True if a module hook was called."""
+        try:
+            if not any(hr.get("ok") and not hr.get("dry_run") for hr in (harness_results or [])):
+                return False
+            name = (winner_dict or {}).get("source_module")
+            for m in self.modules:
+                if getattr(m, "name", None) != name:
+                    continue
+                hook = getattr(m, "on_dispatched", None)
+                if callable(hook):
+                    hook(winner_dict)
+                    return True
+                return False
+        except Exception as e:  # noqa: BLE001 — advisory; the session already ran
+            logger.debug("on_dispatched notify failed (fail-open): %s", e)
+        return False
 
     def _post_action_integrity(
         self, winner_dict: Dict[str, Any], harness_results: List[Dict[str, Any]],

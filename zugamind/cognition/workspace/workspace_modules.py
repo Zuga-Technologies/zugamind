@@ -498,17 +498,27 @@ class PriorityGoalsModule(WorkspaceModule):
     # may flag some as actionable; those bid on a 24-hour ramp up to
     # SALIENCE_CAP_ACTIONABLE, parity with WorldSignals' cap, so a real goal
     # that has gone a day without progress can clear a learned wake floor
-    # that world news sets. Measured on the BugaPC twin 2026-08-29..09-11: this
-    # module won 1,050 lottery cycles under a 0.57 floor and bought zero
-    # sessions, because 0.55 < 0.57 and the list was the example one.
+    # that world news sets. Measured on the BugaPC twin 2026-08-29..09-11
+    # (2,048 journaled cycles): this module won the workspace 1,057 times
+    # and bought zero sessions. The cap was NOT the binding constraint:
+    # 94% of those wins bid 0.23-0.26 with the goal under an hour stale,
+    # because on_broadcast reset the clock on every workspace WIN and the
+    # module wins about every other cycle. A win costs nothing and advances
+    # nothing; only a dispatched session does. So an actionable goal's
+    # clock resets in on_dispatched (a harness really ran), never in
+    # on_broadcast; example/non-actionable goals keep the old reset.
     # ACTIONABLE_LIMIT bounds how many goals may use the higher cap (in list
     # order = priority order), so a long goal tree cannot saturate a
     # harness's daily wake cap with goal sessions.
     SALIENCE_CAP = 0.55
     SALIENCE_CAP_ACTIONABLE = 0.75
-    ACTIONABLE_RAMP_HOURS = 24.0
+    # 48 h to the cap, so the bid crosses the floor's clamp minimum (0.50,
+    # act/floor_calibration.WARMUP_FLOOR) at exactly 24 h: "a day without
+    # progress is worth a session", and staleness alone never buys more
+    # than one session per goal per day.
+    ACTIONABLE_RAMP_HOURS = 48.0
     ACTIONABLE_LIMIT = 3
-    NEVER_TOUCHED_ACTIONABLE = 0.60  # one session soon, but below a day-stale goal
+    NEVER_TOUCHED_ACTIONABLE = 0.60  # one session soon, but below a two-day-stale goal
 
     def __init__(self, now_fn=None):
         super().__init__()
@@ -586,35 +596,51 @@ class PriorityGoalsModule(WorkspaceModule):
         """Replace the goal list at runtime with a deployment's real goals.
 
         Each item is a (key, label) or (key, label, actionable) tuple, or a
-        dict with keys "key", "label" and optional "actionable". Touch state
-        survives for keys that stay in the list (from this process or from
-        the persisted file); new keys start untouched. At most
+        dict with keys "key", "label", optional "actionable" and optional
+        "touched" (ISO timestamp or datetime: when the goal last really
+        moved, e.g. its updated_at in the tracker). Touch state survives for
+        keys that stay in the list (from this process or from the persisted
+        file); a "touched" newer than what is known advances the clock, an
+        older one never regresses it; new keys start untouched. At most
         ACTIONABLE_LIMIT flagged goals, in list order, get the higher cap.
         Persists immediately.
         """
         new_goals: List[Tuple[str, str]] = []
         flagged: List[str] = []
+        touched: Dict[str, datetime] = {}
         for item in goals or []:
             if isinstance(item, dict):
                 key, label = str(item.get("key", "")).strip(), str(item.get("label", "") or "")
                 actionable = bool(item.get("actionable", False))
+                raw_touch = item.get("touched")
             else:
                 seq = list(item)
                 key, label = str(seq[0]).strip(), str(seq[1]) if len(seq) > 1 else ""
                 actionable = bool(seq[2]) if len(seq) > 2 else False
+                raw_touch = None
             if not key or any(k == key for k, _ in new_goals):
                 continue
             new_goals.append((key, label))
             if actionable:
                 flagged.append(key)
+            try:
+                parsed = raw_touch if isinstance(raw_touch, datetime) else self._parse_touch(raw_touch)
+                if parsed is not None:
+                    if parsed.tzinfo is not None:
+                        parsed = parsed.astimezone().replace(tzinfo=None)
+                    touched[key] = parsed
+            except Exception as e:  # noqa: BLE001 — one bad timestamp must not lose the list
+                logger.warning("priority_goals: ignoring bad touched for %r: %s", key, e)
         if not new_goals:
             return
         self._goals = new_goals
         self._actionable = set(flagged[: self.ACTIONABLE_LIMIT])
-        self._goal_last_touched = {
-            key: self._goal_last_touched.get(key) or self._persisted_touch.get(key)
-            for key, _ in new_goals
-        }
+        clocks: Dict[str, Optional[datetime]] = {}
+        for key, _ in new_goals:
+            known = self._goal_last_touched.get(key) or self._persisted_touch.get(key)
+            fed = touched.get(key)
+            clocks[key] = max(known, fed) if (known and fed) else (known or fed)
+        self._goal_last_touched = clocks
         self._save_state()
 
     def set_goal_state(self, goal_last_touched: Dict[str, Optional[datetime]]):
@@ -640,10 +666,12 @@ class PriorityGoalsModule(WorkspaceModule):
         # Salience. Example/non-actionable goals: 0.2 baseline, a gentle
         # 12-hour ramp, capped at SALIENCE_CAP (below metacognition's crisis
         # ceiling of 0.7) — on idle cycles this still out-ranks
-        # metacognition's 0.1 idle baseline. Actionable real goals: a 24-hour
-        # ramp from 0.25 to SALIENCE_CAP_ACTIONABLE, so a day without
-        # progress is worth a session; never-touched earns one session soon
-        # without outranking a genuinely stale goal.
+        # metacognition's 0.1 idle baseline. Actionable real goals: a 48-hour
+        # ramp from 0.25 to SALIENCE_CAP_ACTIONABLE that crosses the floor's
+        # 0.50 clamp minimum at 24 h, so a day without progress is worth a
+        # session and staleness alone never buys more than one a day per
+        # goal; never-touched earns one session soon without outranking a
+        # goal that is genuinely two days stale.
         actionable = key in self._actionable
         if hours_stale > 9000:
             salience = self.NEVER_TOUCHED_ACTIONABLE if actionable else 0.45
@@ -675,17 +703,34 @@ class PriorityGoalsModule(WorkspaceModule):
         )
 
     def on_broadcast(self, content: WorkspaceContent):
-        """Reset this goal's staleness clock when it wins. Persisted
-        immediately — see STATE_FILE — so it survives a process restart
-        before the next wake."""
+        """Reset an EXAMPLE/non-actionable goal's staleness clock when it
+        wins the workspace (the original semantics: the mind thought about
+        it). An actionable goal is different: winning the workspace costs
+        nothing and advances nothing, and it happens about every other
+        cycle. Resetting on it kept real goals under an hour stale forever
+        (1,057 wins, 0 sessions, BugaPC 2026-08-29..09-11). Its clock resets
+        in on_dispatched() instead. Persisted immediately — see STATE_FILE —
+        so it survives a process restart before the next wake."""
         try:
             if content and content.bid and content.bid.source_module == self.name:
                 key = content.bid.context.get("goal_key")
-                if key in self._goal_last_touched:
+                if key in self._goal_last_touched and key not in self._actionable:
                     self._goal_last_touched[key] = self._now_fn()
                     self._save_state()
         except Exception as e:
             logger.debug("priority_goals on_broadcast failed: %s", e)
+
+    def on_dispatched(self, winner: Dict[str, Any]):
+        """A harness really ran for this module's bid: that goal has had its
+        session. Reset its clock (actionable or not) and persist, so the
+        staleness ramp restarts from the session, not from a workspace win."""
+        try:
+            key = ((winner or {}).get("context") or {}).get("goal_key")
+            if key in self._goal_last_touched:
+                self._goal_last_touched[key] = self._now_fn()
+                self._save_state()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("priority_goals on_dispatched failed: %s", e)
 
 
 # =============================================================================

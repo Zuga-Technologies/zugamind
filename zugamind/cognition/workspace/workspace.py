@@ -145,6 +145,13 @@ class WorkspaceModule:
         """Called every cycle with the winning content. Default: no reaction."""
         pass
 
+    def on_dispatched(self, winner: Dict[str, Any]):
+        """Called on the WINNING module only, after a harness really ran for
+        its bid (ok, not dry-run, not filtered). Winning the workspace is
+        free and happens every cycle; a dispatched session is the event that
+        costs money and can advance something. Default: no reaction."""
+        pass
+
 
 # =============================================================================
 # ATTENTION SCHEMA

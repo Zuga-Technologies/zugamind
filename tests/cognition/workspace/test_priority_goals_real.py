@@ -1,24 +1,32 @@
-"""PriorityGoalsModule with a REAL goal list and an actionable cap.
+"""PriorityGoalsModule with a REAL goal list, an actionable cap, and a clock
+that resets on a DISPATCHED session rather than on a workspace win.
 
-Measured on the BugaPC twin, 2026-08-29 to 2026-09-11 (journal.jsonl): the
-module won 1,050 lottery cycles and bought zero sessions, because its bid is
-capped at 0.55 under a learned wake floor of 0.57, and because the list it
-bids on is the three illustrative example goals shipped with the package,
-not the deployment's own. This file pins the two fixes:
+Measured on the BugaPC twin, 2026-08-29 to 2026-09-11 (journal.jsonl, 2,048
+cycles): the module won the workspace 1,057 times and bought zero sessions.
+The cap (0.55 under a learned floor) was never the binding constraint: 94% of
+those wins bid 0.23-0.26 with the goal under an hour stale, because
+on_broadcast reset the goal's clock on every workspace WIN, and the module
+wins about every other cycle. This file pins the three fixes:
 
   1. set_goals() replaces the list at runtime (a private deployment feeds
-     its real goals), keeping touch state for keys that survive.
+     its real goals), keeping touch state for keys that survive, and may
+     carry a "touched" timestamp (the tracker's updated_at) that advances a
+     goal's clock but never regresses it.
   2. An ACTIONABLE goal may bid up to SALIENCE_CAP_ACTIONABLE (0.75, parity
-     with WorldSignals), on a 24-hour staleness ramp, for at most
-     ACTIONABLE_LIMIT goals in list (priority) order. Non-actionable goals
-     keep the old 0.55 cap and 12-hour ramp, so an example deployment
-     behaves exactly as before.
+     with WorldSignals) on a 48-hour staleness ramp that crosses the floor's
+     0.50 clamp minimum at 24 h, for at most ACTIONABLE_LIMIT goals in list
+     (priority) order. Non-actionable goals keep the old 0.55 cap and
+     12-hour ramp, so an example deployment behaves exactly as before.
+  3. An actionable goal's clock resets in on_dispatched() (a harness really
+     ran for it), NOT in on_broadcast(). Non-actionable goals keep the old
+     reset-on-win semantics.
 
 Run: python -m pytest tests/cognition/workspace/test_priority_goals_real.py -v
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+import json
+from datetime import datetime, timedelta, timezone
 
 from cognition.workspace.workspace import SalienceBid, ThoughtType, WorkspaceContent
 from cognition.workspace.workspace_modules import PriorityGoalsModule
@@ -33,6 +41,18 @@ def _module(now=T0):
 def _touch(m, key, when):
     m._goal_last_touched[key] = when
 
+
+def _broadcast(m, bid):
+    m.on_broadcast(WorkspaceContent(bid=SalienceBid(
+        m.name, "x", bid.salience, ThoughtType.METACOGNITION, context=dict(bid.context))))
+
+
+def _winner_for(bid):
+    return {"source_module": "priority_goals", "salience": bid.salience,
+            "content": bid.content, "context": dict(bid.context)}
+
+
+# --- 1. the list -------------------------------------------------------------
 
 def test_set_goals_replaces_the_list_and_keeps_known_touch_state():
     m = _module()
@@ -52,6 +72,39 @@ def test_set_goals_accepts_dicts_with_actionable_flag():
     assert m.is_actionable("goal:2") is False
 
 
+def test_touched_from_the_tracker_sets_a_new_goals_clock_in_local_naive_time():
+    m = _module()
+    when = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True, "touched": when.isoformat()}])
+    clock = m._goal_last_touched["goal:1"]
+    assert clock is not None and clock.tzinfo is None
+    assert clock == when.astimezone().replace(tzinfo=None)
+
+
+def test_touched_advances_a_clock_but_never_regresses_it():
+    m = _module()
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True}])
+    _touch(m, "goal:1", T0 - timedelta(hours=2))
+    # older than what the module knows: ignored
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True,
+                  "touched": (T0 - timedelta(hours=30)).isoformat()}])
+    assert m._goal_last_touched["goal:1"] == T0 - timedelta(hours=2)
+    # newer: the clock moves forward
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True,
+                  "touched": (T0 - timedelta(minutes=10)).isoformat()}])
+    assert m._goal_last_touched["goal:1"] == T0 - timedelta(minutes=10)
+
+
+def test_a_bad_touched_timestamp_does_not_lose_the_goal():
+    m = _module()
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True, "touched": "not a date"},
+                 {"key": "goal:2", "label": "two"}])
+    assert [g[0] for g in m.goals()] == ["goal:1", "goal:2"]
+    assert m._goal_last_touched["goal:1"] is None
+
+
+# --- 2. the bid --------------------------------------------------------------
+
 def test_non_actionable_goal_keeps_the_old_cap():
     m = _module()
     m.set_goals([("goal:1", "one")])
@@ -61,14 +114,25 @@ def test_non_actionable_goal_keeps_the_old_cap():
     assert bid.salience <= PriorityGoalsModule.SALIENCE_CAP == 0.55
 
 
-def test_actionable_goal_ramps_to_0_75_at_24_hours():
+def test_actionable_goal_reaches_0_75_at_48_hours():
     m = _module()
     m.set_goals([{"key": "goal:1", "label": "one", "actionable": True}])
-    _touch(m, "goal:1", T0 - timedelta(hours=24))
+    _touch(m, "goal:1", T0 - timedelta(hours=48))
     bid = m.generate_bid({})
     assert abs(bid.salience - PriorityGoalsModule.SALIENCE_CAP_ACTIONABLE) < 1e-9
     assert PriorityGoalsModule.SALIENCE_CAP_ACTIONABLE == 0.75
     assert bid.context["actionable"] is True
+
+
+def test_actionable_goal_crosses_the_floor_clamp_minimum_at_24_hours():
+    """0.50 is act/floor_calibration.WARMUP_FLOOR, the lowest the learned
+    floor can ever be: a day without progress is exactly one session."""
+    m = _module()
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True}])
+    _touch(m, "goal:1", T0 - timedelta(hours=24))
+    assert abs(m.generate_bid({}).salience - 0.50) < 1e-9
+    _touch(m, "goal:1", T0 - timedelta(hours=23))
+    assert m.generate_bid({}).salience < 0.50
 
 
 def test_actionable_goal_is_below_cap_when_fresh():
@@ -81,7 +145,7 @@ def test_actionable_goal_is_below_cap_when_fresh():
 
 def test_actionable_never_touched_bids_above_warmup_floor_but_below_cap():
     """A real goal never advanced this session earns one session soon, but
-    must not outrank a goal that has genuinely gone a day without progress."""
+    must not outrank a goal that has genuinely gone two days without progress."""
     m = _module()
     m.set_goals([{"key": "goal:1", "label": "one", "actionable": True}])
     bid = m.generate_bid({})
@@ -114,11 +178,46 @@ def test_default_example_deployment_is_unchanged():
     assert bid.salience <= 0.55
 
 
-def test_on_broadcast_still_resets_a_real_goal():
+# --- 3. the clock ------------------------------------------------------------
+
+def test_winning_the_workspace_does_not_reset_an_actionable_goal():
+    """The 1,057-wins-0-sessions failure: a win is free and advances
+    nothing, so it must not restart the ramp."""
     m = _module()
     m.set_goals([{"key": "goal:1", "label": "one", "actionable": True}])
     _touch(m, "goal:1", T0 - timedelta(hours=30))
     bid = m.generate_bid({})
-    m.on_broadcast(WorkspaceContent(bid=SalienceBid(
-        m.name, "x", bid.salience, ThoughtType.METACOGNITION, context=dict(bid.context))))
+    _broadcast(m, bid)
+    assert m._goal_last_touched["goal:1"] == T0 - timedelta(hours=30)
+    # and the next cycle bids exactly as high again
+    assert abs(m.generate_bid({}).salience - bid.salience) < 1e-9
+
+
+def test_winning_the_workspace_still_resets_a_non_actionable_goal():
+    m = _module()
+    m.set_goals([("goal:1", "one")])
+    _touch(m, "goal:1", T0 - timedelta(hours=30))
+    _broadcast(m, m.generate_bid({}))
     assert m._goal_last_touched["goal:1"] == T0
+
+
+def test_a_dispatched_session_resets_the_actionable_goal_and_persists():
+    m = _module()
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True}])
+    _touch(m, "goal:1", T0 - timedelta(hours=30))
+    bid = m.generate_bid({})
+    m.on_dispatched(_winner_for(bid))
+    assert m._goal_last_touched["goal:1"] == T0
+    on_disk = json.loads(PriorityGoalsModule.STATE_FILE.read_text(encoding="utf-8"))
+    assert on_disk["goal:1"] == T0.isoformat()
+    # the ramp restarts from the session
+    assert m.generate_bid({}).salience < 0.30
+
+
+def test_on_dispatched_ignores_a_winner_for_an_unknown_goal():
+    m = _module()
+    m.set_goals([{"key": "goal:1", "label": "one", "actionable": True}])
+    _touch(m, "goal:1", T0 - timedelta(hours=30))
+    m.on_dispatched({"source_module": "priority_goals", "context": {"goal_key": "goal:404"}})
+    m.on_dispatched({})
+    assert m._goal_last_touched["goal:1"] == T0 - timedelta(hours=30)

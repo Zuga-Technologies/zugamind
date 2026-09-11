@@ -234,6 +234,23 @@ def maybe_record_ambient_sample(hc: Dict[str, Any], winner_dict: Optional[Dict[s
         state = _load_state()
         entry = state.setdefault(name, {"samples": [], "floor": None, "calibrated_at": None})
 
+        # One event, one sample. The same (module, target) winning again on
+        # the very next cycle is the same event still on the table (a stale
+        # goal re-bidding until a session is bought, a story still on top),
+        # not fresh ambient evidence. Sampling it every cycle let a bidder
+        # push the 90th percentile above its own cap and lock the gate
+        # against everything: a 0.75 bidder repeating 5 of 50 cycles puts
+        # the floor at 0.80, above every module's cap, for good. Measured
+        # before adding this (BugaPC journal, 2,048 cycles, 2026-08-29..
+        # 09-11): no world_signals winner ever repeated consecutively and no
+        # consecutive repeat of any module bid >= 0.5, so the fitted floor's
+        # history is unchanged. Modules that set no "target" are untouched.
+        target = (winner_dict.get("context") or {}).get("target")
+        identity = f"{winner_dict.get('source_module')}:{target}" if target is not None else None
+        if identity is not None and entry.get("last_identity") == identity:
+            return
+        entry["last_identity"] = identity
+
         entry["samples"] = (entry["samples"] + [float(salience)])[-ROLLING_WINDOW:]
         if len(entry["samples"]) >= CALIBRATION_WINDOW:
             first_calibration = entry.get("floor") is None
