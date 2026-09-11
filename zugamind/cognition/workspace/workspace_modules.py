@@ -22,7 +22,7 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from foundation.config import ENGINE_DIR
 from foundation.fs import atomic_write_text
@@ -493,10 +493,30 @@ class PriorityGoalsModule(WorkspaceModule):
     # was silently defeated. 0.001 h = 3.6 s per rank.
     PRIORITY_TIEBREAK_HOURS = 0.001
 
+    # Salience caps. The example list bids under SALIENCE_CAP exactly as it
+    # always has. A deployment that feeds its REAL goals through set_goals()
+    # may flag some as actionable; those bid on a 24-hour ramp up to
+    # SALIENCE_CAP_ACTIONABLE, parity with WorldSignals' cap, so a real goal
+    # that has gone a day without progress can clear a learned wake floor
+    # that world news sets. Measured on the BugaPC twin 2026-08-29..09-11: this
+    # module won 1,050 lottery cycles under a 0.57 floor and bought zero
+    # sessions, because 0.55 < 0.57 and the list was the example one.
+    # ACTIONABLE_LIMIT bounds how many goals may use the higher cap (in list
+    # order = priority order), so a long goal tree cannot saturate a
+    # harness's daily wake cap with goal sessions.
+    SALIENCE_CAP = 0.55
+    SALIENCE_CAP_ACTIONABLE = 0.75
+    ACTIONABLE_RAMP_HOURS = 24.0
+    ACTIONABLE_LIMIT = 3
+    NEVER_TOUCHED_ACTIONABLE = 0.60  # one session soon, but below a day-stale goal
+
     def __init__(self, now_fn=None):
         super().__init__()
+        self._goals: List[Tuple[str, str]] = [(g[0], g[1]) for g in self.GOALS]
+        self._actionable: set = set()
+        self._persisted_touch: Dict[str, Optional[datetime]] = {}
         self._goal_last_touched: Dict[str, Optional[datetime]] = {
-            g[0]: None for g in self.GOALS
+            g[0]: None for g in self._goals
         }
         # Injectable clock: staleness feeds salience, so a real datetime.now()
         # here leaks wall-clock into a DECISION — two identical cycles seconds
@@ -532,12 +552,17 @@ class PriorityGoalsModule(WorkspaceModule):
             logger.warning("priority_goals state is not an object; ignoring")
             return
         for key, iso in raw.items():
-            if key not in self._goal_last_touched:
-                continue
             try:  # one bad key must not lose the others
-                self._goal_last_touched[key] = self._parse_touch(iso)
+                parsed = self._parse_touch(iso)
             except Exception as e:  # noqa: BLE001
                 logger.warning("priority_goals: ignoring bad timestamp for %r: %s", key, e)
+                continue
+            # Keep every persisted key, not only the current list's: a
+            # deployment calls set_goals() AFTER construction, and a goal it
+            # feeds back in must find the touch it earned before the restart.
+            self._persisted_touch[key] = parsed
+            if key in self._goal_last_touched:
+                self._goal_last_touched[key] = parsed
 
     def _save_state(self) -> None:
         try:
@@ -546,6 +571,51 @@ class PriorityGoalsModule(WorkspaceModule):
             atomic_write_text(self.STATE_FILE, json.dumps(raw, indent=2))
         except Exception as e:  # noqa: BLE001 — persistence is best-effort
             logger.warning("priority_goals state save failed (non-fatal): %s", e)
+
+    def goals(self) -> List[Tuple[str, str]]:
+        """The current (key, label) list, in priority order."""
+        return list(self._goals)
+
+    def is_actionable(self, key: str) -> bool:
+        """True if `key` may bid under SALIENCE_CAP_ACTIONABLE: flagged by
+        set_goals() AND within the first ACTIONABLE_LIMIT flagged goals in
+        list order."""
+        return key in self._actionable
+
+    def set_goals(self, goals) -> None:
+        """Replace the goal list at runtime with a deployment's real goals.
+
+        Each item is a (key, label) or (key, label, actionable) tuple, or a
+        dict with keys "key", "label" and optional "actionable". Touch state
+        survives for keys that stay in the list (from this process or from
+        the persisted file); new keys start untouched. At most
+        ACTIONABLE_LIMIT flagged goals, in list order, get the higher cap.
+        Persists immediately.
+        """
+        new_goals: List[Tuple[str, str]] = []
+        flagged: List[str] = []
+        for item in goals or []:
+            if isinstance(item, dict):
+                key, label = str(item.get("key", "")).strip(), str(item.get("label", "") or "")
+                actionable = bool(item.get("actionable", False))
+            else:
+                seq = list(item)
+                key, label = str(seq[0]).strip(), str(seq[1]) if len(seq) > 1 else ""
+                actionable = bool(seq[2]) if len(seq) > 2 else False
+            if not key or any(k == key for k, _ in new_goals):
+                continue
+            new_goals.append((key, label))
+            if actionable:
+                flagged.append(key)
+        if not new_goals:
+            return
+        self._goals = new_goals
+        self._actionable = set(flagged[: self.ACTIONABLE_LIMIT])
+        self._goal_last_touched = {
+            key: self._goal_last_touched.get(key) or self._persisted_touch.get(key)
+            for key, _ in new_goals
+        }
+        self._save_state()
 
     def set_goal_state(self, goal_last_touched: Dict[str, Optional[datetime]]):
         """Called by the host loop with per-goal recency (e.g. from an event log)."""
@@ -557,23 +627,32 @@ class PriorityGoalsModule(WorkspaceModule):
     def generate_bid(self, context: Dict[str, Any]) -> Optional[SalienceBid]:
         now = self._now_fn()
         candidates = []
-        for idx, (key, label) in enumerate(self.GOALS):
+        for idx, (key, label) in enumerate(self._goals):
             last = self._goal_last_touched.get(key)
             hours_stale = 9999.0 if last is None else (now - last).total_seconds() / 3600.0
-            priority_bonus = (len(self.GOALS) - idx) * self.PRIORITY_TIEBREAK_HOURS
+            priority_bonus = (len(self._goals) - idx) * self.PRIORITY_TIEBREAK_HOURS
             score = hours_stale + priority_bonus
             candidates.append((score, idx, key, label, hours_stale))
 
         candidates.sort(reverse=True)
         _score, idx, key, label, hours_stale = candidates[0]
 
-        # Salience: 0.2 baseline, scales gently with staleness, capped at 0.55
-        # (below metacognition's crisis ceiling of 0.7) — but on idle cycles
-        # this out-ranks metacognition's 0.1 idle baseline.
+        # Salience. Example/non-actionable goals: 0.2 baseline, a gentle
+        # 12-hour ramp, capped at SALIENCE_CAP (below metacognition's crisis
+        # ceiling of 0.7) — on idle cycles this still out-ranks
+        # metacognition's 0.1 idle baseline. Actionable real goals: a 24-hour
+        # ramp from 0.25 to SALIENCE_CAP_ACTIONABLE, so a day without
+        # progress is worth a session; never-touched earns one session soon
+        # without outranking a genuinely stale goal.
+        actionable = key in self._actionable
         if hours_stale > 9000:
-            salience = 0.45
+            salience = self.NEVER_TOUCHED_ACTIONABLE if actionable else 0.45
+        elif actionable:
+            ramp = (self.SALIENCE_CAP_ACTIONABLE - 0.25) / self.ACTIONABLE_RAMP_HOURS
+            salience = min(self.SALIENCE_CAP_ACTIONABLE,
+                           0.25 + min(hours_stale, self.ACTIONABLE_RAMP_HOURS) * ramp)
         else:
-            salience = min(0.55, 0.2 + min(hours_stale, 12.0) * 0.025)
+            salience = min(self.SALIENCE_CAP, 0.2 + min(hours_stale, 12.0) * 0.025)
 
         content = f"Priority goal #{idx + 1} ({label}) — {hours_stale:.1f}h since touched"
         if hours_stale > 9000:
@@ -590,6 +669,7 @@ class PriorityGoalsModule(WorkspaceModule):
                 "goal_key": key,
                 "goal_label": label,
                 "hours_stale": round(hours_stale, 2),
+                "actionable": actionable,
                 "target": key,  # stable per-goal identity for the attention schema
             },
         )
