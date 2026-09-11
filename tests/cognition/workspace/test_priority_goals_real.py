@@ -153,20 +153,69 @@ def test_actionable_never_touched_bids_above_warmup_floor_but_below_cap():
     assert 0.55 <= bid.salience < PriorityGoalsModule.SALIENCE_CAP_ACTIONABLE
 
 
-def test_actionable_limit_applies_in_list_order():
-    m = _module()
-    goals = [{"key": f"goal:{i}", "label": f"g{i}", "actionable": True} for i in range(1, 6)]
-    m.set_goals(goals)
-    n = PriorityGoalsModule.ACTIONABLE_LIMIT
-    assert n == 3
-    assert [m.is_actionable(f"goal:{i}") for i in range(1, 6)] == [True, True, True, False, False]
-    # the fourth goal, though flagged, bids under the old cap
+def _flag5(m):
+    m.set_goals([{"key": f"goal:{i}", "label": f"g{i}", "actionable": True} for i in range(1, 6)])
+    return m
+
+
+def test_only_three_flagged_goals_hold_a_slot_at_once():
+    m = _flag5(_module())
+    assert PriorityGoalsModule.ACTIONABLE_LIMIT == 3
     for i in range(1, 6):
-        _touch(m, f"goal:{i}", T0 - timedelta(hours=40))
-    _touch(m, "goal:4", T0 - timedelta(hours=60))  # most stale of all
+        assert m.is_flagged(f"goal:{i}") is True
+    assert sum(m.is_actionable(f"goal:{i}") for i in range(1, 6)) == 3
+
+
+def test_the_slots_go_to_the_stalest_flagged_goals_not_the_first_in_the_list():
+    """The starvation this fixes, found live 2026-09-11 00:45: list order is
+    (status, ticket count, key) and never changes, so with fixed-order slots
+    the sixth goal could go 109h untouched and still bid under the floor."""
+    m = _flag5(_module())
+    for i in range(1, 6):
+        _touch(m, f"goal:{i}", T0 - timedelta(hours=1))
+    _touch(m, "goal:5", T0 - timedelta(hours=90))   # last in the list, stalest
+    _touch(m, "goal:4", T0 - timedelta(hours=60))
+    _touch(m, "goal:3", T0 - timedelta(hours=50))
+    assert [m.is_actionable(f"goal:{i}") for i in range(1, 6)] == [False, False, True, True, True]
     bid = m.generate_bid({})
-    assert bid.context["goal_key"] == "goal:4"
-    assert bid.salience <= 0.55
+    assert bid.context["goal_key"] == "goal:5"
+    assert bid.context["actionable"] is True
+    assert abs(bid.salience - 0.75) < 1e-9
+
+
+def test_a_slot_rotates_when_the_goal_holding_it_gets_its_session():
+    m = _flag5(_module())
+    for i, h in ((1, 90), (2, 80), (3, 70), (4, 60), (5, 50)):
+        _touch(m, f"goal:{i}", T0 - timedelta(hours=h))
+    assert [m.is_actionable(f"goal:{i}") for i in range(1, 6)] == [True, True, True, False, False]
+    # goal:1 gets its session; the next-stalest takes the freed slot
+    m.on_dispatched({"source_module": "priority_goals", "context": {"goal_key": "goal:1"}})
+    assert [m.is_actionable(f"goal:{i}") for i in range(1, 6)] == [False, True, True, True, False]
+    m.on_dispatched({"source_module": "priority_goals", "context": {"goal_key": "goal:2"}})
+    assert [m.is_actionable(f"goal:{i}") for i in range(1, 6)] == [False, False, True, True, True]
+
+
+def test_a_flagged_goal_waiting_for_a_slot_keeps_getting_staler():
+    """It must: a win resetting its clock would leave it permanently unable
+    to out-stale the goals already holding slots."""
+    m = _flag5(_module())
+    for i, h in ((1, 90), (2, 80), (3, 70), (4, 60), (5, 50)):
+        _touch(m, f"goal:{i}", T0 - timedelta(hours=h))
+    assert m.is_actionable("goal:5") is False
+    _broadcast(m, m.generate_bid({}))          # goal:1 wins the workspace
+    assert m._goal_last_touched["goal:5"] == T0 - timedelta(hours=50)
+    assert m._goal_last_touched["goal:1"] == T0 - timedelta(hours=90)
+
+
+def test_a_ninety_hour_goal_last_in_the_list_reaches_the_cap():
+    """goal:62's live shape: flagged, bottom of the list, four days stale."""
+    m = _module()
+    m.set_goals([{"key": f"goal:{i}", "label": f"g{i}", "actionable": True} for i in (14, 47, 43, 56, 62)])
+    for k, h in (("goal:14", 1), ("goal:47", 2), ("goal:43", 3), ("goal:56", 4), ("goal:62", 109)):
+        _touch(m, k, T0 - timedelta(hours=h))
+    bid = m.generate_bid({})
+    assert bid.context["goal_key"] == "goal:62"
+    assert abs(bid.salience - 0.75) < 1e-9
 
 
 def test_default_example_deployment_is_unchanged():

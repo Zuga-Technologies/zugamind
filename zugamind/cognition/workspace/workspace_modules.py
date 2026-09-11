@@ -507,9 +507,16 @@ class PriorityGoalsModule(WorkspaceModule):
     # nothing; only a dispatched session does. So an actionable goal's
     # clock resets in on_dispatched (a harness really ran), never in
     # on_broadcast; example/non-actionable goals keep the old reset.
-    # ACTIONABLE_LIMIT bounds how many goals may use the higher cap (in list
-    # order = priority order), so a long goal tree cannot saturate a
-    # harness's daily wake cap with goal sessions.
+    # ACTIONABLE_LIMIT bounds how many goals hold the higher cap AT ONCE, so
+    # a long goal tree cannot saturate a harness's daily wake cap with goal
+    # sessions. The slots go to the STALEST flagged goals, recomputed every
+    # cycle, not to the first N in list order: list order is (status, ticket
+    # count, key) and never changes, so a fixed-order slot permanently
+    # starved every flagged goal past the Nth. Found live 2026-09-11 00:45,
+    # 40 minutes after the ramp shipped: goal:62 (AI-training lane, nobody
+    # assigned) sat sixth, was flagged, had gone 109 h untouched, and bid
+    # 0.500 against a 0.570 floor with no path to ever bid higher. Priority
+    # still decides ties, through PRIORITY_TIEBREAK_HOURS in the bid sort.
     SALIENCE_CAP = 0.55
     SALIENCE_CAP_ACTIONABLE = 0.75
     # 48 h to the cap, so the bid crosses the floor's clamp minimum (0.50,
@@ -523,7 +530,7 @@ class PriorityGoalsModule(WorkspaceModule):
     def __init__(self, now_fn=None):
         super().__init__()
         self._goals: List[Tuple[str, str]] = [(g[0], g[1]) for g in self.GOALS]
-        self._actionable: set = set()
+        self._flagged: set = set()
         self._persisted_touch: Dict[str, Optional[datetime]] = {}
         self._goal_last_touched: Dict[str, Optional[datetime]] = {
             g[0]: None for g in self._goals
@@ -586,11 +593,33 @@ class PriorityGoalsModule(WorkspaceModule):
         """The current (key, label) list, in priority order."""
         return list(self._goals)
 
+    def is_flagged(self, key: str) -> bool:
+        """True if the deployment marked `key` actionable in set_goals().
+        Every flagged goal is eligible for a slot; ACTIONABLE_LIMIT decides
+        how many hold one right now."""
+        return key in self._flagged
+
+    def _actionable_slots(self, now: datetime) -> set:
+        """The flagged goals that hold the higher cap this cycle: the
+        ACTIONABLE_LIMIT stalest, ties broken by list order. Derived every
+        call, never stored, so a goal that gets its session drops out and the
+        next-stalest rotates in."""
+        if not self._flagged:
+            return set()
+        ranked = []
+        for idx, (key, _label) in enumerate(self._goals):
+            if key not in self._flagged:
+                continue
+            last = self._goal_last_touched.get(key)
+            hours = 9999.0 if last is None else (now - last).total_seconds() / 3600.0
+            ranked.append((-hours, idx, key))
+        ranked.sort()
+        return {key for _h, _i, key in ranked[: self.ACTIONABLE_LIMIT]}
+
     def is_actionable(self, key: str) -> bool:
-        """True if `key` may bid under SALIENCE_CAP_ACTIONABLE: flagged by
-        set_goals() AND within the first ACTIONABLE_LIMIT flagged goals in
-        list order."""
-        return key in self._actionable
+        """True if `key` may bid under SALIENCE_CAP_ACTIONABLE right now:
+        flagged AND currently holding one of the ACTIONABLE_LIMIT slots."""
+        return key in self._actionable_slots(self._now_fn())
 
     def set_goals(self, goals) -> None:
         """Replace the goal list at runtime with a deployment's real goals.
@@ -634,7 +663,7 @@ class PriorityGoalsModule(WorkspaceModule):
         if not new_goals:
             return
         self._goals = new_goals
-        self._actionable = set(flagged[: self.ACTIONABLE_LIMIT])
+        self._flagged = set(flagged)
         clocks: Dict[str, Optional[datetime]] = {}
         for key, _ in new_goals:
             known = self._goal_last_touched.get(key) or self._persisted_touch.get(key)
@@ -652,6 +681,7 @@ class PriorityGoalsModule(WorkspaceModule):
 
     def generate_bid(self, context: Dict[str, Any]) -> Optional[SalienceBid]:
         now = self._now_fn()
+        slots = self._actionable_slots(now)
         candidates = []
         for idx, (key, label) in enumerate(self._goals):
             last = self._goal_last_touched.get(key)
@@ -672,7 +702,7 @@ class PriorityGoalsModule(WorkspaceModule):
         # session and staleness alone never buys more than one a day per
         # goal; never-touched earns one session soon without outranking a
         # goal that is genuinely two days stale.
-        actionable = key in self._actionable
+        actionable = key in slots
         if hours_stale > 9000:
             salience = self.NEVER_TOUCHED_ACTIONABLE if actionable else 0.45
         elif actionable:
@@ -710,11 +740,15 @@ class PriorityGoalsModule(WorkspaceModule):
         cycle. Resetting on it kept real goals under an hour stale forever
         (1,057 wins, 0 sessions, BugaPC 2026-08-29..09-11). Its clock resets
         in on_dispatched() instead. Persisted immediately — see STATE_FILE —
-        so it survives a process restart before the next wake."""
+        so it survives a process restart before the next wake.
+
+        Keyed off FLAGGED, not off holding a slot: a flagged goal waiting its
+        turn must keep accumulating staleness, or it could never out-stale
+        the goals currently in the slots and would never get one."""
         try:
             if content and content.bid and content.bid.source_module == self.name:
                 key = content.bid.context.get("goal_key")
-                if key in self._goal_last_touched and key not in self._actionable:
+                if key in self._goal_last_touched and key not in self._flagged:
                     self._goal_last_touched[key] = self._now_fn()
                     self._save_state()
         except Exception as e:
