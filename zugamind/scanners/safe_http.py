@@ -131,6 +131,22 @@ _DEFAULT_TIMEOUT = 8.0
 # in all four pollers logged at debug only, so a month-dark source left no
 # line an operator could find at the default level.
 _FAILS_BEFORE_LOUD = 3
+
+# Sources whose consecutive-failure streak has crossed _FAILS_BEFORE_LOUD, so
+# something other than a log line can see them. Until 2026-09-11 a dead source
+# produced exactly one WARNING per cycle and nothing else, which is how
+# github_issues:Zuga-Technologies/Ludus reached 1,816 consecutive failures and
+# repo_events:Zuga-Technologies/Ludus 636, unnoticed for weeks. (Root cause
+# there: the repo is PRIVATE and the daemon had no GitHub credential at all.
+# GitHub answers 404, never 403, for a private repo you cannot see, so "no
+# token" and "no repo" are the same response and the scanner could not tell
+# them apart.) scanners/health/dead_sources.py turns this registry into
+# triggers the mind can bid on.
+#
+# Process-local on purpose. The authoritative streak count is `state["fails"]`,
+# which each scanner persists in its own cache file, so this repopulates within
+# one cycle of a restart and never has to be reconciled against disk.
+_DEAD_SOURCES: dict = {}
 # Hard ceiling on a response body. Two reasons, and the second is the sharp one:
 # a feed that suddenly returns 200 MB should cost us one skipped cycle, not the
 # process; and the XML parser these bodies feed (xml.etree.ElementTree) is
@@ -229,10 +245,12 @@ def _fetch(url: str, *, state: dict, headers, timeout: float, name: str,
             state["last_modified"] = last_modified if last_modified else None
             state["fails"] = 0
             state.pop("blocked_until", None)
+            _DEAD_SOURCES.pop(label, None)
             return "ok", data
     except urllib.error.HTTPError as exc:
         if exc.code == 304:
             state["fails"] = 0
+            _DEAD_SOURCES.pop(label, None)
             return "not_modified", None
         if exc.code in (429, 403):
             wait = _retry_after_seconds(exc.headers, now)
@@ -271,9 +289,22 @@ def _record_failure(state: dict, label: str, detail: str) -> None:
     if fails >= _FAILS_BEFORE_LOUD:
         logger.warning("scanners: %s has failed %d times in a row (%s)",
                        label, fails, detail)
+        entry = _DEAD_SOURCES.get(label) or {"first_seen": time.time()}
+        entry["fails"] = fails
+        entry["detail"] = str(detail)[:200]
+        _DEAD_SOURCES[label] = entry
     else:
         logger.debug("scanners: %s fetch failed (%s)", label, detail)
 
 
+def dead_sources() -> dict:
+    """Snapshot of every source currently past _FAILS_BEFORE_LOUD consecutive
+    failures: {label: {"fails": int, "detail": str, "first_seen": epoch}}.
+
+    A copy, so a caller iterating it cannot be tripped by a scanner recording
+    a failure mid-loop. Empty when everything is healthy."""
+    return {k: dict(v) for k, v in _DEAD_SOURCES.items()}
+
+
 __all__ = ["opener", "decode_body", "num", "clamp01", "fetch_json",
-           "fetch_text"]
+           "fetch_text", "dead_sources"]
