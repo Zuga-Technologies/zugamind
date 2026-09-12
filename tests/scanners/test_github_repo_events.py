@@ -35,6 +35,33 @@ class DiffStateTest(unittest.TestCase):
         types = {t["type"] for t in diff_state("o/r", prev, cur)}
         self.assertEqual(types, {"repo_fork", "repo_release"})
 
+    def test_release_by_us_is_priced_as_echo_not_news(self):
+        # 2026-09-12: two paid wakes fired on Ludus releases THIS machine had
+        # published minutes earlier. The author is the only field that tells
+        # our own ship apart from a teammate's.
+        prev = _state(release_id=1, tag="v0.15.25")
+        cur = dict(_state(release_id=2, tag="v0.15.26"), release_author="Zuga-luga")
+        (t,) = diff_state("Zuga-Technologies/Ludus", prev, cur)
+        self.assertEqual(t["type"], "repo_release")
+        self.assertTrue(t["self_authored"])
+        self.assertLess(t["relevance"], 0.5)
+        self.assertLess(t["urgency"], 0.2)
+        self.assertIn("echo", t["detail"])
+
+    def test_release_by_teammate_keeps_full_weight(self):
+        prev = _state(release_id=1, tag="v0.1.0")
+        cur = dict(_state(release_id=2, tag="v0.2.0"), release_author="mike-somebody")
+        (t,) = diff_state("o/r", prev, cur)
+        self.assertFalse(t["self_authored"])
+        self.assertEqual(t["relevance"], 0.8)
+        self.assertIn("mike-somebody", t["detail"])
+
+    def test_release_with_unknown_author_keeps_full_weight(self):
+        # Legacy cache entries have no author field: never discount blind.
+        (t,) = diff_state("o/r", _state(release_id=1), _state(release_id=2, tag="v2"))
+        self.assertFalse(t["self_authored"])
+        self.assertEqual(t["relevance"], 0.8)
+
     def test_unchanged_state_emits_nothing(self):
         s = _state(stars=10, forks=2, release_id=5)
         self.assertEqual(diff_state("o/r", s, dict(s)), [])

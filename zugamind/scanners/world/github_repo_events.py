@@ -18,6 +18,10 @@ dedupes to one instance.)
 Env:
     ZUGAMIND_WATCH_REPOS   comma-separated "owner/repo" list. Required.
     GITHUB_TOKEN           optional; raises rate limits / allows private repos.
+    ZUGAMIND_SELF_GITHUB_LOGINS
+                           comma-separated GitHub logins that are *us*. A
+                           release authored by one of these is an echo of our
+                           own work, not world news (see repo_release below).
 
 Star milestones (10/25/50/100/250/500/1k/2.5k/5k/10k) get boosted urgency —
 crossing one is a moment the operator plausibly wants a wake for; a routine
@@ -58,6 +62,17 @@ from scanners import safe_http
 logger = logging.getLogger("zugamind.scanners.github_repo_events")
 
 _REPO_API = "https://api.github.com/repos/{repo}"
+
+# Logins whose releases are OUR releases. 2026-09-12: two paid wakes in one
+# day (v0.15.25 at 02:59Z, v0.15.26 at 16:22Z) fired on Ludus releases this
+# very machine had published minutes earlier. Stars and forks are other
+# people acting on us; a release on a repo we own is us acting. Without the
+# author the scanner cannot tell a teammate's ship (real news) from our own.
+_SELF_LOGINS = frozenset(
+    x.strip().lower()
+    for x in os.environ.get("ZUGAMIND_SELF_GITHUB_LOGINS", "Zuga-luga").split(",")
+    if x.strip()
+)
 _RELEASE_API = "https://api.github.com/repos/{repo}/releases/latest"
 _TIMEOUT = 8.0
 _SCAN_TTL = float(os.environ.get("ZUGAMIND_REPO_EVENTS_TTL", "900"))  # 15 min
@@ -117,6 +132,12 @@ def _repo_state(repo: str, prev: "dict[str, Any] | None",
         "release_id": prev.get("release_id"),
         "release_tag": prev.get("release_tag", ""),
     }
+    # Only carry these when prev has them: a legacy cache entry (pre-author)
+    # must round-trip unchanged on a 304, and an absent author must stay
+    # absent (= "unknown", full weight) rather than become "".
+    for k in ("release_author", "release_published_at"):
+        if k in prev:
+            state[k] = prev[k]
 
     rel_status, rel = _fetch(_RELEASE_API.format(repo=repo),
                              feed_state.setdefault("release", {}),
@@ -124,6 +145,9 @@ def _repo_state(repo: str, prev: "dict[str, Any] | None",
     if rel_status == "ok" and isinstance(rel, dict) and rel.get("id"):
         state["release_id"] = rel["id"]
         state["release_tag"] = str(rel.get("tag_name") or "")[:60]
+        author = rel.get("author") or {}
+        state["release_author"] = str(author.get("login") or "")[:60]
+        state["release_published_at"] = str(rel.get("published_at") or "")[:40]
     # "not_modified": release fields already carried over from `prev` above.
     # "failed"/"rate_limited" (e.g. a repo with zero releases 404s forever):
     # same — a release-endpoint blip must not erase a previously known release.
@@ -177,15 +201,33 @@ def diff_state(repo: str, prev: dict | None, cur: dict) -> list[dict]:
         })
 
     if cur.get("release_id") and cur["release_id"] != prev.get("release_id"):
-        out.append({
-            "type": "repo_release",
-            "detail": f"{repo} published release {cur.get('release_tag') or cur['release_id']}",
-            "id": f"{repo}:release:{cur['release_id']}",
-            "repo": repo,
-            "novelty": 0.8,
-            "relevance": 0.8,
-            "urgency": 0.45,
-        })
+        tag = cur.get('release_tag') or cur['release_id']
+        author = str(cur.get("release_author") or "")
+        self_authored = author.lower() in _SELF_LOGINS
+        if self_authored:
+            # Our own ship. Still recorded (a wake already running may want
+            # the fact), but priced as ambient — never enough to buy a wake.
+            out.append({
+                "type": "repo_release",
+                "detail": f"{repo} published release {tag} (by {author} — our own ship, echo not news)",
+                "id": f"{repo}:release:{cur['release_id']}",
+                "repo": repo,
+                "self_authored": True,
+                "novelty": 0.2,
+                "relevance": 0.2,
+                "urgency": 0.1,
+            })
+        else:
+            out.append({
+                "type": "repo_release",
+                "detail": f"{repo} published release {tag}" + (f" (by {author})" if author else ""),
+                "id": f"{repo}:release:{cur['release_id']}",
+                "repo": repo,
+                "self_authored": False,
+                "novelty": 0.8,
+                "relevance": 0.8,
+                "urgency": 0.45,
+            })
     return out
 
 
