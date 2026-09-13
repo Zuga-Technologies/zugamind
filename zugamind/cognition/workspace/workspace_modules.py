@@ -712,9 +712,9 @@ class PriorityGoalsModule(WorkspaceModule):
         else:
             salience = min(self.SALIENCE_CAP, 0.2 + min(hours_stale, 12.0) * 0.025)
 
-        content = f"Priority goal #{idx + 1} ({label}) — {hours_stale:.1f}h since touched"
+        content = f"Priority goal #{idx + 1} [{key}] ({label}) — {hours_stale:.1f}h since touched"
         if hours_stale > 9000:
-            content = f"Priority goal #{idx + 1} ({label}) — never advanced this session"
+            content = f"Priority goal #{idx + 1} [{key}] ({label}) — never advanced this session"
 
         return SalienceBid(
             source_module=self.name,
