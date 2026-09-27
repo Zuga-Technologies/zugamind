@@ -385,6 +385,28 @@ def _mask_retro_release(title: str) -> str:
         lambda m: m.group(0)[: -len("release")] + " " * len("release"), title)
 
 
+# A product NOUN is not a ship claim. Measured 2026-09-27 04:02Z, at the cost
+# of a session: "OpenAI agents tried to bruteforce a UN website's API fields"
+# took the PROMOTED lane (relevance 0.9, bid 0.67) on a stranger's blog
+# (swarmcha.se). `_SHIP_EVENT_RE`'s `\bapis?\b` matched span (49,52) -- "API"
+# as a plain noun in "the website's API fields". Nothing shipped; the post is
+# about agents misbehaving against someone else's endpoint.
+#
+# Same class as the version token and the retro "release" noun: a word that
+# NAMES a thing we build on, standing in for a claim that it changed. On a
+# lab's own feed (ai_labs) "API" beside a heading is the announcement; on HN it
+# is any title that mentions an API. So it is masked here, not removed from the
+# shared union, and every real claim still promotes on its own evidence:
+# "OpenAI launches a new API" (launches), "Claude API now available" (now
+# available), "OpenAI API pricing changes" (pricing).
+_BARE_PRODUCT_NOUN_RE = re.compile(r"\b(?:apis?|sdks?)\b", re.I)
+
+
+def _mask_bare_product_nouns(title: str) -> str:
+    """Blank bare `API`/`SDK` so they cannot carry the ship half alone."""
+    return _BARE_PRODUCT_NOUN_RE.sub(lambda m: " " * len(m.group(0)), title)
+
+
 def _ship_subject(title: str) -> str:
     """The part of the title a ship claim is ABOUT: everything before the first
     comparison marker. A vendor name that appears only past that marker is the
@@ -420,8 +442,10 @@ def _is_vendor_ship(title: str, url: str = "") -> bool:
         return False
     # Evidence from any publisher: a title that CLAIMS a change happened.
     # Asked of the title with any backward-looking "release" noun blanked --
-    # see _mask_retro_release. Everything else in the title still counts.
-    if (_ship_grammar().search(_mask_retro_release(title))
+    # see _mask_retro_release. Bare API/SDK nouns are blanked too -- see
+    # _mask_bare_product_nouns. Everything else in the title still counts.
+    if (_ship_grammar().search(
+            _mask_bare_product_nouns(_mask_retro_release(title)))
             or _VENDOR_TERMS_RE.search(title)):
         return True
     # Evidence from the vendor only: a version number and nothing else.
