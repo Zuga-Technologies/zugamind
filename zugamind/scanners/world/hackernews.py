@@ -274,6 +274,28 @@ def _is_vendor_host(url: str) -> bool:
     return bool(_VENDOR_HOST_RE.search(host))
 
 
+# A DOCS PAGE is not an announcement. Measured 2026-09-28, at the cost of a
+# session: "Prompting Claude Opus 5.5"
+# (platform.claude.com/docs/en/build-with-claude/prompt-engineering/
+# prompting-claude-opus-5-5) cleared _is_vendor_ship on the version-only
+# lane. `_version_grammar()` matched "Opus 5.5" -- the vendor-prefix
+# alternation it shares with _VERSIONED_MODEL_RE lists "opus" itself, so it
+# fires even though no digit sits glued to "claude". `_is_vendor_host()` said
+# yes because platform.claude.com is a first-party Anthropic host. Both
+# halves of that lane ask WHO published the page, not WHAT KIND of page it
+# is: a how-to-use-it guide sits on the same host indefinitely, long after
+# the model it documents shipped, and can get reposted to HN any time with
+# no release behind it. The version-only lane exists for a lab's own SHIP
+# POST; a docs page is not a post.
+_DOCS_PATH_RE = re.compile(r"/docs?(?:/|$)|/documentation(?:/|$)", re.IGNORECASE)
+
+
+def _is_docs_url(url: str) -> bool:
+    m = _URL_HOST_RE.match((url or "").strip())
+    path = (url or "")[m.end():] if m else (url or "")
+    return bool(_DOCS_PATH_RE.search(path))
+
+
 # A case study is not a ship. Measured 2026-09-09, at the cost of a session:
 # "How GPT-5.6 Sol helps run quantum computing experiments" cleared
 # _is_vendor_ship and took the PROMOTED lane (relevance 0.9, bid 0.67+),
@@ -448,8 +470,10 @@ def _is_vendor_ship(title: str, url: str = "") -> bool:
             _mask_bare_product_nouns(_mask_retro_release(title)))
             or _VENDOR_TERMS_RE.search(title)):
         return True
-    # Evidence from the vendor only: a version number and nothing else.
-    return bool(_version_grammar().search(title) and _is_vendor_host(url))
+    # Evidence from the vendor only: a version number and nothing else --
+    # except a docs page, which names a version forever without shipping one.
+    return bool(_version_grammar().search(title) and _is_vendor_host(url)
+                and not _is_docs_url(url))
 
 # `detail` is the literal briefing text handed to a paid model, and a title
 # is third-party, untrusted text — a newline or control byte inside it is a
