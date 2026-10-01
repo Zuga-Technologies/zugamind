@@ -133,6 +133,7 @@ _STATIC_SPECS: dict[str, SourceSpec] = {
     "scan_hackernews":  SourceSpec("scan_hackernews",  base_cadence_secs=300,  cost_class="heavy"),
     "scan_reddit_ai":   SourceSpec("scan_reddit_ai",   base_cadence_secs=1800, cost_class="http"),
     "scan_ai_labs":     SourceSpec("scan_ai_labs",     base_cadence_secs=1800, cost_class="http"),
+    "scan_usgs_quakes": SourceSpec("scan_usgs_quakes", base_cadence_secs=600,  cost_class="http"),
 }
 
 

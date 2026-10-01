@@ -796,6 +796,7 @@ class WorldSignalsModule(WorkspaceModule):
         "hackernews_story", "reddit_ai_post", "ai_lab_research",
         "repo_star_delta", "repo_fork", "repo_release",
         "reach_web_update", "reach_search_result",
+        "usgs_quake",
     } | {
         t.strip()
         for t in os.environ.get("ZUGAMIND_WORLD_SIGNAL_EXTRA_TYPES", "").split(",")
