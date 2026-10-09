@@ -329,8 +329,16 @@ def test_promotional_and_org_posts_price_below_the_wake_floor(title):
 ])
 def test_shipping_posts_clear_the_floor_with_margin(title):
     """A moving floor is the point. The wake floor self-calibrates, and at
-    0.600 a model launch cleared it by exactly zero — three more such winners
-    would have ratcheted it to 0.65 and silenced the feed, launches included.
+    0.600 a model launch cleared it by exactly zero — so HIGH is priced with
+    real margin instead.
+
+    The "three more such winners would have ratcheted it to 0.65" this
+    docstring used to give as the reason was measured false on 2026-09-04:
+    the floor is a 90th percentile, so it answers only to the top 10% of
+    cycles, and no single source arrives anywhere near that often. Nine
+    DEFAULT winners over 6.8 days moved it zero. The margin below is
+    therefore load-bearing on its own — there is no ratchet behind it. See
+    tests/act/test_floor_ratchet_arrival_rate.py.
     """
     assert ai_labs._relevance_for(title) == ai_labs._RELEVANCE_HIGH
     assert _salience(ai_labs._relevance_for(title), 0.25) > 0.600
@@ -344,8 +352,15 @@ def test_shipping_posts_clear_the_floor_with_margin(title):
 ])
 def test_a_firehose_papers_unrecognized_item_prices_below_the_floor(title):
     """On hf_papers, "unrecognized" is the daily quota, not a near-miss. Fail
-    open there and the feed pays wake price ten times a day -- and its own
-    0.600 bids become the p90 that lifts the floor it has to clear."""
+    open there and the feed pays wake price ten times a day.
+
+    This demotion is the ONLY thing pricing that quota. The second half of
+    this docstring used to add "and its own 0.600 bids become the p90 that
+    lifts the floor it has to clear" — false, and the reason it matters is
+    that it made the demotion look like a belt-and-braces nicety rather than
+    the whole mechanism. A 90th-percentile floor answers to the top 10% of
+    cycles; a source at ~0.65% of cycles cannot reach it at any window size.
+    See tests/act/test_floor_ratchet_arrival_rate.py."""
     assert ai_labs._relevance_for(title, "", "hf_papers") == ai_labs._RELEVANCE_FIREHOSE
     assert _salience(ai_labs._relevance_for(title, "", "hf_papers"), 0.25) < 0.590
     # identical title on a curated feed still fails OPEN

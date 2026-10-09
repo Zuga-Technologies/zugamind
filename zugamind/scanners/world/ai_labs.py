@@ -404,6 +404,16 @@ _SEEN_MAX = 800     # seven feeds x eight items = 56 keys/sweep; this holds ~2 w
 _FRESH_HOURS = 24   # published inside this window scores full urgency
 _STALE_HOURS = 72   # published beyond this scores zero — backlog, not news
 _RELEVANCE_HIGH = 0.95      # ships something to build on — bids 0.68 fresh, clears a moving floor
+# Fails OPEN, and "open" here means ABOVE the floor, not near it. Fresh, this
+# bids 0.600 against a raw floor measured at 0.4943-0.5900 over 6.8 days —
+# above its every observed value, so on a curated feed an unrecognized subject
+# is not a near-miss that might wake, it is a wake. Nine did in that window,
+# 100% conversion, the largest single wake consumer in the system. Nothing
+# downstream prices it: a 90th-percentile floor answers only to the top 10% of
+# cycles and no one source is that frequent (tests/act/test_floor_ratchet_
+# arrival_rate.py). Every gap in the vocabulary above is therefore billed at
+# one Claude Code session, which is what makes the demotion tiers load-bearing
+# rather than tidy.
 _RELEVANCE_DEFAULT = 0.75   # unrecognized subject on a curated feed — bids 0.60 fresh
 _RELEVANCE_FIREHOSE = 0.40  # unrecognized subject on a firehose feed — bids 0.46 fresh, under the floor
 _RELEVANCE_NON_WORK = 0.40  # the lab talking about itself — bids 0.46 fresh, under the floor
