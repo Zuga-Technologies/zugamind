@@ -100,6 +100,33 @@ def test_no_module_attribute_points_at_live_data(module_name):
     )
 
 
+def test_the_live_kill_switch_markers_are_somewhere_else_during_tests():
+    """The two live-state paths that are NOT under data/, so nothing above
+    can see them.
+
+    `PAUSE` and `stop.request` are read by the running daemon, and PAUSE sits
+    at the package root with no suffix — outside `_LIVE_DATA` and outside the
+    suffix filter, so the parametrized test above skips it twice over. It is
+    also the one marker whose leak direction is inward: `run_cycle` short-
+    circuits to `{"paused": True}` while it exists, so a marker left by the
+    operator turns 23 unrelated tests red on a tree that is fine (measured
+    2026-09-08). Assert the seam, not the marker's absence — the point is
+    that a test never consults the real one either way.
+    """
+    from foundation import config
+
+    live_pause = (Path(zugamind.__file__).resolve().parent / "PAUSE").resolve()
+    assert Path(config.PAUSE_FILE).resolve() != live_pause, (
+        "conftest is no longer redirecting PAUSE_FILE — `touch PAUSE` by the "
+        "operator will now make tests/stream and tests/scripts fail for "
+        "reasons that have nothing to do with the code under test."
+    )
+    assert _LIVE_DATA not in Path(config.STOP_FILE).resolve().parents, (
+        "conftest is no longer redirecting STOP_FILE — a test that writes a "
+        "stop request will shut down the real daemon on this box."
+    )
+
+
 def test_the_live_data_dir_is_actually_somewhere_else_during_tests():
     """Guard the guard: if conftest ever stopped isolating DATA_DIR, every
     assertion above would pass vacuously by comparing the live tree to
