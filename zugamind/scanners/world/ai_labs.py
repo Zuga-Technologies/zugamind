@@ -322,6 +322,54 @@ eight separate times over twelve days and bought a harness wake:
    an arguable keep. The noun-pair grammar spares it, deliberately -- an
    eval a builder can run against is closer to work than to narrative.
 
+13. A PODCAST EPISODE IS A CONVERSATION, AND THE URL SAYS SO. [msft_research]
+   "Called to serve: Tech, research, and positive impact with Chris White" --
+   "Lab Director Chris White has worked on research challenges with
+   real-world implications -- from new approaches to wartime data analysis to
+   tools for combating human trafficking" -- scored DEFAULT 0.75, bid 0.600
+   and bought a session on 2026-09-08 16:51Z. It is a career-profile
+   interview. No model, no price, no endpoint, nothing to build with.
+
+   This is point 10's mechanism in a second place, and that is the whole
+   reason it is worth writing. The show names are unbounded -- Abstracts,
+   Ideas, Collaborators, What's Your Story, AI Testing and Evaluation, The
+   AI Revolution in Medicine, Called to serve -- and Microsoft adds series
+   faster than a title list can learn them, which is precisely the "one
+   funeral at a time" failure points 5, 7 and 10 each paid for. But the
+   FORMAT is not guessed at all: the publisher files every episode under a
+   `/research/podcast/` path and every blog post under a different one. Same
+   discipline as reading google_res's category -- structured data the feed
+   already hands over -- and it needs no vocabulary, so it cannot drift.
+
+   Measured 2026-09-08 on the full live msft_research window (250 items over
+   904 days, walked page by page; the feed serves 10 at a time and the cache
+   holds 8): 68 are podcast episodes, 57 of them score DEFAULT, and ZERO of
+   the 68 score HIGH. That last number is the case for the rule -- across
+   two and a half years of a show-heavy feed, the format has never once
+   carried a shipped thing, so the demotion has no measured collateral.
+
+   Priced honestly, because 57 is not the number that matters: those 68 are
+   mostly 2024-2025 archive. In the last 365 days only 7 podcast episodes at
+   DEFAULT arrived -- one per 52 days. So this rule is worth ~7 avoided
+   sessions a year, not 57. It ships anyway because the floor cannot learn
+   this on its own: QUANTILE is 0.9, so a source arriving once per 52 days
+   is ~0.1% of cycles and moves the p90 floor by nothing, forever (the
+   arithmetic `test_floor_ratchet_arrival_rate.py` pins). A rare, worthless
+   source is exactly the case the demotion tiers exist to price.
+
+   ASKED AFTER THE HIGH CHECK, for point 10's reason and not for caution: a
+   URL is evidence about a post's FORMAT, and a lab could in principle
+   announce a shipped thing on a podcast page. Zero of 68 did, so this
+   placement changes no measured outcome -- it keeps the escape hatch open
+   for the 69th.
+
+   Left out on purpose: a `/video/` or `/webinar/` sibling. Neither path
+   appears in the live window, and point 8's standard (include a sector that
+   has never fired, rather than learn it one funeral at a time) applies to
+   vocabulary lists, where the alternative is guessing. It does not apply
+   here: a path segment that the publisher does not use is not a gap in a
+   word list, it is a rule with no subject.
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -417,6 +465,25 @@ _OFF_DOMAIN_CATEGORIES = frozenset({
     "year in review",
     "conferences & events",
 })
+
+# NON-WORK, tier five: the item's OWN URL says the post is a podcast episode.
+# Point 13 of the module docstring has the measurement and the reasoning; the
+# short version is that the show names are unbounded and the path segment is
+# not, so this reads the publisher's own filing instead of guessing at titles.
+#
+# Matched as a whole path SEGMENT, not a substring, and that is load-bearing:
+# `/blog/podcast-transcription-with-whisper/` is a real post about podcasts and
+# must stay DEFAULT, while `/research/podcast/<slug>/` is an episode. Requiring
+# the delimiter on both sides is what separates them. Query and fragment are
+# stripped first so a `?ref=/podcast/` style parameter cannot reach the match --
+# no live feed does that today, but the cost of ruling it out is one split.
+#
+# Applies to every lab, unlike the taxonomy rule above, because nothing here is
+# feed-specific: any publisher that files episodes under a podcast path gets the
+# same verdict. In practice only msft_research does -- one podcast link in the
+# 405-link seen history -- so this is future-proofing that costs nothing, not a
+# claim that the other feeds have a podcast problem.
+_PODCAST_PATH_RE = re.compile(r"/podcasts?(?:/|$)", re.I)
 # Honors ZUGAMIND_DATA_DIR without importing foundation — scanners stay standalone.
 _DATA_DIR = Path(os.environ.get("ZUGAMIND_DATA_DIR") or Path(__file__).resolve().parent.parent.parent / "data")
 _CACHE_DIR = _DATA_DIR / "scanner_cache"
@@ -953,7 +1020,8 @@ def _is_non_work(text: str, title: str = "") -> bool:
     )
 
 
-def _relevance_for(title: str, summary: str = "", lab: str = "") -> float:
+def _relevance_for(title: str, summary: str = "", lab: str = "",
+                   link: str = "") -> float:
     """How much this post bears on building with these models.
 
     Order is load-bearing. NON-WORK is asked FIRST because promotional copy
@@ -974,6 +1042,11 @@ def _relevance_for(title: str, summary: str = "", lab: str = "") -> float:
     already filed the post under a field we do not build in -- see
     _OFF_DOMAIN_CATEGORIES. `lab` defaults to "" (curated) so an unlabelled
     call keeps the old answer.
+
+    Nor is it a near-miss when the item's own URL files it under a podcast
+    path -- see _PODCAST_PATH_RE and point 13. `link` defaults to "" for the
+    same reason `lab` does: a caller that does not pass it gets exactly the
+    pre-2026-09-08 answer.
     """
     # Order matters and NON-WORK deliberately wins: a promo that names a model
     # is still a promo (the 2026-08-19 Replit wake). What changed on
@@ -986,8 +1059,11 @@ def _relevance_for(title: str, summary: str = "", lab: str = "") -> float:
     if lab in _FIREHOSE_LABS:
         return _RELEVANCE_FIREHOSE
     # After HIGH, unlike every other NON-WORK rule -- see _OFF_DOMAIN_CATEGORIES
-    # for why a category may not outvote an explicit launch.
+    # for why a category may not outvote an explicit launch. The two rules below
+    # are the same kind: the publisher's own filing, not our vocabulary.
     if lab in _TAXONOMY_LABS and _category_is_off_domain(summary):
+        return _RELEVANCE_NON_WORK
+    if _link_is_podcast(link):
         return _RELEVANCE_NON_WORK
     return _RELEVANCE_DEFAULT
 
@@ -997,6 +1073,14 @@ def _category_is_off_domain(summary: str) -> bool:
     not build in. Normalised on whitespace and case because the label is CMS
     copy, not an identifier -- nothing guarantees it keeps its exact casing."""
     return " ".join((summary or "").split()).lower() in _OFF_DOMAIN_CATEGORIES
+
+
+def _link_is_podcast(link: str) -> bool:
+    """True when the item's URL files it under a podcast path segment. Query
+    and fragment are dropped first so only the PATH can match -- see the
+    comment above _PODCAST_PATH_RE for why the segment boundary matters."""
+    path = (link or "").split("#", 1)[0].split("?", 1)[0]
+    return bool(_PODCAST_PATH_RE.search(path))
 
 
 def _urgency_for(published: float | None, now: float) -> float:
@@ -1376,7 +1460,8 @@ def scan_ai_labs() -> list[dict[str, Any]]:
             "summary": it.get("summary", ""),
             "published": published,
             "novelty": 0.8,
-            "relevance": _relevance_for(it["title"], it.get("summary", ""), it["lab"]),
+            "relevance": _relevance_for(it["title"], it.get("summary", ""), it["lab"],
+                                        it.get("link", "")),
             "urgency": _urgency_for(published, now),
         })
 
