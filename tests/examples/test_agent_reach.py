@@ -730,9 +730,13 @@ def test_search_relevance_ignores_the_querys_own_terms(monkeypatch, tmp_path):
     assert t["urgency"] == agent_reach._SEARCH_URGENCY_UNDATED
 
 
-def test_undated_or_stale_search_hit_cannot_buy_a_wake_on_relevance_alone():
+def test_undated_or_stale_search_hit_cannot_buy_a_wake_on_relevance_alone(monkeypatch):
     # The 2026-09-10 wake: tech-leads-club/agent-skills, an UNDATED GitHub repo
     # page, bid 0.63 against a 0.500 bar at relevance 0.9 / urgency 0.1.
+    # The 0.9 comes from the daemon's keyword list, so pin it here: unset,
+    # _keyword_relevance returns the 0.5 "unconfigured" neutral, and this test
+    # passed only in a shell that already had the list exported (CI did not).
+    monkeypatch.setenv("ZUGAMIND_REACH_KEYWORDS", "agent,claude,anthropic,mcp,llm,openai,open source")
     text = ("GitHub - tech-leads-club/agent-skills: skill registry for AI coding"
             " agents. mcp llm openai anthropic open source")
     query = "Claude Code agent skills"
