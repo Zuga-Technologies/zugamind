@@ -99,6 +99,19 @@ def _isolate_live_data_dir(tmp_path, monkeypatch):
     # would have stopped the real one. The tests that touch it today bring
     # their own fixture; this is so the next one does not have to know.
     monkeypatch.setattr(_config, "STOP_FILE", engine_dir / "stop.request")
+    # PAUSE_FILE is STOP_FILE's mirror image, and it leaks the other way.
+    # STOP_FILE unredirected let a TEST stop the live daemon; PAUSE_FILE
+    # unredirected lets the LIVE DAEMON break the tests — it lives at the
+    # package root (not under data/, so test_no_live_data_writes.py cannot
+    # see it), and runner.run_cycle returns `{"paused": True}` before doing
+    # anything the moment it exists. On 2026-09-08 the marker was present
+    # during a wake and the suite reported 23 failures across tests/stream/
+    # and tests/scripts/ on a tree that passed clean in a worktree — same
+    # commit, same interpreter, no PAUSE. A woken session running the suite
+    # to check its own work sees that red and concludes it broke something,
+    # which is the worst possible moment for a false failure. The tests that
+    # exercise the kill-switch deliberately still patch this themselves.
+    monkeypatch.setattr(_config, "PAUSE_FILE", engine_dir / "PAUSE")
 
     # Modules that import one of the above BY VALUE (`from foundation.config
     # import BUDGET_FILE`) hold their own separate name binding — patching
