@@ -94,10 +94,11 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import signal
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from act import command_actuator
@@ -459,13 +460,75 @@ class StreamRunner:
             reason = (f"winner urgency {urgency:.2f} >= {ALERT_URGENCY_THRESHOLD}" if hot
                       else f"alarm-lane critical (module salience dampened to {urgency:.2f})")
             state = transition_state(state, "ALERT", reason)
-            journal.append_event("alarm", {
+            if self._alarm_is_repeat(state, winner_dict, ctx):
+                return state
+            event = {
                 "detail": f"{winner_dict['source_module']}: {str(winner_dict['content'])[:200]}",
                 "urgency": urgency,
                 "alarm_lane": lane,
-            })
+            }
+            suppressed = self._alarm_record(state, winner_dict, ctx)
+            if suppressed:
+                event["repeats_suppressed"] = suppressed
+            journal.append_event("alarm", event)
             return state
         return transition_state(state, "FOCUSED", f"winner from {winner_dict['source_module']}")
+
+    # The same alarm journaled once per cycle (420 s) for as long as its cause
+    # stood. Live 2026-10-12: priority_goals bid 0.75 on a goal 101 h stale and
+    # wrote "alarm: Priority goal #1 [goal:14] ... 101.6h / 101.7h / 101.8h"
+    # every 7 minutes — every one of them surfaced to Buga as a new finding.
+    # A stale goal's clock only resets when a session is dispatched, so with
+    # no session the alarm never stopped. State stays ALERT every cycle; only
+    # the journal line (what gets surfaced) is held to once per window.
+    ALARM_REPEAT_WINDOW_SEC = 6 * 3600
+
+    @staticmethod
+    def _alarm_key(winner_dict: Dict[str, Any], ctx: Any) -> str:
+        """Identity of an alarm across cycles: module + its stable target
+        when the bid names one, else the content with numbers blanked (the
+        hours-stale figure changes every cycle and must not make it new)."""
+        target = ctx.get("target") if isinstance(ctx, dict) else None
+        if target:
+            ident = str(target)
+        else:
+            ident = re.sub(r"\d+(?:\.\d+)?", "#", str(winner_dict.get("content", "")))[:160]
+        return f"{winner_dict.get('source_module')}|{ident}"
+
+    def _alarm_is_repeat(self, state: Dict[str, Any], winner_dict: Dict[str, Any], ctx: Any) -> bool:
+        seen = state.get("alarm_last_journaled")
+        if not isinstance(seen, dict):
+            return False
+        entry = seen.get(self._alarm_key(winner_dict, ctx))
+        if not isinstance(entry, dict):
+            return False
+        try:
+            last = datetime.fromisoformat(str(entry.get("at")))
+        except ValueError:
+            return False
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - last).total_seconds()
+        if age < 0 or age >= self.ALARM_REPEAT_WINDOW_SEC:
+            return False
+        entry["suppressed"] = int(entry.get("suppressed") or 0) + 1
+        return True
+
+    def _alarm_record(self, state: Dict[str, Any], winner_dict: Dict[str, Any], ctx: Any) -> int:
+        """Mark this alarm journaled now; return how many repeats the
+        previous window swallowed (so the next line says so)."""
+        seen = state.get("alarm_last_journaled")
+        if not isinstance(seen, dict):
+            seen = {}
+        key = self._alarm_key(winner_dict, ctx)
+        prior = seen.get(key) if isinstance(seen.get(key), dict) else {}
+        suppressed = int(prior.get("suppressed") or 0)
+        seen[key] = {"at": datetime.now(timezone.utc).isoformat(), "suppressed": 0}
+        if len(seen) > 128:  # bounded, oldest first
+            for k in sorted(seen, key=lambda k: str(seen[k].get("at", "")))[:64]:
+                del seen[k]
+        state["alarm_last_journaled"] = seen
+        return suppressed
 
     # -- winner -> plan -> briefing -> gate -> harness --------------------
 
