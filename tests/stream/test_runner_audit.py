@@ -107,6 +107,59 @@ def test_plain_low_salience_winner_is_focused_not_alert(engine):
     assert state["state"] == "FOCUSED" and not _events("alarm")
 
 
+def _stale_goal(hours, key="goal:14"):
+    return {"source_module": "priority_goals", "salience": 0.75,
+            "content": f"Priority goal #1 [{key}] (Ludus -> live) — {hours:.1f}h since touched",
+            "context": {"raw_salience": 0.75, "target": key}}
+
+
+def _cycle(r, winner):
+    """One cycle's state round trip, as run_once does it (load, transition, save)."""
+    state_mod.save_state(r._transition_state(winner))
+
+
+def test_a_standing_alarm_is_journaled_once_per_window_not_every_cycle(engine):
+    """Live 2026-10-12: goal:14 at 101.6h / 101.7h / 101.8h journaled an
+    alarm every 7-minute cycle and each one reached Buga as a new finding."""
+    r = _runner()
+    for h in (101.6, 101.7, 101.8, 101.9):
+        _cycle(r, _stale_goal(h))
+    assert len(_events("alarm")) == 1
+    assert state_mod.load_state()["state"] == "ALERT"  # still alert, just quiet
+
+
+def test_a_different_alarm_is_not_swallowed_by_another_ones_window(engine):
+    r = _runner()
+    _cycle(r, _stale_goal(101.6, "goal:14"))
+    _cycle(r, _stale_goal(50.0, "goal:43"))
+    _cycle(r, {"source_module": "infrastructure", "content": "db down", "salience": 0.8,
+               "context": {"raw_salience": 0.8}})
+    assert len(_events("alarm")) == 3
+
+
+def test_the_alarm_returns_after_the_window_and_counts_what_it_held_back(engine):
+    r = _runner()
+    _cycle(r, _stale_goal(101.6))
+    _cycle(r, _stale_goal(101.7))
+    _cycle(r, _stale_goal(101.8))
+    state = state_mod.load_state()
+    old = datetime.now(timezone.utc) - timedelta(seconds=StreamRunner.ALARM_REPEAT_WINDOW_SEC + 1)
+    for entry in state["alarm_last_journaled"].values():
+        entry["at"] = old.isoformat()
+    state_mod.save_state(state)
+    _cycle(r, _stale_goal(107.7))
+    alarms = _events("alarm")
+    assert len(alarms) == 2 and alarms[1]["repeats_suppressed"] == 2
+
+
+def test_an_untargeted_alarm_with_a_changing_number_is_still_the_same_alarm(engine):
+    r = _runner()
+    for n in (3, 4, 5):
+        _cycle(r, {"source_module": "infrastructure", "salience": 0.8,
+                   "content": f"CRITICAL: api down for {n} min", "context": {"raw_salience": 0.8}})
+    assert len(_events("alarm")) == 1
+
+
 def test_briefing_names_an_alarm_lane_winner_as_critical(engine):
     text = journal.build_briefing(None, winner={"source_module": "infrastructure", "content": "prod db down",
                                                 "salience": 0.15, "context": {"alarm_lane": True}})
