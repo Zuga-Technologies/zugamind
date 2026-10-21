@@ -72,6 +72,26 @@ def test_counts_and_handoffs_are_not_capped_by_a_line_horizon(jf, monkeypatch):
     assert "old-1: still open" in text
 
 
+# --- a handoff is an instruction, not a headline -----------------------------------------
+
+def test_long_handoff_reaches_the_briefing_whole(jf):
+    # 504 chars, the real hn-vendor-gate-noun-whackamole handoff's length: the
+    # fix lived in the tail that a 200-char slice silently dropped.
+    tail = "require a finite ship VERB in the subject clause"
+    detail = "x" * 450 + " " + tail
+    journal.append_event("handoff", {"id": "long-1", "detail": detail})
+    text = journal.build_briefing(None, winner=None)
+    assert tail in text
+    assert "[cut at" not in text
+
+
+def test_handoff_longer_than_the_cap_says_it_was_cut(jf):
+    n = journal._HANDOFF_DETAIL_CAP + 400
+    journal.append_event("handoff", {"id": "huge-1", "detail": "y" * n})
+    text = journal.build_briefing(None, winner=None)
+    assert f"[cut at {journal._HANDOFF_DETAIL_CAP} of {n} chars" in text
+
+
 # --- the gate the winner actually faced ---------------------------------------------------
 
 def test_gate_note_cites_only_applicable_harnesses(jf, monkeypatch):

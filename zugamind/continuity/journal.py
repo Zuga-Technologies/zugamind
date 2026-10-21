@@ -176,6 +176,14 @@ _DIGEST_SHARE = 0.30
 # ~80-line budget regardless of journal size in the common case.
 _GROUP_DISPLAY_CAP = 5
 
+# Per-handoff detail cap in the briefing. A handoff is an instruction from one
+# session to a later one, so cutting it is not like cutting a headline: at 200
+# chars "hn-vendor-gate-noun-whackamole-20260927" (504 chars) reached two
+# consecutive wakes ending "...stood in for a ", with the fix itself in the
+# lost tail, and both wakes left it alone (2026-10-21). The slice was also
+# silent, so a reader could not tell the text was cut. Cut text now says so.
+_HANDOFF_DETAIL_CAP = 600
+
 # Hard ceiling on the rendered briefing's length, in characters, overridable
 # via ZUGAMIND_BRIEFING_MAX_CHARS. Context assembly is exactly where
 # ambient-cognition systems go wrong: an unbounded "everything that
@@ -773,8 +781,11 @@ def build_briefing(
         lines.append("## Unresolved handoffs")
         if group_cap > 0 and unresolved:
             for e in unresolved[-group_cap:]:
-                lines.append(f"- [{e.get('ts', '?')}] {_untrusted(e.get('id', '?'), 60)}: "
-                             f"{_untrusted(e.get('detail', ''), 200)}")
+                detail = _untrusted(e.get('detail', ''), _HANDOFF_DETAIL_CAP)
+                full_len = len(_untrusted(e.get('detail', ''), 10 ** 9))
+                if full_len > _HANDOFF_DETAIL_CAP:
+                    detail += f" [cut at {_HANDOFF_DETAIL_CAP} of {full_len} chars; full text in the journal]"
+                lines.append(f"- [{e.get('ts', '?')}] {_untrusted(e.get('id', '?'), 60)}: {detail}")
         else:
             lines.append("- none" if not unresolved else f"- {len(unresolved)} pending (trimmed — see journal)")
 
