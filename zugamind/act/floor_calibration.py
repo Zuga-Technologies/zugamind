@@ -116,7 +116,14 @@ WARMUP_FLOOR = 0.50
 # pushed max(samples)+margin to 1.04, silently disabling every wake since
 # calibration day. Applied at compute AND resolve so pre-existing bad state
 # files heal without manual surgery.
-FLOOR_CEILING = 0.9
+#
+# 0.70, not 0.9 (hivemind #621, found 2026-10-21): the gate judges
+# min(raw, modulated), and PriorityGoalsModule.SALIENCE_CAP_ACTIONABLE caps a
+# stale real goal's raw bid at 0.75. A ceiling above 0.75 let the learned floor
+# sit at 0.80 and no goal could ever wake a session: last_wake stayed at
+# 2026-09-28 for 23 days while 292 rounds bid 0.83-0.99 after boosting. The
+# ceiling must stay under the highest bid a real goal can make.
+FLOOR_CEILING = 0.70
 # A calibrated floor is recomputed on every sample; journal its movement only
 # once it has moved this far from the last journaled value.
 DRIFT_JOURNAL_DELTA = 0.05

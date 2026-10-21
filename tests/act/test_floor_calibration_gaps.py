@@ -115,9 +115,10 @@ def test_floor_drift_is_journaled_once_it_moves_enough(tmp_path, monkeypatch):
     assert _events("floor_drifted") == []
 
     # the environment shifts: the rolling window fills with much louder noise
-    _fill(n=floor_calibration.ROLLING_WINDOW, salience=0.7)
+    # (0.5, not 0.7: the ceiling is 0.70 since #621, so 0.7 noise would land ON it)
+    _fill(n=floor_calibration.ROLLING_WINDOW, salience=0.5)
     drifts = _events("floor_drifted")
-    assert drifts, "a WARMUP_FLOOR -> ~0.75 floor move must be visible in the journal"
+    assert drifts, "a WARMUP_FLOOR -> ~0.6 floor move must be visible in the journal"
     assert drifts[0]["basis"] == "modulated"
     assert drifts[-1]["to"] > drifts[0]["from"]
     assert all(d["at_ceiling"] is False for d in drifts)
@@ -146,3 +147,10 @@ def test_calibrated_at_uses_the_journal_utc_convention(tmp_path, monkeypatch):
     state = json.loads(floor_calibration.STATE_FILE.read_text(encoding="utf-8"))
     for key in ("calibrated_at", "raw_calibrated_at"):
         assert state["h"][key].endswith("+00:00"), key
+
+
+def test_floor_ceiling_stays_under_the_highest_goal_bid():
+    # hivemind #621: a ceiling above the goal cap let the learned floor sit at 0.80
+    # while a stale goal can only bid 0.75, so nothing woke for 23 days.
+    from zugamind.cognition.workspace.workspace_modules import PriorityGoalsModule
+    assert floor_calibration.FLOOR_CEILING < PriorityGoalsModule.SALIENCE_CAP_ACTIONABLE
