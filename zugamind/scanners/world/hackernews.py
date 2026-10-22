@@ -429,6 +429,38 @@ def _mask_bare_product_nouns(title: str) -> str:
     return _BARE_PRODUCT_NOUN_RE.sub(lambda m: " " * len(m.group(0)), title)
 
 
+# A NOUN is not a ship claim, whoever's noun it is. The three earlier fixes
+# above each blanked ONE noun after it had bought a paid wake (a version token,
+# a retrospective "release", a bare "API"), and the shared union still holds
+# pricing, changelog, "release notes", "migration guide", "breaking change",
+# deprecation and "rate limits" -- each one a wake waiting for its title.
+#
+# So for a publisher that is not the vendor itself, the evidence above is not
+# enough alone: the subject clause must also carry a finite VERB that says
+# something happened. The vendor's own host keeps the old behaviour, where a
+# heading IS the announcement (same split as the version token, and as
+# ai_labs, which reads curated lab feeds and keeps the noun union untouched).
+#
+# The verb list is the ship verbs the union already has, "now/generally
+# available", the deprecation and shutdown verbs, and the change verbs that
+# make "pricing", "limits" and "quota" mean something ("cut", "raising",
+# "reduce"), and "outage", the one noun that IS an event ("OpenAI outage
+# affecting the Codex endpoint" must still wake; a product noun like API,
+# pricing, changelog or "release notes" must not). Bare `release` is NOT here: only its finite forms, or after
+# will/to, so "OpenAI's Navier-Stokes release included..." stays a noun.
+_STRANGER_VERB_RE = re.compile(
+    r"\b(?:launch(?:es|ed|ing)|releas(?:es|ed|ing)|ships?|shipp(?:ed|ing)"
+    r"|unveil(?:s|ed|ing)|announc(?:es|ed|ing)|introduc(?:es|ed|ing)"
+    r"|preview(?:s|ed|ing)|roll(?:s|ed|ing)\s+out|(?:now|generally)\s+available"
+    r"|available\s+now|deprecat(?:es|ed|ing)|sunsett?(?:s|ed|ing)"
+    r"|outage|shutting\s+down|shuts?\s+down|rais(?:es|ed|ing)|reduc(?:es|e|ed|ing)"
+    r"|cut(?:s|ting)?|increas(?:es|ed|ing)|chang(?:es|ed|ing)|lower(?:s|ed|ing)"
+    r"|drop(?:s|ped|ping)|remov(?:es|ed|ing)|doubl(?:es|ed|ing)"
+    r"|(?:will|to|about\s+to)\s+(?:release|launch|ship|unveil|announce|introduce))\b",
+    re.I,
+)
+
+
 def _ship_subject(title: str) -> str:
     """The part of the title a ship claim is ABOUT: everything before the first
     comparison marker. A vendor name that appears only past that marker is the
@@ -469,7 +501,9 @@ def _is_vendor_ship(title: str, url: str = "") -> bool:
     if (_ship_grammar().search(
             _mask_bare_product_nouns(_mask_retro_release(title)))
             or _VENDOR_TERMS_RE.search(title)):
-        return True
+        # A stranger must also use a VERB: see _STRANGER_VERB_RE.
+        if _is_vendor_host(url) or _STRANGER_VERB_RE.search(_ship_subject(title)):
+            return True
     # Evidence from the vendor only: a version number and nothing else --
     # except a docs page, which names a version forever without shipping one.
     return bool(_version_grammar().search(title) and _is_vendor_host(url)
