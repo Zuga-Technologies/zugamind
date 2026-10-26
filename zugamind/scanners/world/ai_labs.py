@@ -370,6 +370,36 @@ eight separate times over twelve days and bought a harness wake:
    here: a path segment that the publisher does not use is not a gap in a
    word list, it is a rule with no subject.
 
+14. A PARTNERSHIP TITLED AS "X AND Y PARTNER TO <VERB>" STILL BID 0.60. The
+   2026-10-23 02:05 EDT wake (briefing zugamind_briefing_j0c8_m9z): [curated]
+   "OpenAI and Poland's NASK partner to advance AI safety and security" scored
+   DEFAULT and bought a session -- no ship, no pricing, nothing a builder acts
+   on. The org-partnership class has been named since 2026-08-19, but every
+   pattern for it needs a "with" ("partners with", "partnering with") or the
+   noun ("partnership"), and this headline has neither.
+
+   "partners? to <verb>" alone is not the grammar: builder copy says "launch
+   partners to test the new API" and "available to our partners to build
+   with GPT-X", and NON-WORK reads the summary too, so a real launch carrying
+   that sentence would drop from HIGH. Dropping the "s" is not it either --
+   "Anthropic partners to expand Claude access" is the singular-subject form
+   of the same announcement. What both announcement forms have and the
+   builder copy does not is a NAMED SUBJECT opening the headline: one or two
+   capitalised org names, then the verb. So `_LAB_PARTNER_VERB_RE` is
+   case-sensitive (the capital is the discriminator, as for _ORG_PROGRAM_RE)
+   and anchored at the start of the combined text, which is the title.
+
+   A memorandum of understanding is the same announcement in its other
+   standard phrasing, named directly rather than left for its own wake.
+
+   Measured 2026-10-26 over 1532 live RSS items (openai 1322, deepmind 100,
+   google_res 100, msft_research 10) plus the 56-item cache: 7 change, all
+   DEFAULT -> NON-WORK, zero HIGH collateral. Six are "X and Y partner to"
+   headlines (NASK, Hugging Face, Dell, Malta, PNNL, Snowflake) and one is a
+   Department of Energy collaboration whose summary names an MoU. "OpenAI and
+   Dell partner to bring Codex to ..." is the closest call; it is the same
+   trade "partners with" has made since 2026-08-29.
+
 Stdlib only. Failure-silent per scanner contract. Cached 30min on disk.
 """
 from __future__ import annotations
@@ -681,6 +711,8 @@ _PUBLIC_AFFAIRS_RE = re.compile(
     # with game studios" (that one was in the live cache). Measured
     # 2026-08-29: 13 archive items demote cleanly, zero HIGH collateral.
     r"|\bpartners?\s+with\b|\bpartnered\s+with\b|\bagreement\s+with\b"
+    # The MoU phrasing of the same class; added 2026-10-26, see point 14.
+    r"|\bmemorandum\s+of\s+understanding\b|\bmous?\b"
     r"|\bappoints?\b|\bappointment\b|chief\s+\w+\s+officer"
     r"|to\s+join\s+\w+\s+as\b|\bboard\s+of\s+directors\b|\bgovernor\b"
     r"|\bpartnering\s+with\b|\bpartnership\b|\bletter\s+to\b|\bstatement\s+on\b"
@@ -1046,6 +1078,15 @@ def _is_partner_powered_by(text: str) -> bool:
     return False
 
 
+# "OpenAI and Poland's NASK partner to advance ..." / "Anthropic partners to
+# expand ...": one or two named orgs OPEN the headline, then the verb. Case-
+# sensitive and anchored at the start of the text (the title) -- see point 14
+# for why "partners? to" without the named subject demotes builder copy.
+_LAB_PARTNER_VERB_RE = re.compile(
+    rf"^{_PROMO_BUYER}(?:\s+(?:and|&)\s+{_PROMO_BUYER})?\s+partners?\s+to\s+[a-z]"
+)
+
+
 def _is_non_work(text: str, title: str = "") -> bool:
     """The lab talking about itself, selling itself, or doing science that
     isn't about the models — public affairs, promotion, or an off-topic
@@ -1058,6 +1099,7 @@ def _is_non_work(text: str, title: str = "") -> bool:
         or _PUBLIC_AFFAIRS_RE.search(text)
         or _BILL_NUMBER_RE.search(text)
         or _ORG_PROGRAM_RE.search(text)
+        or _LAB_PARTNER_VERB_RE.search(text)
         or _PROMO_HOW_RE.search(text)
         or _PROMO_OUTCOME_RE.search(text)
         or _PROMO_CASE_STUDY_RE.search(text)

@@ -518,6 +518,36 @@ def test_an_eval_governance_pilot_with_institutes_is_public_affairs():
     ) == ai_labs._RELEVANCE_DEFAULT
 
 
+def test_a_partnership_titled_as_a_verb_is_public_affairs():
+    """Point 14 in the module docstring, the 2026-10-23 02:05 EDT wake.
+    "OpenAI and Poland's NASK partner to advance AI safety and security" is a
+    lab partnership with no "with" and no "partnership" in it. The verb form
+    demotes only behind a named subject opening the headline: "partners to
+    <verb>" is also ordinary builder copy, and NON-WORK reads the summary."""
+    title = "OpenAI and Poland's NASK partner to advance AI safety and security"
+    relevance = ai_labs._relevance_for(title, title)
+    assert relevance == ai_labs._RELEVANCE_NON_WORK
+    assert _salience(relevance, 0.25) < 0.600
+    for headline in (
+        "Anthropic partners to expand Claude access in Japan",
+        "Google DeepMind partners to bring Gemini to classrooms",
+        "Signing an MoU with the Singapore AI Safety Institute",
+        "A memorandum of understanding on AI safety research",
+    ):
+        assert ai_labs._relevance_for(headline) == ai_labs._RELEVANCE_NON_WORK, headline
+    for headline in (
+        "Our launch partners to test the upcoming features",
+        "Open to our partners to build integrations with the platform",
+        "Our new developer partner program",
+    ):
+        assert ai_labs._relevance_for(headline) == ai_labs._RELEVANCE_DEFAULT, headline
+    # builder copy in the summary must not cost a launch its HIGH tier
+    assert ai_labs._relevance_for(
+        "Introducing GPT-6",
+        "Available today to our launch partners to build with the new API",
+    ) == ai_labs._RELEVANCE_HIGH
+
+
 def test_a_vendor_contract_decision_is_public_affairs():
     """Point 9 in the module docstring, the 2026-08-29 02:12Z wake. [openai]
     "Our decision on Cursor following its acquisition by SpaceX" is one
