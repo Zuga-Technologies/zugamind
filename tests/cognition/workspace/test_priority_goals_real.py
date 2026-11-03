@@ -72,13 +72,17 @@ def test_set_goals_accepts_dicts_with_actionable_flag():
     assert m.is_actionable("goal:2") is False
 
 
-def test_touched_from_the_tracker_sets_a_new_goals_clock_in_local_naive_time():
+def test_touched_from_the_tracker_sets_a_new_goals_clock_in_naive_utc():
     m = _module()
     when = datetime(2026, 9, 1, 12, 0, 0, tzinfo=timezone.utc)
     m.set_goals([{"key": "goal:1", "label": "one", "actionable": True, "touched": when.isoformat()}])
     clock = m._goal_last_touched["goal:1"]
     assert clock is not None and clock.tzinfo is None
-    assert clock == when.astimezone().replace(tzinfo=None)
+    assert clock == datetime(2026, 9, 1, 12, 0, 0)
+    # an offset-aware stamp in another zone lands on the same UTC instant
+    est = datetime.fromisoformat("2026-09-01T07:00:00-05:00")
+    m.set_goals([{"key": "goal:2", "label": "two", "touched": est.isoformat()}])
+    assert m._goal_last_touched["goal:2"] == datetime(2026, 9, 1, 12, 0, 0)
 
 
 def test_touched_advances_a_clock_but_never_regresses_it():
@@ -258,7 +262,7 @@ def test_a_dispatched_session_resets_the_actionable_goal_and_persists():
     m.on_dispatched(_winner_for(bid))
     assert m._goal_last_touched["goal:1"] == T0
     on_disk = json.loads(PriorityGoalsModule.STATE_FILE.read_text(encoding="utf-8"))
-    assert on_disk["goal:1"] == T0.isoformat()
+    assert on_disk["goal:1"] == T0.replace(tzinfo=timezone.utc).isoformat()  # explicit "+00:00"
     # the ramp restarts from the session
     assert m.generate_bid({}).salience < 0.30
 

@@ -87,6 +87,12 @@ def test_run_cycle_exception_is_journaled_and_the_cycle_completes(tmp_path, monk
 
 def test_cycle_event_carries_a_compacted_winner(tmp_path, monkeypatch):
     _patch(tmp_path, monkeypatch)
+    # Winner selection is a weighted lottery over the GLOBAL random stream
+    # (workspace._select_winner), and the 0.495 priority_goals bid wins it ~6%
+    # of the time. Which draw this test lands on depended on how many cycles
+    # earlier tests had run in the process, so adding an unrelated test ahead of
+    # it turned it red (hm-#887). Pin the draw: the first bid, infrastructure.
+    monkeypatch.setattr("random.random", lambda: 0.0)
     runner = StreamRunner(extra_scanners={"scan_toy": lambda: _big_triggers(12)},
                           dry_run=True, include_default_scanners=False)
     result = runner.run_once()

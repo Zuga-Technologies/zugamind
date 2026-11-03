@@ -93,3 +93,42 @@ def test_set_goal_state_also_persists():
 
     m2 = PriorityGoalsModule()
     assert m2._goal_last_touched[key] is not None
+
+
+# --- UTC clocks (hm-#887) ------------------------------------------------------
+
+def test_staleness_across_the_dst_fall_back_is_real_elapsed_time():
+    # milestone:75 on 2026-11-01: last touched 09:58:54 EDT on Oct 30, alarm at
+    # 12:47:43 UTC on Nov 1 (07:47 EST, after the 02:00 fall-back). Local naive
+    # clocks read 45.8h; the real elapsed time is 46h 48m 49s = 46.81h.
+    from datetime import datetime, timezone
+    m = PriorityGoalsModule(now_fn=lambda: datetime(2026, 11, 1, 12, 47, 43, tzinfo=timezone.utc))
+    m.set_goals([{"key": "milestone:75", "label": "x", "actionable": True,
+                  "touched": "2026-10-30T13:58:54+00:00"}])
+    assert m.generate_bid({}).context["hours_stale"] == 46.81
+
+
+def test_state_file_is_written_in_utc_with_an_explicit_offset():
+    import json
+    from datetime import datetime
+    m = PriorityGoalsModule(now_fn=lambda: datetime(2026, 11, 1, 12, 47, 43))
+    key, label = m.GOALS[0]
+    m.on_dispatched({"context": {"goal_key": key}})
+    assert json.loads(m.STATE_FILE.read_text(encoding="utf-8"))[key] == "2026-11-01T12:47:43+00:00"
+
+
+def test_a_state_file_from_before_the_utc_switch_still_means_the_same_instant():
+    # Old files hold NAIVE LOCAL text. Reading them as UTC would shift every
+    # clock by the zone offset on the first restart after the upgrade.
+    import json
+    from datetime import datetime, timezone
+    legacy = "2026-11-01T07:53:32"          # written by the old code, local wall time
+    m0 = PriorityGoalsModule()
+    key = m0.GOALS[0][0]
+    m0.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    m0.STATE_FILE.write_text(json.dumps({key: legacy}), encoding="utf-8")
+    m = PriorityGoalsModule()
+    expected = datetime.fromisoformat(legacy).astimezone(timezone.utc).replace(tzinfo=None)
+    assert m._goal_last_touched[key] == expected
+    m.set_goal_state({})                     # any save rewrites it in the new format
+    assert json.loads(m.STATE_FILE.read_text(encoding="utf-8"))[key].endswith("+00:00")

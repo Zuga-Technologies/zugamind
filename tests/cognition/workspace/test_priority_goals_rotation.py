@@ -7,7 +7,7 @@ clock is injectable so a replay can be byte-identical.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from cognition.workspace import workspace_modules as wm
 from cognition.workspace.workspace import Workspace
@@ -58,4 +58,5 @@ def test_frozen_clock_makes_bids_byte_identical(tmp_path, monkeypatch):
 
 def test_default_clock_is_the_real_one(tmp_path, monkeypatch):
     m = _module(tmp_path, monkeypatch, None)
-    assert m._now_fn == datetime.now  # bound methods compare equal, not identical
+    assert m._now_fn == wm._utc_now
+    assert abs((m._now() - datetime.now(timezone.utc).replace(tzinfo=None)).total_seconds()) < 5

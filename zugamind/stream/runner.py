@@ -17,6 +17,8 @@ Each cycle:
        trigger seen within HABITUATION_HOURS is damped, injected
        extra_scanners bypass the filter by design
     -> route_triggers_to_modules()
+    -> before_bids() if the host set one         (re-read state the scanners
+                                                  just refreshed; see below)
     -> workspace.run_cycle(context)                (GWT: one winner or None)
     -> scheduler.record_yield() per source
     -> cognitive state transition (see _STATE_TRANSITIONS_DOC below)
@@ -214,6 +216,15 @@ class StreamRunner:
         # REFLECTING transition, and in memory only it reset on every restart
         # (a --once-per-cron deployment could never reflect at all).
         self._idle_cycles = 0
+        # Host hook: called once per cycle AFTER the scanners ran and BEFORE the
+        # modules bid. A host that keeps module inputs outside the engine (the
+        # BugaPC daemon feeds priority_goals from a snapshot one of its own
+        # scanners rewrites) refreshes them here, so the bids read what the
+        # scanners just saw and not the previous cycle's copy: fed before the
+        # scan, a goal Buga noted 8 minutes earlier still bid as 46h stale and
+        # bought a wake (hm-#887). Non-fatal: a raise is logged and the cycle
+        # bids on what it has.
+        self.before_bids: Optional[Callable[[], Any]] = None
         try:
             saved = load_state()
             snapshot = saved.get("attention")
@@ -323,6 +334,12 @@ class StreamRunner:
             # and the daemon swallowed it with a log line only.
             triggers = []
             cycle_error = self._journal_cycle_error("perception", e, 0)
+
+        if self.before_bids is not None:
+            try:
+                self.before_bids()
+            except Exception as e:  # noqa: BLE001 — a stale input beats a dead cycle
+                logger.warning("before_bids hook failed (non-fatal): %s", e)
 
         try:
             content = self.workspace.run_cycle({"trigger_count": len(triggers)})

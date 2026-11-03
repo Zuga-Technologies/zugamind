@@ -20,7 +20,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -58,6 +58,14 @@ _CONTENT_CLIP = 200
 
 def _clip(s: str, n: int = _CONTENT_CLIP) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _utc_now() -> datetime:
+    """Now as a NAIVE UTC datetime, the frame PriorityGoalsModule keeps every
+    clock in. Local wall time is not a frame you can subtract across: a goal
+    last touched before a DST change and measured after it reads an hour short
+    (45.8h shown, 46.8h real, across the 2026-11-01 fall-back; hm-#887)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _num(t: Any, key: str, default: float = 0.0) -> float:
@@ -538,24 +546,37 @@ class PriorityGoalsModule(WorkspaceModule):
         # Injectable clock: staleness feeds salience, so a real datetime.now()
         # here leaks wall-clock into a DECISION — two identical cycles seconds
         # apart bid 0.201250 vs 0.201299. A replay harness can freeze it.
-        self._now_fn = now_fn or datetime.now
+        self._now_fn = now_fn or _utc_now
         self._load_state()
 
+    def _now(self) -> datetime:
+        """The injected clock, in the module's frame (naive UTC)."""
+        return self._to_clock(self._now_fn())
+
     @staticmethod
-    def _parse_touch(iso: Any) -> Optional[datetime]:
-        """A persisted timestamp as a NAIVE LOCAL datetime — the same kind
-        `generate_bid` subtracts it from. An offset-aware value in the file
-        (hand-edited, or written by a future version) used to raise
-        "can't subtract offset-naive and offset-aware" inside generate_bid,
-        which the engine swallows — and since the value was persisted, the
-        module lost its bid EVERY cycle until someone edited the JSON
-        (audit 2026-08-28)."""
+    def _to_clock(dt: datetime, naive_is_local: bool = False) -> datetime:
+        """`dt` as a NAIVE UTC datetime — the kind `generate_bid` subtracts.
+
+        Every clock here is naive UTC. An offset-aware value is converted; a
+        naive one is already in the module's frame (the caller owns an
+        injected clock) unless `naive_is_local`, which is for the one place
+        naive text means local time: a state file written before 2026-11-02,
+        when the module stored local wall time. Mixing aware and naive used to
+        raise "can't subtract offset-naive and offset-aware" inside
+        generate_bid, which the engine swallows, and since the value was
+        persisted the module lost its bid EVERY cycle until someone edited the
+        JSON (audit 2026-08-28)."""
+        if dt.tzinfo is not None or naive_is_local:
+            # astimezone() on a naive datetime reads it as system-local time.
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    @classmethod
+    def _parse_touch(cls, iso: Any, naive_is_local: bool = False) -> Optional[datetime]:
+        """A timestamp string as a naive UTC datetime (see `_to_clock`)."""
         if not isinstance(iso, str) or not iso:
             return None
-        dt = datetime.fromisoformat(iso)
-        if dt.tzinfo is not None:
-            dt = dt.astimezone().replace(tzinfo=None)
-        return dt
+        return cls._to_clock(datetime.fromisoformat(iso), naive_is_local=naive_is_local)
 
     def _load_state(self) -> None:
         try:
@@ -570,7 +591,9 @@ class PriorityGoalsModule(WorkspaceModule):
             return
         for key, iso in raw.items():
             try:  # one bad key must not lose the others
-                parsed = self._parse_touch(iso)
+                # naive_is_local: files written before the UTC switch hold
+                # naive LOCAL text; files written since carry "+00:00".
+                parsed = self._parse_touch(iso, naive_is_local=True)
             except Exception as e:  # noqa: BLE001
                 logger.warning("priority_goals: ignoring bad timestamp for %r: %s", key, e)
                 continue
@@ -584,7 +607,10 @@ class PriorityGoalsModule(WorkspaceModule):
     def _save_state(self) -> None:
         try:
             self.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-            raw = {k: (v.isoformat() if v else None) for k, v in self._goal_last_touched.items()}
+            # Explicit "+00:00": the file says which frame it is in, so a
+            # reader (or the legacy-local branch of _load_state) cannot guess.
+            raw = {k: (v.replace(tzinfo=timezone.utc).isoformat() if v else None)
+                   for k, v in self._goal_last_touched.items()}
             atomic_write_text(self.STATE_FILE, json.dumps(raw, indent=2))
         except Exception as e:  # noqa: BLE001 — persistence is best-effort
             logger.warning("priority_goals state save failed (non-fatal): %s", e)
@@ -619,7 +645,7 @@ class PriorityGoalsModule(WorkspaceModule):
     def is_actionable(self, key: str) -> bool:
         """True if `key` may bid under SALIENCE_CAP_ACTIONABLE right now:
         flagged AND currently holding one of the ACTIONABLE_LIMIT slots."""
-        return key in self._actionable_slots(self._now_fn())
+        return key in self._actionable_slots(self._now())
 
     def set_goals(self, goals) -> None:
         """Replace the goal list at runtime with a deployment's real goals.
@@ -627,7 +653,8 @@ class PriorityGoalsModule(WorkspaceModule):
         Each item is a (key, label) or (key, label, actionable) tuple, or a
         dict with keys "key", "label", optional "actionable" and optional
         "touched" (ISO timestamp or datetime: when the goal last really
-        moved, e.g. its updated_at in the tracker). Touch state survives for
+        moved, e.g. its updated_at in the tracker; an offset-aware value is
+        converted to UTC, a naive one is taken to be UTC already). Touch state survives for
         keys that stay in the list (from this process or from the persisted
         file); a "touched" newer than what is known advances the clock, an
         older one never regresses it; new keys start untouched. At most
@@ -653,10 +680,9 @@ class PriorityGoalsModule(WorkspaceModule):
             if actionable:
                 flagged.append(key)
             try:
-                parsed = raw_touch if isinstance(raw_touch, datetime) else self._parse_touch(raw_touch)
+                parsed = (self._to_clock(raw_touch) if isinstance(raw_touch, datetime)
+                          else self._parse_touch(raw_touch))
                 if parsed is not None:
-                    if parsed.tzinfo is not None:
-                        parsed = parsed.astimezone().replace(tzinfo=None)
                     touched[key] = parsed
             except Exception as e:  # noqa: BLE001 — one bad timestamp must not lose the list
                 logger.warning("priority_goals: ignoring bad touched for %r: %s", key, e)
@@ -673,14 +699,15 @@ class PriorityGoalsModule(WorkspaceModule):
         self._save_state()
 
     def set_goal_state(self, goal_last_touched: Dict[str, Optional[datetime]]):
-        """Called by the host loop with per-goal recency (e.g. from an event log)."""
+        """Called by the host loop with per-goal recency (e.g. from an event log).
+        Offset-aware values are converted to UTC; naive ones are taken as UTC."""
         for k, v in goal_last_touched.items():
             if k in self._goal_last_touched:
-                self._goal_last_touched[k] = v
+                self._goal_last_touched[k] = None if v is None else self._to_clock(v)
         self._save_state()
 
     def generate_bid(self, context: Dict[str, Any]) -> Optional[SalienceBid]:
-        now = self._now_fn()
+        now = self._now()
         slots = self._actionable_slots(now)
         candidates = []
         for idx, (key, label) in enumerate(self._goals):
@@ -749,7 +776,7 @@ class PriorityGoalsModule(WorkspaceModule):
             if content and content.bid and content.bid.source_module == self.name:
                 key = content.bid.context.get("goal_key")
                 if key in self._goal_last_touched and key not in self._flagged:
-                    self._goal_last_touched[key] = self._now_fn()
+                    self._goal_last_touched[key] = self._now()
                     self._save_state()
         except Exception as e:
             logger.debug("priority_goals on_broadcast failed: %s", e)
@@ -761,7 +788,7 @@ class PriorityGoalsModule(WorkspaceModule):
         try:
             key = ((winner or {}).get("context") or {}).get("goal_key")
             if key in self._goal_last_touched:
-                self._goal_last_touched[key] = self._now_fn()
+                self._goal_last_touched[key] = self._now()
                 self._save_state()
         except Exception as e:  # noqa: BLE001
             logger.debug("priority_goals on_dispatched failed: %s", e)
