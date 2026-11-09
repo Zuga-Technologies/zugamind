@@ -68,6 +68,9 @@ _ADAPTIVE_WHEN_OMITTED = ("claude-sonnet-5", "claude-opus-5")
 # by prefix so a dated alias ("claude-haiku-4-5-20251001") prices like its
 # family. Override/extend with ZUGAMIND_CLAUDE_PRICES='{"claude-x": [in, out]}'.
 _PRICES_PER_MTOK: Dict[str, Tuple[float, float]] = {
+    # 5.2 (2026-11-09 launch post): $8/$40; longest prefix wins over 5.x.
+    "claude-fable-5-2": (8.0, 40.0),
+    "claude-mythos-5-2": (8.0, 40.0),
     "claude-fable-5": (10.0, 50.0),
     "claude-mythos-5": (10.0, 50.0),
     "claude-opus-5": (5.0, 25.0),

@@ -196,3 +196,10 @@ def test_cost_uses_family_prefix_and_cache_multipliers():
 def test_price_override_env(monkeypatch):
     monkeypatch.setenv("ZUGAMIND_CLAUDE_PRICES", json.dumps({"claude-custom-1": [100, 200]}))
     assert claude.estimate_cost_usd("claude-custom-1", {"input_tokens": 1_000_000}) == pytest.approx(100.0)
+
+
+def test_fable_5_2_prices_at_its_own_rate_not_the_5_1_family():
+    from zugamind.cognition.models.claude import estimate_cost_usd
+    usage = {"input_tokens": 1_000_000, "output_tokens": 1_000_000}
+    assert estimate_cost_usd("claude-fable-5-2", usage) == pytest.approx(48.0)
+    assert estimate_cost_usd("claude-fable-5-1", usage) == pytest.approx(60.0)
